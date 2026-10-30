@@ -490,7 +490,7 @@ internal sealed partial class LignesCommandeDb2
             await Executer(cnx, tx, $"""
                 INSERT INTO {b}.SYN100 (HTSOC, HTDOSS, HTDCLE, HTDATE, HTHEUR, HTSTAT, HTNBL, HTACT) VALUES (?, ?, ?, ?, ?, ' ', 0, 'CDE')
                 """, ct, societe, cle.Numero, cle.Cle, BaseDb2.AAAAMMJJ(DateOnly.FromDateTime(maintenant)),
-                maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second);
+                maintenant);
     }
 
     // ------------------------------------------------------------------

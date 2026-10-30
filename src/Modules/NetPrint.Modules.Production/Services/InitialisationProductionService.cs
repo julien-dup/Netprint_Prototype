@@ -15,6 +15,8 @@ internal sealed class InitialisationProductionService(DemandesOfDb2 donnees, Ref
         var u = await utilisateur.ExigerAsync();
         var d = Normaliser(demande);
         await ControlerAsync(u.Societe, d, creation: true, ct);
+        // Quantité lancée non saisie : total à fabriquer (NEG515 l. 2888-2892)
+        if (d.QuantiteLancee <= 0) d = d with { QuantiteLancee = d.Articles.Sum(a => a.AFabriquer) };
         return await donnees.CreerAsync(u.Societe, u.Profil, d, ct);
     }
 
@@ -42,6 +44,17 @@ internal sealed class InitialisationProductionService(DemandesOfDb2 donnees, Ref
                     "Suivi du BAG (AB009) de l'OF {Of} non supprimé", of.Libelle);
             }
         }
+    }
+
+    public async Task AjouterAOfAsync(NumeroOf of, CommandeOrigine commande, BesoinArticle besoin, CancellationToken ct = default)
+    {
+        var u = await utilisateur.ExigerAsync();
+        var b = besoin with { Article = besoin.Article.Trim().ToUpperInvariant(), Indice = besoin.Indice.Trim().ToUpperInvariant() };
+        if (b.AFabriquer <= 0)
+            throw new DemandeOfInvalideException([new(nameof(BesoinArticle.AFabriquer), Messages.Obligatoire)]);
+        if (b.AAffecter < 0 || b.AAffecter > b.AFabriquer)
+            throw new DemandeOfInvalideException([new(nameof(BesoinArticle.AAffecter), Messages.AffecteSuperieurAFabriquer)]);
+        await donnees.AjouterAsync(u.Societe, of, commande, b, ct);
     }
 
     public async Task<DemandeOfLue?> LireDemandeOfAsync(NumeroOf of, CommandeOrigine commande, CancellationToken ct = default)

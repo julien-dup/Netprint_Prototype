@@ -72,14 +72,14 @@ internal static class CalculLancement
                 var dispo = aFabriquer + stock + surplus - affecteTotal;
                 if (livre is { PourLaCommande: > 0 }) dispo += Math.Min(livre.PourLaCommande, affecteCommande);
                 lotsVus.Add(numeroLot);   // le lot de l'OF n'est jamais reproposé comme stock libre (arbitrage l. 1809)
-                if (dispo < 0 && affecteCommande == 0) continue;
-                if (dispo == 0 && affecteCommande == 0) continue;
+                var lie = parOf.Any(DeLaCommande);
+                if (dispo <= 0 && affecteCommande == 0 && !lie) continue;
                 sources.Add(new SourceArticle(
                     d.OfAOuvrir.Contains(of) ? NatureSource.OfAOuvrir : NatureSource.OfOuvert, of, affecteCommande, aFabriquer,
                     retenus.Sum(l => l.Lance), (int)retenus.Sum(l => l.Fabrique), stock, surplus, affecteTotal, Math.Max(0, dispo),
                     // Nature de la ligne : le dernier lien de cette commande sur l'OF (sinon de l'OF)
                     livre?.Total ?? 0, livre?.PourLaCommande ?? 0, (parOf.LastOrDefault(DeLaCommande) ?? parOf.Last()).Type == "S",
-                    Bloque(d, of, a), d.Bags.GetValueOrDefault((of, Reference(a.Article, a.Indice)))));
+                    Bloque(d, of, a), d.Bags.GetValueOrDefault((of, Reference(a.Article, a.Indice))), lie));
             }
 
             // Lots de l'article sans lien (stock libre)
@@ -90,7 +90,7 @@ internal static class CalculLancement
                 var of = OfDuLot(parLot.Key);
                 var livre = livraisons.GetValueOrDefault(parLot.Key);
                 sources.Add(new SourceArticle(NatureSource.Lot, of, 0, 0, 0, 0, stock, surplus, 0, stock + surplus,
-                    livre?.Total ?? 0, livre?.PourLaCommande ?? 0, false, Bloque(d, of, a), null));
+                    livre?.Total ?? 0, livre?.PourLaCommande ?? 0, false, Bloque(d, of, a), null, false));
             }
             resultat.Add(new ArticleALancer(a.Article, a.Indice, a.Designation, a.ReferenceImprime, a.Stocke, a.Commande, affecteArticle, sources));
         }

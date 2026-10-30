@@ -21,6 +21,9 @@ public interface IInitialisationProduction
     // aucune commande (option 4 de NEG515)
     Task SupprimerDemandeOfAsync(NumeroOf of, CommandeOrigine commande, CancellationToken ct = default);
 
+    // Rattacher un article d'une commande à un OF pas encore ouvert (option AL de NEG515, limitée aux OF à ouvrir)
+    Task AjouterAOfAsync(NumeroOf of, CommandeOrigine commande, BesoinArticle besoin, CancellationToken ct = default);
+
     // Demande d'OF telle qu'enregistrée (fenêtre de modification), null si l'OF n'est pas (ou plus) à ouvrir
     Task<DemandeOfLue?> LireDemandeOfAsync(NumeroOf of, CommandeOrigine commande, CancellationToken ct = default);
 

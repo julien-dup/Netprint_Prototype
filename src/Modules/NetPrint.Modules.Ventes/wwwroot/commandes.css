@@ -161,3 +161,19 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .grille-lancement .ligne-article td { background: #f6f8fb; border-top: 2px solid #d5dbe3; }
 .grille-lancement td.decale { padding-left: 28px; }
 .grille-lancement .source-possible td { color: #6b7280; }
+.grille-lancement .col-case { width: 26px; text-align: center; }
+.grille-lancement .actions-source { white-space: nowrap; text-align: right; }
+.bouton-ligne { padding: 2px 8px; font-size: 12.5px; margin-left: 4px; }
+
+/* Fenêtres de lancement et d'affectation */
+.fenetre.fenetre-lancement { width: min(1000px, 96vw); max-height: 92vh; display: flex; flex-direction: column; }
+.fenetre-lancement .corps-fenetre { overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.fenetre-lancement .titre-section { margin: 4px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-3, #8a94a6); }
+.fenetre-lancement td.en-erreur input { border-color: var(--danger); background: var(--danger-clair); }
+.fenetre-lancement td input.num9, .fenetre-affectation input.num9 { width: 110px; text-align: right; }
+.fenetre.fenetre-affectation { width: min(480px, 94vw); }
+.fenetre-affectation .corps-fenetre { display: flex; flex-direction: column; gap: 10px; }
+.resume-origine { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+.resume-origine dt { color: var(--texte-2); }
+.resume-origine dd { margin: 0; font-variant-numeric: tabular-nums; }
+input.num9 { width: 110px; }

@@ -111,8 +111,7 @@ internal sealed partial class LignesCommandeDb2
         var maintenant = DateTime.Now;
         await Executer(cnx, tx, $"""
             INSERT INTO {b}.SYN100 (HTSOC, HTDOSS, HTDCLE, HTDATE, HTHEUR, HTSTAT, HTNBL, HTACT) VALUES (?, ?, ?, ?, ?, ' ', 0, 'CDE')
-            """, ct, societe, cle.Numero, cle.Cle, maintenant.Year * 10000 + maintenant.Month * 100 + maintenant.Day,
-            maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second);
+            """, ct, societe, cle.Numero, cle.Cle, Socle.Donnees.BaseDb2.AAAAMMJJ(DateOnly.FromDateTime(maintenant)), maintenant);
     }
 
     // Suppression (option 4, SPSUP / SPneg100) d'une commande sans BL ni facture, contrôlés dans la transaction ;

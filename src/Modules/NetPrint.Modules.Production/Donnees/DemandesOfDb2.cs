@@ -91,7 +91,8 @@ internal sealed class DemandesOfDb2(IConfiguration config)
     }
 
     // Modification d'un OF à ouvrir : en-tête (sauf n°, catégorie, modèle) et liens de la commande ; les liens ne sont
-    // jamais supprimés en modification (NEG515 SPVAL)
+    // jamais supprimés en modification (NEG515 SPVAL). Quantité lancée non saisie : inchangée (l'OF peut servir
+    // d'autres commandes)
     public async Task ModifierAsync(int societe, string profil, NumeroOf of, DemandeOf d, CancellationToken ct)
     {
         var b = Bib;
@@ -101,11 +102,46 @@ internal sealed class DemandesOfDb2(IConfiguration config)
         try
         {
             await ExigerAOuvrirAsync(cnx, tx, b, societe, of, ct);
-            var colonnes = ColonnesEntete(d, profil);
+            var colonnes = ColonnesEntete(d, profil).Where(c => c.Colonne != "CCQTEC" || d.QuantiteLancee > 0).ToList();
             await Executer(cnx, tx,
                 $"UPDATE {b}.AB001T SET {string.Join(", ", colonnes.Select(c => c.Colonne + " = ?"))} WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?",
                 ct, [.. colonnes.Select(c => c.Valeur), societe, of.Numero, of.Cle]);
             await LiensAsync(cnx, tx, b, societe, of, d, ct);
+            await tx.CommitAsync(ct);
+            validee = true;
+        }
+        finally
+        {
+            if (!validee) await tx.RollbackAsync(CancellationToken.None);
+        }
+    }
+
+    // Rattachement d'un article d'une commande à un OF à ouvrir (AL) : lien créé, ou quantités remplacées s'il existe ;
+    // date de fin de fabrication = date de mise à disposition de l'OF ; la quantité lancée suit l'écart d'à fabriquer
+    public async Task AjouterAsync(int societe, NumeroOf of, CommandeOrigine commande, BesoinArticle besoin, CancellationToken ct)
+    {
+        var b = Bib;
+        await using var cnx = await OuvrirAsync(ct);
+        await using var tx = (OdbcTransaction)await cnx.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        var validee = false;
+        try
+        {
+            await ExigerAOuvrirAsync(cnx, tx, b, societe, of, ct);
+            var date = besoin.DateFinFabrication;
+            await using (var rd = await Lire(cnx, tx, $"SELECT CCDTLA, CCDTLM, CCDTLJ FROM {b}.AB001T WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?",
+                             ct, societe, of.Numero, of.Cle))
+                if (await rd.ReadAsync(ct) && BaseDb2.Date(rd.Entier(0), rd.Entier(1), rd.Entier(2)) is { } mad) date = mad;
+            var ancien = 0;
+            await using (var rd = await Lire(cnx, tx, $"""
+                SELECT COALESCE(SUM(LAQTEC), 0) FROM {b}.AB0020
+                WHERE RSOC = ? AND RDOSS = ? AND LADCLE = ? AND LAART = ? AND LAIND = ? AND LADOSC = ? AND LACLDC = ?
+                """, ct, societe, of.Numero, of.Cle, besoin.Article, besoin.Indice, commande.Numero, commande.Cle))
+                if (await rd.ReadAsync(ct)) ancien = rd.Entier(0);
+            var demande = new DemandeOf(commande, 0, 0, "", "", "", "", "", "", "", date, date, null, null, 0, 0, "", null, null, 0, "", "", "",
+                false, [besoin with { DateFinFabrication = date }]);
+            await LiensAsync(cnx, tx, b, societe, of, demande, ct);
+            await Executer(cnx, tx, $"UPDATE {b}.AB001T SET CCQTEC = CCQTEC + ? WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", ct,
+                besoin.AFabriquer - ancien, societe, of.Numero, of.Cle);
             await tx.CommitAsync(ct);
             validee = true;
         }

@@ -1,5 +1,6 @@
 using System.Data.Odbc;
 using Microsoft.Extensions.Configuration;
+using NetPrint.Modules.Production.Contrats;
 using NetPrint.Modules.Ventes.Contrats;
 using NetPrint.Modules.Ventes.Donnees;
 using NetPrint.Modules.Ventes.Services;
@@ -244,15 +245,168 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
     private static DateOnly NextWorkingDay(DateOnly d) =>
         d.DayOfWeek switch { DayOfWeek.Saturday => d.AddDays(2), DayOfWeek.Sunday => d.AddDays(1), _ => d };
 
-    private static async Task<(string Article, string Indice)?> ArticleDuClientAsync(OdbcConnection cnx)
+    // Lancement en fabrication (NEG515, NEG510 F10) d'une commande d'essai d'une ligne : valeurs proposées, contrôles,
+    // lancement, modification, F10 refusé puis accepté, rattachement, affectation de stock s'il y en a, suppression
+    [FactDb2Ecriture]
+    public async Task Lancement_en_fabrication_de_bout_en_bout()
+    {
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var article = await ArticleDuClientAsync(cnx, avecStock: true);
+        Assert.NotNull(article);
+        var client = await ValeursAsync(cnx, "SELECT CDDTPC, CDDTDC, CDDDOS, CDDCLE FROM NP11F.AA0003 WHERE RSOC = ? AND RGEN = ? AND RCLI = ?",
+            BaseDeTest.Societe, BaseDeTest.CompteGeneral, BaseDeTest.CompteClient);
+        var adtcde = await ValeursAsync(cnx, "SELECT ADTCDE FROM NP11F.SPF010 WHERE RSOC = ? AND AARTIC = ? AND AINDIC = ?",
+            BaseDeTest.Societe, article.Value.Article, article.Value.Indice);
+        var production = new NetPrint.Modules.Production.Services.InitialisationProductionService(
+            new NetPrint.Modules.Production.Donnees.DemandesOfDb2(BaseDeTest.Configuration),
+            new NetPrint.Modules.Production.Donnees.ReferencesProductionDb2(BaseDeTest.Configuration), new Utilisateur(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<NetPrint.Modules.Production.Services.InitialisationProductionService>.Instance);
+        var lancement = new LancementCommandeService(new LancementCommandeDb2(BaseDeTest.Configuration), Consultation, production, new Utilisateur());
+        var crees = new List<NumeroOf>();
+        var commandes = new List<CleCommande>();
+        var livraison = DateOnly.FromDateTime(DateTime.Today.AddDays(25));
+        // Commande d'essai d'une ligne de l'article
+        async Task<CleCommande> CommandeAsync(int quantite)
+        {
+            var entete = new SaisieCommandesService(new SaisieCommandesDb2(BaseDeTest.Configuration), Consultation, new Utilisateur());
+            var e = await entete.PreparerAsync(new DebutCommande
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, TypeCommande = "4", Enseigne = "1",
+            });
+            (e.Designation1, e.DateLivraison, e.Interlocuteur, e.Fabricant) = ("TEST NETPRINT SAAS LANCEMENT - A SUPPRIMER", livraison, "TEST SAAS", "LEN");
+            var c = await entete.CreerAsync(e);
+            commandes.Add(c);
+            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur());
+            var l = await service.NouvelleAsync(c);
+            (l.Article, l.Indice, l.Quantite, l.PrixBrut, l.PrixSaisi, l.AdresseSiege) = (article.Value.Article, article.Value.Indice, quantite, 49, true, true);
+            l.DateLivraison = NextWorkingDay(DateOnly.FromDateTime(DateTime.Today.AddDays(15)));
+            l = await service.CompleterAsync(c, l);
+            l.AvertissementsAcceptes = [.. typeof(AvertissementsLigne).GetFields().Select(f => (string)f.GetValue(null)!)];
+            await service.EnregistrerAsync(c, l);
+            return c;
+        }
+        try
+        {
+            var cle = await CommandeAsync(2500);
+            var reference = new ReferenceArticle(article.Value.Article, article.Value.Indice);
+            sortie.WriteLine($"Commande {cle.Libelle}, article {reference.Article} {reference.Indice}");
+
+            async Task<ArticleALancer> ArticleAsync() => (await lancement.LireAsync(cle))!.Articles.Single();
+            Assert.Equal(2500, (await ArticleAsync()).ResteAAffecter);
+
+            // Valeurs proposées
+            var demande = await lancement.PreparerAsync(cle, [reference]);
+            sortie.WriteLine($"Proposé : « {demande.Designation1} » cat. {demande.Categorie}/{demande.SousCategorie} MAD {demande.DateMiseADisposition} " +
+                $"modèle {demande.Modele}{demande.IndiceComposition} préc. {demande.DossierPrecedent?.Libelle} devis {demande.Devis?.Numero} norme {demande.Norme}");
+            var besoin = Assert.Single(demande.Articles);
+            Assert.Equal((2500, 2500, livraison), (besoin.AFabriquer, besoin.AAffecter, demande.DateMiseADisposition));
+            Assert.Equal((BaseDeTest.CompteClient, "1"), (demande.CompteClient, demande.Enseigne));
+            if (demande.Designation1 == "") demande = demande with { Designation1 = "TEST NETPRINT SAAS LANCEMENT" };
+
+            // Affecté au-delà du commandé : refusé
+            var trop = await Assert.ThrowsAsync<DemandeOfInvalideException>(() =>
+                lancement.LancerAsync(cle, demande with { Articles = [besoin with { AFabriquer = 3000, AAffecter = 3000 }] }));
+            Assert.Contains(trop.Erreurs, x => x.Message == PreparationLancement.Messages.AffecteSuperieurCommande);
+
+            var of = await lancement.LancerAsync(cle, demande);
+            crees.Add(of);
+            sortie.WriteLine($"OF {of.Libelle}");
+            var a = await ArticleAsync();
+            Assert.Equal(0, a.ResteAAffecter);
+            Assert.Contains(a.Sources, s => s.Of == of && s.Nature == NatureSource.OfAOuvrir && s.AffecteCommande == 2500);
+
+            // Modification : 3000 à fabriquer, 2000 affectés
+            var lue = (await lancement.LireLancementAsync(cle, of))!;
+            await lancement.ModifierLancementAsync(cle, of, lue with { Articles = [lue.Articles[0] with { AFabriquer = 3000, AAffecter = 2000 }] });
+            Assert.Equal(500, (await ArticleAsync()).ResteAAffecter);
+
+            // F10 refusé tant qu'un OF existe pour la commande
+            var refus = await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => lancement.CreerOfAutomatiqueAsync(cle));
+            Assert.Equal("Un OF a déjà été créé pour cette commande.", refus.Message);
+
+            // Rattachement (AL) refusé : l'OF sert déjà la commande
+            await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => lancement.RattacherAsync(cle, of, reference));
+
+            await lancement.SupprimerLancementAsync(cle, of);
+            Assert.Equal(EtatOf.Inconnu, await production.EtatAsync(of));
+            Assert.Equal(2500, (await ArticleAsync()).ResteAAffecter);
+
+            // F10 : un OF, tout le commandé fabriqué et affecté
+            var auto = await lancement.CreerOfAutomatiqueAsync(cle);
+            crees.Add(auto);
+            var d = (await lancement.LireLancementAsync(cle, auto))!;
+            sortie.WriteLine($"F10 : OF {auto.Libelle} « {d.Designation1} » cat. {d.Categorie} lancé {d.QuantiteLancee} dossier du {d.DateDossier}");
+            Assert.Equal((2500, 2500), (d.Articles.Single().AFabriquer, d.Articles.Single().AAffecter));
+
+            // Rattachement (AL) d'une 2e commande à l'OF à ouvrir : reste à affecter fabriqué et affecté, quantité lancée augmentée
+            var autre = await CommandeAsync(1000);
+            await lancement.RattacherAsync(autre, auto, reference);
+            Assert.Equal(0, (await lancement.LireAsync(autre))!.Articles.Single().ResteAAffecter);
+            Assert.Equal(d.QuantiteLancee + 1000, (await lancement.LireLancementAsync(autre, auto))!.QuantiteLancee);
+            await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => lancement.RattacherAsync(autre, auto, reference));
+            // Un lien sans affectation reste modifiable et supprimable (pas de rattachement par-dessus)
+            var lueAutre = (await lancement.LireLancementAsync(autre, auto))!;
+            await lancement.ModifierLancementAsync(autre, auto, lueAutre with { Articles = [lueAutre.Articles[0] with { AFabriquer = 500, AAffecter = 0 }] });
+            Assert.Contains((await lancement.LireAsync(autre))!.Articles.Single().Sources, s => s.Of == auto && s.LieALaCommande && s.AffecteCommande == 0);
+            await lancement.SupprimerLancementAsync(autre, auto);
+            Assert.Equal(EtatOf.AOuvrir, await production.EtatAsync(auto));   // sert encore la 1re commande
+            await lancement.SupprimerLancementAsync(cle, auto);
+            Assert.Equal(EtatOf.Inconnu, await production.EtatAsync(auto));
+
+            // Affectation du stock d'un OF ouvert (ou d'un lot) disponible, puis sa suppression
+            a = await ArticleAsync();
+            var stock = a.Sources.FirstOrDefault(s => s.Nature != NatureSource.OfAOuvrir && s.Disponible > 0);
+            if (stock is null)
+                sortie.WriteLine("Aucun stock disponible pour cet article : affectation non essayée.");
+            else
+            {
+                var q = Math.Min(stock.Disponible, a.ResteAAffecter);
+                sortie.WriteLine($"Affectation de {q} sur {stock.Of.Libelle} ({stock.Nature}, dispo {stock.Disponible})");
+                await Assert.ThrowsAsync<DemandeOfInvalideException>(() => lancement.AffecterStockAsync(cle, stock.Of, reference, stock.Disponible + 1));
+                await lancement.AffecterStockAsync(cle, stock.Of, reference, q);
+                var s = (await ArticleAsync()).Sources.Single(x => x.Of == stock.Of);
+                Assert.Equal((q, true), (s.AffecteCommande, s.AffectationStock));
+                await lancement.SupprimerAffectationAsync(cle, stock.Of, reference);
+                Assert.Equal(2500, (await ArticleAsync()).ResteAAffecter);
+            }
+        }
+        finally
+        {
+            foreach (var cle in commandes)
+            {
+                await using (var cmd = new OdbcCommand("DELETE FROM NP11F.AB0020 WHERE RSOC = ? AND LADOSC = ? AND LACLDC = ?", cnx))
+                {
+                    cmd.Parameters.AddWithValue("s", BaseDeTest.Societe);
+                    cmd.Parameters.AddWithValue("n", cle.Numero);
+                    cmd.Parameters.AddWithValue("c", cle.Cle);
+                    sortie.WriteLine($"{await cmd.ExecuteNonQueryAsync()} lien(s) AB0020 restant(s) supprimé(s)");
+                }
+                await NettoyerAsync(cnx, cle, client, article!.Value, adtcde);
+            }
+            foreach (var of in crees)
+                await using (var cmd = new OdbcCommand("DELETE FROM NP11F.AB001T WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", cnx))
+                {
+                    cmd.Parameters.AddWithValue("s", BaseDeTest.Societe);
+                    cmd.Parameters.AddWithValue("n", of.Numero);
+                    cmd.Parameters.AddWithValue("c", of.Cle);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+        }
+    }
+
+    // Article commandable du client d'essai ; avecStock : géré en stock, avec des lots en stock (de préférence)
+    private static async Task<(string Article, string Indice)?> ArticleDuClientAsync(OdbcConnection cnx, bool avecStock = false)
     {
         await using var cmd = cnx.CreateCommand();
-        cmd.CommandText = """
+        cmd.CommandText = $"""
             SELECT a.AARTIC, a.AINDIC FROM NP11F.SPF010 a
             WHERE a.RSOC = ? AND a.ATYPEA = '2' AND a.ATYFAC = '1' AND a.AGEN = ? AND a.ACLI = ? AND a.AREMPL NOT IN ('C', 'O')
               AND a.AOPT4 <> 'O' AND a.AUNITE <> ' ' AND a.AARTIC NOT LIKE '999%'
               AND NOT EXISTS (SELECT 1 FROM NP11F.SPFNOM n WHERE n.RSOC = a.RSOC AND n.AARTIC = a.AARTIC AND n.AINDIC = a.AINDIC)
               AND EXISTS (SELECT 1 FROM NP11F.AA00083 u WHERE u.RSOC = a.RSOC AND u.RTABLE = 'UV' AND u.RARG = a.AUNITE)
+            {(avecStock ? "AND a.ASTK = 'O'" : "")}
+            {(avecStock ? "ORDER BY (SELECT COUNT(*) FROM NP11F.AL00F p WHERE p.RSOC = a.RSOC AND p.PLREF = a.AARTIC AND p.PLIND = a.AINDIC AND p.PLQENT > 0) DESC, a.AARTIC" : "")}
             FETCH FIRST 1 ROW ONLY
             """;
         cmd.Parameters.AddWithValue("a", BaseDeTest.Societe);

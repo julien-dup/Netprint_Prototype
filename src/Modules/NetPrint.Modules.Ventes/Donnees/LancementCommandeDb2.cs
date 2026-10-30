@@ -13,7 +13,7 @@ namespace NetPrint.Modules.Ventes.Donnees;
 // toutes commandes), lots (AL00F, dépôts B100F non exclus du disponible), livraisons des lots sur le dépôt principal
 // (A700F EX − RE), OF à ouvrir (AB001T), lots bloqués (CQU150), dernier cycle du BAG (AB009).
 // =====================================================================
-internal sealed class LancementCommandeDb2(IConfiguration config)
+internal sealed partial class LancementCommandeDb2(IConfiguration config)
 {
     private string Bib => BaseDb2.Bibliotheque(config);
 

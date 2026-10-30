@@ -16,7 +16,8 @@ public class LancementCommandeDb2Tests(ITestOutputHelper sortie)
     }
 
     private static LancementCommandeService Service() =>
-        new(new LancementCommandeDb2(BaseDeTest.Configuration), new ConsultationCommandesDb2(BaseDeTest.Configuration), new Utilisateur());
+        new(new LancementCommandeDb2(BaseDeTest.Configuration), new ConsultationCommandesDb2(BaseDeTest.Configuration),
+        null!, new Utilisateur());
 
     [FactDb2]
     public async Task Commande_livree_du_client_d_essai()
