@@ -321,6 +321,30 @@ public class SaisieCommandesServiceTests
         Assert.Contains("modifié par un autre utilisateur", ex.Message);
     }
 
+    [Fact]
+    public async Task Creation_et_modification_refusees_sans_droit()
+    {
+        var sansDroits = new ConsultationCommandesServiceTests.SourceFactice { Options = ["", "**", "**", "", "", "", "", ""] };
+        var service = new SaisieCommandesService(new SourceSaisieFactice { Lue = Valide() }, sansDroits,
+            new ConsultationCommandesServiceTests.UtilisateurFactice());
+        Assert.Equal("Vous n'êtes pas autorisé à créer des commandes.",
+            (await Assert.ThrowsAsync<RegleMetierException>(() => service.CreerAsync(Valide()))).Message);
+        await Assert.ThrowsAsync<RegleMetierException>(() => service.PreparerAsync(Debut()));
+        Assert.Equal("Vous n'êtes pas autorisé à modifier les commandes.",
+            (await Assert.ThrowsAsync<RegleMetierException>(() => service.ModifierAsync(new CleCommande(1, "9"), Valide()))).Message);
+    }
+
+    [Fact]
+    public async Task Representant_impose_a_la_creation()
+    {
+        var source = new SourceSaisieFactice();
+        var limite = new ConsultationCommandesServiceTests.SourceFactice { RepresentantImpose = 12 };
+        var service = new SaisieCommandesService(source, limite, new ConsultationCommandesServiceTests.UtilisateurFactice());
+        Assert.Equal(12, (await service.PreparerAsync(Debut())).Representant);
+        await service.CreerAsync(Valide().Avec(s => s.Representant = 34));
+        Assert.Equal(12, source.Creee!.Representant);
+    }
+
     // ---------- Jeux d'essai ----------
     private static List<ErreurSaisie> Controler(EnteteSaisie s, ReferencesEntete? r = null) =>
         SaisieCommandesService.Controler(s, r ?? References(), true, false);
@@ -368,6 +392,7 @@ public class SaisieCommandesServiceTests
         public (int, int)? SemaineEcrite { get; private set; }
         public string? ProfilEcrit { get; private set; }
         public EnteteSaisie? Modifiee { get; private set; }
+        public EnteteSaisie? Creee { get; private set; }
 
         public Task<ParametresSaisie> ParametresAsync(int societe, CancellationToken ct) => Task.FromResult(Parametres());
         public Task<ListesSaisie> ListesAsync(int societe, CancellationToken ct) => Task.FromResult(new ListesSaisie([], [], []));
@@ -382,6 +407,7 @@ public class SaisieCommandesServiceTests
         {
             SemaineEcrite = semaine;
             ProfilEcrit = profil;
+            Creee = s;
             return Task.FromResult(new CleCommande(12345, "9"));
         }
 

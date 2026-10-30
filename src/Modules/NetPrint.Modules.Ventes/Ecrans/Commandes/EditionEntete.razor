@@ -390,7 +390,14 @@
     }
 
     // ---------- Étape 1 ----------
-    private async Task PreparerAsync()
+    // Bouton « Continuer » : la confirmation de qualité client vaut pour ce client seulement
+    private Task PreparerAsync()
+    {
+        debut.ForcerQualite = false;
+        return PreparerClientAsync();
+    }
+
+    private async Task PreparerClientAsync()
     {
         enregistrement = true;
         erreurs = [];
@@ -404,7 +411,7 @@
             if (await Dialogues.ConfirmerAsync(ex.Message + "\n\nCréer la commande malgré tout ?", "Client sous surveillance", "Continuer"))
             {
                 debut.ForcerQualite = true;
-                await PreparerAsync();
+                await PreparerClientAsync();
                 return;
             }
         }

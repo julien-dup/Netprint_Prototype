@@ -132,8 +132,8 @@ internal sealed class ConsultationCommandesService(ISourceCommandes donnees, IUt
             TauxRemise: e.Ctxrm,
             Revendeur: e.Ccrcvd == "O",
             AdresseArc: e.Ccnaea,
-            SousTraitee: e.Ccop11 == "O",
-            MultiSite: e.Ccop10 == "O",
+            NonModifiable: e.Ccop11 == "O",
+            SousTraitee: e.Ccop10 == "O",
             DateSolde: soldee ? c.DateSolde : null,
             Etat: Etat(soldee, lignes.Select(l => l.Ligne).ToList()),
             Valeur: lignes.Sum(l => l.Ligne.Valeur));

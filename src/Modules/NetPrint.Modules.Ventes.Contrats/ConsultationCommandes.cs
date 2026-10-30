@@ -226,8 +226,8 @@ public sealed record EnteteCommande(
     int TauxRemise,                   // CTXRM
     bool Revendeur,                   // CCRCVD
     int AdresseArc,                   // n° d'adresse d'envoi de l'ARC (CCNAEA)
-    bool SousTraitee,                // CCOP11 = 'O' : plus modifiable
-    bool MultiSite,                   // CCOP10 = 'O' : synchronisée avec un site distant
+    bool NonModifiable,               // CCOP11 = 'O' : « Commande sous-traitée. Modification impossible » (NEG510 R3)
+    bool SousTraitee,                 // CCOP10 = 'O' : sous-traitée à un autre site (zone « Sous-traité » de DOS505, SYN100)
     DateOnly? DateSolde,
     EtatCommande Etat,
     decimal Valeur)

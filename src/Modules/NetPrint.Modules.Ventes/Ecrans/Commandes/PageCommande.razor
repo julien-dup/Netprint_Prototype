@@ -47,13 +47,13 @@
                 <span class="sur-titre">Commande @TypesCommande.Libelle(e.TypeCommande).ToLowerInvariant()</span>
                 <span class="code-titre">@e.Cle.Libelle</span>
                 <span class="badge badge-etat etat-@Classe(e.Etat)">@Libelle(e.Etat)@(e.DateSolde is { } ds ? $" le {ds:dd/MM/yyyy}" : "")</span>
+                @if (e.NonModifiable)
+                {
+                    <span class="badge badge-alerte" title="Commande sous-traitée : elle ne peut plus être modifiée (CCOP11, NEG510 R3)">Non modifiable</span>
+                }
                 @if (e.SousTraitee)
                 {
-                    <span class="badge badge-alerte" title="Commande sous-traitée : elle ne peut plus être modifiée (NEG510 R3)">Sous-traitée</span>
-                }
-                @if (e.MultiSite)
-                {
-                    <span class="badge badge-appel" title="Commande synchronisée avec un site distant">Multi-site</span>
+                    <span class="badge badge-appel" title="Commande sous-traitée à un autre site (CCOP10)">Sous-traitée</span>
                 }
                 <span class="titre-designation">@e.Designation1 @e.Designation2</span>
             </div>
@@ -184,11 +184,11 @@
     private void Retour() => Navigation.NavigateTo("ventes/commandes");
 
     // Modification de l'en-tête : droit DOS500C, commande ni soldée ni sous-traitée (NEG510 R3)
-    private bool PeutModifier => fiche is { Entete.Soldee: false, Entete.SousTraitee: false, Droits.Modifier: true };
+    private bool PeutModifier => fiche is { Entete.Soldee: false, Entete.NonModifiable: false, Droits.Modifier: true };
 
     private string RaisonNonModifiable => fiche is null ? ""
         : fiche.Entete.Soldee ? "Commande soldée"
-        : fiche.Entete.SousTraitee ? "Commande sous-traitée : modification impossible"
+        : fiche.Entete.NonModifiable ? "Commande sous-traitée : modification impossible"
         : "Vous n'êtes pas autorisé à modifier les commandes";
 
 

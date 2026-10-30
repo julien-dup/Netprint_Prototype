@@ -269,7 +269,7 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
                 await HistoriqueAsync(cnx, tx, b, societe, numero, cle, s, "EN", ct);
 
             await tx.CommitAsync(ct);
-            await AuditAsync(cnx, b, societe, profil, numero, cle, "CR", ct);
+            await AuditAsync(cnx, b, societe, profil, numero, cle, "CR");
             return new CleCommande(numero, cle);
         }
         catch
@@ -318,8 +318,9 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
 
     // Audit EVE200 (programme EVE400) : CR création, MO modification.
     // EVE200 n'est pas journalisée : écrite après la validation, hors transaction ; une erreur est ignorée, comme dans EVE400.
+    // Jamais d'exception ni d'annulation : appelé après la validation, il ne doit pas faire croire à un échec.
     private static async Task AuditAsync(OdbcConnection cnx, string b, int societe, string profil,
-        int numero, string cle, string type, CancellationToken ct)
+        int numero, string cle, string type)
     {
         await using var cmd = Commande(cnx, null, $"""
             INSERT INTO {b}.EVE200 (AMLIG, RSOC, AMTYPE, AMDATE, AMPROF, AMDOSS, AMDCLE)
@@ -328,9 +329,9 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
             """, societe, type, profil.ToUpperInvariant(), numero, cle);
         try
         {
-            await cmd.ExecuteNonQueryAsync(ct);
+            await cmd.ExecuteNonQueryAsync(CancellationToken.None);
         }
-        catch (OdbcException)
+        catch (Exception)
         {
             // audit non bloquant
         }
@@ -424,7 +425,8 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
                         DNART, DNIND, DNQTEC, DNPUS, DNUV, DNPXCE, DEDTMO, DEDTHE, DETYMO, DETRAI, DEPROF, ANCREP, DNREP,
                         ANCTYC, DNTYPC)
                     SELECT RSOC, RDOSS, DNDCLE, DNNLIG, DNART, DNIND, DNQTEC, DNPUS, DNUV, DNPXCE,
-                        DNART, DNIND, DNQTEC, DNPUS, DNUV, DNPXCE, ?, ?, 'M', 'N', ?, ?, ?, ?, ?
+                        DNART, DNIND, DNQTEC, DNPUS, DNUV, DNPXCE, CAST(? AS NUMERIC(8, 0)), CAST(? AS NUMERIC(6, 0)), 'M', 'N',
+                        CAST(? AS CHAR(10)), CAST(? AS NUMERIC(3, 0)), CAST(? AS NUMERIC(3, 0)), CAST(? AS CHAR(1)), CAST(? AS CHAR(1))
                     FROM {b}.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ?
                     """, BaseDb2.AAAAMMJJ(DateOnly.FromDateTime(maintenant)), maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second,
                     profil.ToUpperInvariant(), actuel.Representant ?? 0, s.Representant ?? 0, actuel.TypeCommande, s.TypeCommande,
@@ -435,7 +437,7 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
             if (s.DateDossier < DateOnly.FromDateTime(DateTime.Today))
                 await HistoriqueAsync(cnx, tx, b, societe, cle.Numero, cle.Cle, s, "EN", ct);
             await tx.CommitAsync(ct);
-            await AuditAsync(cnx, b, societe, profil, cle.Numero, cle.Cle, "MO", ct);
+            await AuditAsync(cnx, b, societe, profil, cle.Numero, cle.Cle, "MO");
             return true;
         }
         catch

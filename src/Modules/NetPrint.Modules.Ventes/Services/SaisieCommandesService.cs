@@ -33,6 +33,7 @@ internal sealed class SaisieCommandesService(
     public async Task<EnteteSaisie> PreparerAsync(DebutCommande debut, CancellationToken ct = default)
     {
         var u = await utilisateur.ExigerAsync();
+        await ExigerDroitAsync(u, d => d.Creer, "Vous n'êtes pas autorisé à créer des commandes.", ct);
         var p = await donnees.ParametresAsync(u.Societe, ct);
         var erreurs = new List<ErreurSaisie>();
         if (debut.CompteGeneral is null or 0) erreurs.Add(new(nameof(DebutCommande.CompteGeneral), Messages.Obligatoire));
@@ -50,7 +51,24 @@ internal sealed class SaisieCommandesService(
         if (!defauts.CategorieExiste || !defauts.SousCategorieExiste)
             throw new RegleMetierException($"La catégorie {categorie} (ou sa sous-catégorie) n'existe pas pour cette société.");
 
-        return Proposer(debut, client!, defauts, p, categorie);
+        var proposition = Proposer(debut, client!, defauts, p, categorie);
+        // Représentant limité (B000F.ILIMIT) : la commande est à lui
+        if (await commandes.RepresentantImposeAsync(u.Societe, u.Profil, ct) is { } impose) proposition.Representant = impose;
+        return proposition;
+    }
+
+    // Droits PRT000P1 du programme DOS500C, vérifiés côté serveur (l'écran ne fait que griser les boutons)
+    private async Task ExigerDroitAsync(UtilisateurConnecte u, Func<DroitsCommandes, bool> droit, string message, CancellationToken ct)
+    {
+        var droits = ConsultationCommandesService.Droits(
+            await commandes.OptionsProgrammeAsync(ConsultationCommandesService.ProgrammeDroits, u.Profil, ct));
+        if (!droit(droits)) throw new RegleMetierException(message);
+    }
+
+    // Représentant limité : il ne peut ni créer ni déplacer une commande vers un autre représentant
+    private async Task ImposerRepresentantAsync(UtilisateurConnecte u, EnteteSaisie s, CancellationToken ct)
+    {
+        if (await commandes.RepresentantImposeAsync(u.Societe, u.Profil, ct) is { } impose) s.Representant = impose;
     }
 
     private async Task ControlerClientAsync(UtilisateurConnecte u, ParametresSaisie p, DebutCommande debut, ClientSaisie? client,
@@ -198,7 +216,9 @@ internal sealed class SaisieCommandesService(
     public async Task<CleCommande> CreerAsync(EnteteSaisie saisie, CancellationToken ct = default)
     {
         var u = await utilisateur.ExigerAsync();
+        await ExigerDroitAsync(u, d => d.Creer, "Vous n'êtes pas autorisé à créer des commandes.", ct);
         var s = Normaliser(saisie);
+        await ImposerRepresentantAsync(u, s, ct);
         var p = await donnees.ParametresAsync(u.Societe, ct);
 
         // Client recontrôlé à l'enregistrement (clôture, qualité, enseigne, encours)
@@ -227,6 +247,7 @@ internal sealed class SaisieCommandesService(
     public async Task ModifierAsync(CleCommande cle, EnteteSaisie saisie, CancellationToken ct = default)
     {
         var u = await utilisateur.ExigerAsync();
+        await ExigerDroitAsync(u, d => d.Modifier, "Vous n'êtes pas autorisé à modifier les commandes.", ct);
         var actuel = await LireAsync(cle, ct) ?? throw new RegleMetierException("Cette commande n'existe pas ou ne vous est pas accessible.");
         if (actuel.Soldee) throw new RegleMetierException("Option impossible, dossier soldé.");
         if (actuel.Bloquee) throw new RegleMetierException("Commande sous-traitée. Modification impossible.");
@@ -239,6 +260,7 @@ internal sealed class SaisieCommandesService(
         s.Enseigne = actuel.Enseigne;
         s.TypeCommande = actuel.TypeCommande;
         if (actuel.AvecLignes) s.TypeFacturation = actuel.TypeFacturation;
+        await ImposerRepresentantAsync(u, s, ct);
 
         var p = await donnees.ParametresAsync(u.Societe, ct);
         var client = await donnees.ClientAsync(u.Societe, s.CompteGeneral, s.CompteClient, ct);

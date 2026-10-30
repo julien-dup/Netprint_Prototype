@@ -318,7 +318,7 @@ public class ConsultationCommandesServiceTests
         Assert.Equal("Franco", f.Entete.Port);
         Assert.Equal("S45/2026", f.Entete.SemaineLivraison);
         Assert.Equal("411000 99 CENTRALE", f.Entete.ClientFacture);
-        Assert.True(f.Entete.SousTraitee);
+        Assert.True(f.Entete.NonModifiable);
         Assert.True(f.Entete.Revendeur);
         Assert.Equal(5, f.Entete.TauxRemise);
         Assert.Equal(200m, f.Entete.Valeur);
