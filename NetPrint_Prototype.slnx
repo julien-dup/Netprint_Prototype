@@ -21,6 +21,7 @@
     <File Path=".editorconfig" />
     <File Path=".gitattributes" />
     <File Path="README.md" />
+    <File Path="CLAUDE.md" />
     <File Path=".gitignore" />
     <File Path=".githooks/pre-push" />
     <File Path=".github/workflows/build.yml" />
