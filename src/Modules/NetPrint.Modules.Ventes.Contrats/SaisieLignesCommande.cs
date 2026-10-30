@@ -37,8 +37,9 @@ public interface IActionsCommande
     // Commande remise en cours ; ses lignes soldées le restent
     Task ReactiverAsync(CleCommande commande, CancellationToken ct = default);
 
-    // Refusée s'il existe un BL ou une facture (droit « Suppression »)
-    Task SupprimerAsync(CleCommande commande, CancellationToken ct = default);
+    // Refusée s'il existe un BL ou une facture (droit « Suppression »). Renvoie un avertissement si des données annexes
+    // n'ont pas pu être nettoyées (la commande, elle, est supprimée), sinon null.
+    Task<string?> SupprimerAsync(CleCommande commande, CancellationToken ct = default);
 }
 
 public static class StatutsLigne

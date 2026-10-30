@@ -353,28 +353,25 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     {
         var (u, c) = await ContexteActionAsync(commande, d => d.Creer, ct);
         if (c.Soldee) throw new RegleMetierException("Cette commande est déjà soldée.");
-        if (c.NonModifiable) throw new RegleMetierException("Commande sous-traitée. Modification impossible.");
         await donnees.SolderCommandeAsync(u.Societe, u.Profil, commande, c, ct);
-        await RecalculerStocksCommandeAsync(u, c, commande, ct);
+        await RecalculerStocksCommandeAsync(u, c, await donnees.ArticlesAsync(u.Societe, commande, ct), ct);
     }
 
     async Task IActionsCommande.ReactiverAsync(CleCommande commande, CancellationToken ct)
     {
         var (u, c) = await ContexteActionAsync(commande, d => d.Creer, ct);
         if (!c.Soldee) throw new RegleMetierException("Cette commande n'est pas soldée.");
-        await donnees.ReactiverCommandeAsync(u.Societe, u.Profil, commande, ct);
+        await donnees.ReactiverCommandeAsync(u.Societe, u.Profil, commande, c, ct);
     }
 
-    async Task IActionsCommande.SupprimerAsync(CleCommande commande, CancellationToken ct)
+    async Task<string?> IActionsCommande.SupprimerAsync(CleCommande commande, CancellationToken ct)
     {
         var (u, c) = await ContexteActionAsync(commande, d => d.Supprimer, ct);
-        if (c.NonModifiable) throw new RegleMetierException("Commande sous-traitée. Modification impossible.");
-        var (bl, facture) = await donnees.PiecesAsync(u.Societe, commande, ct);
-        if (RefusSuppressionCommande(bl, facture) is { } refus) throw new RegleMetierException(refus);
         var articles = await donnees.ArticlesAsync(u.Societe, commande, ct);
-        await donnees.SupprimerCommandeAsync(u.Societe, u.Profil, commande, c, ct);
-        foreach (var (article, indice) in articles)
-            await RecalculerStocksAsync(u, c, await donnees.ArticleAsync(u.Societe, article, indice, ct), article, indice, null, ct);
+        var echecs = await donnees.SupprimerCommandeAsync(u.Societe, u.Profil, commande, c, RefusSuppressionCommande, ct);
+        await RecalculerStocksCommandeAsync(u, c, articles, ct);
+        return echecs.Count == 0 ? null
+            : $"La commande est supprimée, mais ces données annexes n'ont pas pu être nettoyées : {string.Join(", ", echecs)}.";
     }
 
     // DOS500S R7 : une commande livrée ou facturée ne se supprime pas
@@ -387,15 +384,18 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         CancellationToken ct)
     {
         var (u, c) = await ContexteAsync(cle, false, ct);
+        // Commande sous-traitée reçue (CCOP11) : ni solde, ni réactivation, ni suppression
+        if (c.NonModifiable) throw new RegleMetierException("Commande sous-traitée. Modification impossible.");
         var droits = ConsultationCommandesService.Droits(
             await commandes.OptionsProgrammeAsync(ConsultationCommandesService.ProgrammeDroits, u.Profil, ct));
         if (!droit(droits)) throw new RegleMetierException("Vous n'êtes pas autorisé à faire cette opération sur les commandes.");
         return (u, c);
     }
 
-    private async Task RecalculerStocksCommandeAsync(UtilisateurConnecte u, ContexteLigne c, CleCommande commande, CancellationToken ct)
+    private async Task RecalculerStocksCommandeAsync(UtilisateurConnecte u, ContexteLigne c,
+        IReadOnlyList<(string Article, string Indice)> articles, CancellationToken ct)
     {
-        foreach (var (article, indice) in await donnees.ArticlesAsync(u.Societe, commande, ct))
+        foreach (var (article, indice) in articles)
             await RecalculerStocksAsync(u, c, await donnees.ArticleAsync(u.Societe, article, indice, ct), article, indice, null, ct);
     }
 

@@ -29,12 +29,12 @@
             @onclick="() => OuvrirLigneAsync(0)">＋ Ajouter une ligne</button>
     @if (fiche is { Entete.Soldee: true })
     {
-        <button disabled="@(!fiche.Droits.Creer)" title="Remettre la commande en cours (ses lignes soldées le restent)"
+        <button disabled="@(!fiche.Droits.Creer || fiche.Entete.NonModifiable)" title="Remettre la commande en cours (ses lignes soldées le restent)"
                 @onclick="ReactiverCommandeAsync">↺ Réactiver</button>
     }
     else
     {
-        <button disabled="@(!PeutModifier || !fiche!.Droits.Creer)" title="Solder toutes les lignes et la commande"
+        <button disabled="@(fiche is null || !fiche.Droits.Creer || fiche.Entete.NonModifiable)" title="Solder toutes les lignes et la commande"
                 @onclick="SolderCommandeAsync">✔ Solder</button>
     }
     <button class="bouton-danger" disabled="@(fiche is null || !fiche.Droits.Supprimer || fiche.Entete.NonModifiable)"
@@ -215,13 +215,15 @@
 
     private async Task SupprimerCommandeAsync()
     {
+        string? avertissement = null;
         if (await ActionCommandeAsync($"Supprimer définitivement la commande {CleCourante.Libelle} et ses lignes ?", "Supprimer la commande",
-                () => Actions.SupprimerAsync(CleCourante), "supprimée", recharger: false))
+                async () => avertissement = await Actions.SupprimerAsync(CleCourante), "supprimée", recharger: false))
         {
             // La commande disparaît de la liste conservée en session
             if (Etat.Resultat is { } r)
                 Etat.Resultat = r with { Commandes = r.Commandes.Where(c => c.Cle != CleCourante).ToList() };
             Etat.Selection = null;
+            if (avertissement is not null) Notifications.Erreur(avertissement);
             Retour();
         }
     }

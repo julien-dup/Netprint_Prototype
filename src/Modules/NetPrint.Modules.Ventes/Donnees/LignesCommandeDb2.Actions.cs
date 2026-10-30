@@ -15,7 +15,7 @@ namespace NetPrint.Modules.Ventes.Donnees;
 // =====================================================================
 internal sealed partial class LignesCommandeDb2
 {
-    // Lignes non soldées de la commande (articles à recalculer en stock)
+    // Articles des lignes de la commande, soldées comprises (réservations à recalculer après un solde ou une suppression)
     public async Task<IReadOnlyList<(string Article, string Indice)>> ArticlesAsync(int societe, CleCommande cle, CancellationToken ct)
     {
         var liste = new List<(string, string)>();
@@ -29,13 +29,18 @@ internal sealed partial class LignesCommandeDb2
     // BL et factures de la commande : la suppression est alors refusée (DOS500S R7)
     public async Task<(bool Bl, bool Facture)> PiecesAsync(int societe, CleCommande cle, CancellationToken ct)
     {
-        var b = Bib;
         await using var cnx = await OuvrirAsync(ct);
+        return await PiecesAsync(cnx, null, Bib, societe, cle, ct);
+    }
+
+    private static async Task<(bool Bl, bool Facture)> PiecesAsync(OdbcConnection cnx, OdbcTransaction? tx, string b, int societe,
+        CleCommande cle, CancellationToken ct)
+    {
         bool bl, facture;
-        await using (var rd = await Lire(cnx, $"SELECT 1 FROM {b}.EXP010 WHERE RSOC = ? AND HNODOS = ? AND HCLEF = ? FETCH FIRST 1 ROW ONLY",
+        await using (var rd = await Lire(cnx, tx, $"SELECT 1 FROM {b}.EXP010 WHERE RSOC = ? AND HNODOS = ? AND HCLEF = ? FETCH FIRST 1 ROW ONLY",
                          ct, societe, cle.Numero, cle.Cle))
             bl = await rd.ReadAsync(ct);
-        await using (var rd = await Lire(cnx, $"SELECT 1 FROM {b}.FAC090 WHERE RSOC = ? AND FEDOSS = ? AND FECLE = ? FETCH FIRST 1 ROW ONLY",
+        await using (var rd = await Lire(cnx, tx, $"SELECT 1 FROM {b}.FAC090 WHERE RSOC = ? AND FEDOSS = ? AND FECLE = ? FETCH FIRST 1 ROW ONLY",
                          ct, societe, cle.Numero, cle.Cle))
             facture = await rd.ReadAsync(ct);
         return (bl, facture);
@@ -60,6 +65,7 @@ internal sealed partial class LignesCommandeDb2
                 societe, cle.Numero, cle.Cle);
             // ÉCART : DOS500S supprimait ici les événements du dossier (EVE100 / EVE105) ; ils sont conservés
             await HistoriqueDossierAsync(cnx, tx, b, societe, profil, cle, c, "SO", ct);
+            await TransfertAsync(cnx, tx, b, societe, cle, c, ct);
             await tx.CommitAsync(ct);
             validee = true;
         }
@@ -70,21 +76,50 @@ internal sealed partial class LignesCommandeDb2
         await AuditDossierAsync(cnx, b, societe, profil, cle, "SO");
     }
 
-    // Réactivation (option RE, SPACT) : en-tête remis en cours ; les lignes soldées le restent
-    public async Task ReactiverCommandeAsync(int societe, string profil, CleCommande cle, CancellationToken ct)
+    // Réactivation (option RE, SPACT) d'une commande soldée (« D ») ; les lignes soldées le restent.
+    // Un autre état de l'en-tête n'est pas touché.
+    public async Task ReactiverCommandeAsync(int societe, string profil, CleCommande cle, ContexteLigne c, CancellationToken ct)
     {
         var b = Bib;
         await using var cnx = await OuvrirAsync(ct);
-        var n = await Executer(cnx, null, $"""
-            UPDATE {b}.AB001 SET CCTAGS = ' ', CCSLDA = 0, CCSLDM = 0, CCSLDJ = 0
-            WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ? AND CCTAGS <> ' '
-            """, ct, societe, cle.Numero, cle.Cle);
-        if (n == 0) throw new RegleMetierException("Cette commande n'est pas soldée.");
+        await using (var tx = (OdbcTransaction)await cnx.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct))
+        {
+            var validee = false;
+            try
+            {
+                var n = await Executer(cnx, tx, $"""
+                    UPDATE {b}.AB001 SET CCTAGS = ' ', CCSLDA = 0, CCSLDM = 0, CCSLDJ = 0
+                    WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ? AND CCTAGS = 'D'
+                    """, ct, societe, cle.Numero, cle.Cle);
+                if (n == 0) throw new RegleMetierException("Cette commande n'est pas soldée : elle ne peut pas être réactivée ici.");
+                await TransfertAsync(cnx, tx, b, societe, cle, c, ct);
+                await tx.CommitAsync(ct);
+                validee = true;
+            }
+            finally
+            {
+                if (!validee) await tx.RollbackAsync(CancellationToken.None);
+            }
+        }
         await AuditDossierAsync(cnx, b, societe, profil, cle, "RA");
     }
 
-    // Suppression (option 4, SPSUP / SPneg100) d'une commande sans BL ni facture
-    public async Task SupprimerCommandeAsync(int societe, string profil, CleCommande cle, ContexteLigne c, CancellationToken ct)
+    // Commande sous-traitée à un autre site : demande de transfert SYN100 « CDE »
+    private static async Task TransfertAsync(OdbcConnection cnx, OdbcTransaction tx, string b, int societe, CleCommande cle,
+        ContexteLigne c, CancellationToken ct)
+    {
+        if (!c.SousTraitee) return;
+        var maintenant = DateTime.Now;
+        await Executer(cnx, tx, $"""
+            INSERT INTO {b}.SYN100 (HTSOC, HTDOSS, HTDCLE, HTDATE, HTHEUR, HTSTAT, HTNBL, HTACT) VALUES (?, ?, ?, ?, ?, ' ', 0, 'CDE')
+            """, ct, societe, cle.Numero, cle.Cle, maintenant.Year * 10000 + maintenant.Month * 100 + maintenant.Day,
+            maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second);
+    }
+
+    // Suppression (option 4, SPSUP / SPneg100) d'une commande sans BL ni facture, contrôlés dans la transaction.
+    // Renvoie les tables satellites qui n'ont pas pu être vidées (verrou...), pour le signaler.
+    public async Task<IReadOnlyList<string>> SupprimerCommandeAsync(int societe, string profil, CleCommande cle, ContexteLigne c,
+        Func<bool, bool, string?> refus, CancellationToken ct)
     {
         var b = Bib;
         object?[] k = [societe, cle.Numero, cle.Cle];
@@ -94,6 +129,11 @@ internal sealed partial class LignesCommandeDb2
             var validee = false;
             try
             {
+                // Verrou de l'en-tête, puis plus de BL ni de facture (ils pourraient avoir été créés depuis l'ouverture)
+                await Executer(cnx, tx, $"UPDATE {b}.AB001 SET CCDES1 = CCDES1 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", ct, k);
+                var (bl, facture) = await PiecesAsync(cnx, tx, b, societe, cle, ct);
+                if (refus(bl, facture) is { } message) throw new RegleMetierException(message);
+
                 // Journal : une suppression « S » par ligne (SPneg100)
                 var maintenant = DateTime.Now;
                 await Executer(cnx, tx, $"""
@@ -106,6 +146,11 @@ internal sealed partial class LignesCommandeDb2
                     """, ct, maintenant.Day * 1_000_000 + maintenant.Month * 10_000 + maintenant.Year,
                     maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second, profil.ToUpperInvariant(), c.Representant,
                     c.TypeCommande, societe, cle.Numero, cle.Cle);
+                // Événements des lignes (comme la suppression d'une ligne par MAJ520)
+                await Executer(cnx, tx, $"""
+                    DELETE FROM {b}.EVE105 WHERE EVLIG IN (SELECT EVLIG FROM {b}.EVE100 WHERE RSOC = ? AND EVCDC = ? AND EVCDCC = ?)
+                    """, ct, k);
+                await Executer(cnx, tx, $"DELETE FROM {b}.EVE100 WHERE RSOC = ? AND EVCDC = ? AND EVCDCC = ?", ct, k);
                 foreach (var table in new[] { "NEG100T", "NEG100S", "NEG100" })
                     await Executer(cnx, tx, $"DELETE FROM {b}.{table} WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ?", ct, k);
                 await Executer(cnx, tx, $"DELETE FROM {b}.EXP020 WHERE RSOC = ? AND RDOSS = ? AND F4DCLE = ?", ct, k);
@@ -114,11 +159,7 @@ internal sealed partial class LignesCommandeDb2
                 await Executer(cnx, tx, $"DELETE FROM {b}.AB0016 WHERE RSOC = ? AND RDOSS = ? AND F16CLE = ?", ct, k);
                 if (await Executer(cnx, tx, $"DELETE FROM {b}.AB001 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ? AND CCTYPC IN ('3', '4')", ct, k) == 0)
                     throw new RegleMetierException("Cette commande n'existe plus.");
-                if (c.SousTraitee)
-                    await Executer(cnx, tx, $"""
-                        INSERT INTO {b}.SYN100 (HTSOC, HTDOSS, HTDCLE, HTDATE, HTHEUR, HTSTAT, HTNBL, HTACT) VALUES (?, ?, ?, ?, ?, ' ', 0, 'CDE')
-                        """, ct, societe, cle.Numero, cle.Cle, maintenant.Year * 10000 + maintenant.Month * 100 + maintenant.Day,
-                        maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second);
+                await TransfertAsync(cnx, tx, b, societe, cle, c, ct);
                 await tx.CommitAsync(ct);
                 validee = true;
             }
@@ -129,28 +170,34 @@ internal sealed partial class LignesCommandeDb2
         }
 
         // Tables satellites non journalisées (normalement vides pour une commande de négoce ou de produit fini)
+        var echecs = new List<string>();
         foreach (var (table, dossier, cleCol) in new[]
                  {
                      ("ABREPE", "RDOSS", "LADCLE"), ("ABREPD", "RDOSS", "LADCLE"), ("ABCOUTE", "CODOSS", "CODCLE"),
                      ("ABCOUTD", "CODOSS", "CODCLE"), ("ABCOUTB", "CODOSS", "CODCLE"), ("ABDIRL", "RDOSS", "CCDCLE"),
                      ("ABDIRP", "RDOSS", "CCDCLE"), ("DIR100", "RDOSS", "CCDCLE"),
                  })
-            await SupprimerSansTransactionAsync(cnx, $"DELETE FROM {b}.{table} WHERE RSOC = ? AND {dossier} = ? AND {cleCol} = ?", k);
-        await SupprimerSansTransactionAsync(cnx, $"DELETE FROM {b}.AFC020 WHERE RSOC = ? AND FCDOSS = ? AND FCDCLE = ?", k);
+            await SupprimerSansTransactionAsync(cnx, table, $"DELETE FROM {b}.{table} WHERE RSOC = ? AND {dossier} = ? AND {cleCol} = ?", k, echecs);
+        await SupprimerSansTransactionAsync(cnx, "AFC020", $"DELETE FROM {b}.AFC020 WHERE RSOC = ? AND FCDOSS = ? AND FCDCLE = ?", k, echecs);
         // Liens commande → OF (AB0020, commande d'origine LADOSC / LACLDC)
-        await SupprimerSansTransactionAsync(cnx, $"DELETE FROM {b}.AB0020 WHERE RSOC = ? AND LADOSC = ? AND LACLDC = ?", k);
+        await SupprimerSansTransactionAsync(cnx, "AB0020", $"DELETE FROM {b}.AB0020 WHERE RSOC = ? AND LADOSC = ? AND LACLDC = ?", k, echecs);
         await AuditDossierAsync(cnx, b, societe, profil, cle, "SU");
+        return echecs;
     }
 
-    private static async Task SupprimerSansTransactionAsync(OdbcConnection cnx, string sql, object?[] valeurs)
+    // Table ou colonne absente selon l'installation (SQLSTATE 42704 / 42703) : ignoré ; toute autre erreur (verrou...) est signalée
+    private static async Task SupprimerSansTransactionAsync(OdbcConnection cnx, string table, string sql, object?[] valeurs, List<string> echecs)
     {
         try
         {
             await Executer(cnx, null, sql, CancellationToken.None, valeurs);
         }
+        catch (OdbcException ex) when (ex.Errors.Count > 0 && ex.Errors[0].SQLState is "42704" or "42703")
+        {
+        }
         catch (OdbcException)
         {
-            // Table absente ou colonnes différentes selon l'installation : la commande est déjà supprimée
+            echecs.Add(table);
         }
     }
 
@@ -170,9 +217,11 @@ internal sealed partial class LignesCommandeDb2
             maintenant.Year, maintenant.Month, maintenant.Day, maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second);
     }
 
-    // Audit EVE200 (EVE400), hors transaction (table non journalisée) ; jamais d'exception
+    // Audit EVE200 (EVE400), hors transaction (table non journalisée) ; n° de ligne MAX + 1 comme EVE400, nouvel essai en cas
+    // de collision avec un autre poste ; jamais d'exception
     private static async Task AuditDossierAsync(OdbcConnection cnx, string b, int societe, string profil, CleCommande cle, string type)
     {
+        for (var essai = 0; essai < 3; essai++)
         try
         {
             await Executer(cnx, null, $"""
@@ -180,6 +229,7 @@ internal sealed partial class LignesCommandeDb2
                 SELECT COALESCE(MAX(AMLIG), 0) + 1, CAST(? AS NUMERIC(4, 0)), CAST(? AS CHAR(2)), CURRENT TIMESTAMP,
                        CAST(? AS CHAR(10)), CAST(? AS NUMERIC(5, 0)), CAST(? AS CHAR(1)) FROM {b}.EVE200
                 """, CancellationToken.None, societe, type, profil.ToUpperInvariant(), cle.Numero, cle.Cle);
+            return;
         }
         catch (Exception)
         {
