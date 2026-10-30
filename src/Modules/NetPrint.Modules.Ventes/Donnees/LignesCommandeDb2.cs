@@ -103,6 +103,15 @@ internal sealed partial class LignesCommandeDb2(IConfiguration config)
             modeleClient, modeleGeneral, prorata, largeur, hauteur, mandataire);
     }
 
+    // Diviseur de l'unité de vente (AA00083 « UV ») ; null si l'unité n'existe pas
+    public async Task<long?> TnumAsync(int societe, string unite, CancellationToken ct)
+    {
+        if (unite == "") return null;
+        await using var cnx = await OuvrirAsync(ct);
+        await using var rd = await Lire(cnx, $"SELECT TNUM FROM {Bib}.AA00083 WHERE RSOC = ? AND RTABLE = 'UV' AND RARG = ? AND TTAG <> '*'", ct, societe, unite);
+        return await rd.ReadAsync(ct) ? Convert.ToInt64(rd.GetValue(0)) : null;
+    }
+
     private static async Task<List<MoteurPrixCommande.TarifQuantite>> TranchesAsync(OdbcConnection cnx, string sql,
         CancellationToken ct, params object?[] valeurs)
     {

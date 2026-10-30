@@ -51,6 +51,7 @@ public sealed class LigneSaisie
     public int Emballage { get; set; }                 // nombre par UC (repris de l'article)
     public bool SaisieEnUc { get; set; }               // SPF010.AOPT3 = 'O'
     public int? MaxiLivrable { get; set; }
+    public bool MaxiSaisi { get; set; }                 // maxi tapé : il ne suit plus la quantité
 
     // Prix
     public decimal? PrixBrut { get; set; }
@@ -60,6 +61,7 @@ public sealed class LigneSaisie
     public bool Gratuite { get; set; }
     public bool PrixADefinir { get; set; }
     public decimal? TauxCommission { get; set; }
+    public bool CommissionSaisie { get; set; }          // taux tapé par l'utilisateur : il ne suit plus le prix
     public string SourcePrix { get; set; } = "";       // tarif retenu (information)
 
     // Calculés (CompleterAsync)
@@ -99,6 +101,7 @@ public sealed class LigneSaisie
     public int LigneOrigine { get; set; }
     public string ArticleEnregistre { get; set; } = "";   // pour détecter un changement d'article
     public string IndiceEnregistre { get; set; } = "";
+    public string ArticleComplete { get; set; } = "";     // article dont les valeurs ont été reprises (« article|indice »)
     public string Empreinte { get; set; } = "";
 
     // Avertissements acceptés par l'utilisateur (codes de AvertissementsLigne)

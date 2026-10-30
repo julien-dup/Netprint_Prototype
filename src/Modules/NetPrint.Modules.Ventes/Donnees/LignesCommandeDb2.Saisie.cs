@@ -261,6 +261,9 @@ internal sealed partial class LignesCommandeDb2
         l.AdresseSiege = l.NumeroAdresse is null && l.AdresseRaisonSociale == "" && l.AdresseVille == "";
         l.ArticleEnregistre = l.Article;
         l.IndiceEnregistre = l.Indice;
+        l.ArticleComplete = $"{l.Article}|{l.Indice}";
+        l.CommissionSaisie = true;                  // taux enregistré : conservé
+        l.MaxiSaisi = l.MaxiLivrable is > 0;
         return l;
     }
 
@@ -421,26 +424,30 @@ internal sealed partial class LignesCommandeDb2
         CleCommande cle, ContexteLigne c, CancellationToken ct)
     {
         decimal total = 0, totalFranc = 0;
-        var actives = 0;
+        int actives = 0, lignes = 0;
         await using (var rd = await Lire(cnx, tx, $"""
             SELECT COALESCE(SUM(CASE WHEN f.LTYPE = 'V' THEN n.DNMTHT ELSE 0 END), 0),
                    COALESCE(SUM(CASE WHEN f.LTYPE = 'V' THEN n.DNMTHA ELSE 0 END), 0),
-                   COALESCE(SUM(CASE WHEN n.DNART NOT LIKE '999%' AND n.DNSOLD <> 'O' THEN 1 ELSE 0 END), 0)
+                   COALESCE(SUM(CASE WHEN n.DNART NOT LIKE '999%' AND n.DNSOLD <> 'O' THEN 1 ELSE 0 END), 0), COUNT(n.DNNLIG)
             FROM {b}.NEG100 n LEFT OUTER JOIN {b}.FAC020 f ON f.RSOC = n.RSOC AND f.RLIGNE = n.DNCLIG
             WHERE n.RSOC = ? AND n.RDOSS = ? AND n.DNDCLE = ?
             """, ct, societe, cle.Numero, cle.Cle))
-            if (await rd.ReadAsync(ct)) (total, totalFranc, actives) = (rd.Nombre(0), rd.Nombre(1), rd.Entier(2));
+            if (await rd.ReadAsync(ct)) (total, totalFranc, actives, lignes) = (rd.Nombre(0), rd.Nombre(1), rd.Entier(2), rd.Entier(3));
+
+        // Solde automatique (sens unique, comme NEG520) : des lignes existent et toutes sont soldées. ÉCART : une commande dont
+        // on vient de supprimer la dernière ligne n'est pas soldée (elle resterait bloquée), et un autre code de solde est conservé.
+        var solder = lignes > 0 && actives == 0 ? 0 : 1;
 
         var aujourdhui = DateTime.Today;
         await Executer(cnx, tx, $"""
             UPDATE {b}.AB001 SET CCPXVE = ?, CCPAVE = ?, CCUNIT = 'LT',
-                CCTAGS = CASE WHEN ? = 0 THEN 'D' ELSE CCTAGS END,
+                CCTAGS = CASE WHEN ? = 0 AND CCTAGS = ' ' THEN 'D' ELSE CCTAGS END,
                 CCSLDA = CASE WHEN ? = 0 AND CCTAGS = ' ' THEN ? ELSE CCSLDA END,
                 CCSLDM = CASE WHEN ? = 0 AND CCTAGS = ' ' THEN ? ELSE CCSLDM END,
                 CCSLDJ = CASE WHEN ? = 0 AND CCTAGS = ' ' THEN ? ELSE CCSLDJ END,
                 CCFOPO = CASE WHEN ? <= ? AND CCFOPO <> 'D' THEN 'O' ELSE CCFOPO END
             WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?
-            """, ct, total, totalFranc, actives, actives, aujourdhui.Year, actives, aujourdhui.Month, actives, aujourdhui.Day,
+            """, ct, total, totalFranc, solder, solder, aujourdhui.Year, solder, aujourdhui.Month, solder, aujourdhui.Day,
             total, c.PlafondFranco, societe, cle.Numero, cle.Cle);
 
         var marge = total > 0 ? 100m : 0m;   // le prix de revient cumulé n'est jamais alimenté par NEG520 : 100 % ou 0
@@ -486,6 +493,7 @@ internal sealed partial class LignesCommandeDb2
             await Executer(cnx, tx, $"DELETE FROM {b}.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = ?", ct, societe, cle.Numero, cle.Cle, ligne);
             await Executer(cnx, tx, $"DELETE FROM {b}.NEG100T WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = ?", ct, societe, cle.Numero, cle.Cle, ligne);
             await Executer(cnx, tx, $"DELETE FROM {b}.NEG100S WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = ?", ct, societe, cle.Numero, cle.Cle, ligne);
+            // EVE105 n'a pas de colonne société : ses lignes sont celles des événements EVE100 de la ligne (comme MAJ520)
             await Executer(cnx, tx, $"""
                 DELETE FROM {b}.EVE105 WHERE EVLIG IN (SELECT EVLIG FROM {b}.EVE100 WHERE RSOC = ? AND EVCDC = ? AND EVCDCC = ? AND EVCDCL = ?)
                 """, ct, societe, cle.Numero, cle.Cle, ligne);

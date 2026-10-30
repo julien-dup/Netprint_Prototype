@@ -75,24 +75,34 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         if (l.Article == "") return l;
         var a = await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct);
         if (a is null) return l;
-        var tarif = await donnees.DonneesTarifAsync(u.Societe, l.Article, l.Indice, c.CompteGeneral, c.CompteClient, c.Representant,
+        return await CompleterAsync(u.Societe, c, l, a, ct);
+    }
+
+    // Complète la ligne puis calcule le montant avec le diviseur de l'unité finale (l'article ou le tarif peuvent la changer)
+    private async Task<LigneSaisie> CompleterAsync(int societe, ContexteLigne c, LigneSaisie l, ArticleLigne a, CancellationToken ct)
+    {
+        var tarif = await donnees.DonneesTarifAsync(societe, l.Article, l.Indice, c.CompteGeneral, c.CompteClient, c.Representant,
             Aujourdhui, ct);
-        long? tnum = null;
-        if (l.Unite != "" || a.Unite != "")
-            tnum = (await donnees.VerifierAsync(u.Societe, commande, c, l.Unite == "" ? Avec(l, x => x.Unite = a.Unite) : l, null, ct)).TnumUnite;
-        return Completer(c, l, a, tarif, tnum, Aujourdhui);
+        var complete = Completer(c, l, a, tarif, null, Aujourdhui);
+        if (await donnees.TnumAsync(societe, complete.Unite, ct) is { } tnum)
+            complete.Montant = MoteurPrixCommande.Montant(complete.PrixNet, complete.Quantite ?? 0, tnum);
+        return complete;
     }
 
     internal static LigneSaisie Completer(ContexteLigne c, LigneSaisie ligne, ArticleLigne a, MoteurPrixCommande.DonneesTarif? tarif,
         long? tnum, DateOnly aujourdhui)
     {
         var l = ligne.Copier();
-        var nouvelArticle = l.Article != l.ArticleEnregistre || l.Indice != l.IndiceEnregistre;
-        if (l.Designation == "" || nouvelArticle && l.NumeroLigne == 0) l.Designation = a.Designation;
-        if (l.Unite == "" || nouvelArticle) l.Unite = a.Unite;
-        if (l.Norme == "") l.Norme = a.Norme;
-        if (l.Emplacement == "" && l.NumeroLigne == 0) l.Emplacement = a.Emplacement;
-        if (l.Texte == "" && l.NumeroLigne == 0) l.Texte = string.Join("\n", a.Textes).TrimEnd('\n');
+        // Article changé (ou nouvelle ligne) : désignation, unité, norme, emplacement et textes de l'article (RECUP de CTL520) ;
+        // sinon seules les zones vides sont complétées, la saisie de l'utilisateur est conservée
+        var cleArticle = $"{l.Article}|{l.Indice}";
+        var nouvelArticle = l.ArticleComplete != cleArticle;
+        l.ArticleComplete = cleArticle;
+        if (nouvelArticle || l.Designation == "") l.Designation = a.Designation;
+        if (nouvelArticle || l.Unite == "") l.Unite = a.Unite;
+        if (nouvelArticle || l.Norme == "") l.Norme = a.Norme;
+        if (nouvelArticle && l.NumeroLigne == 0 || l.Emplacement == "" && l.NumeroLigne == 0) l.Emplacement = a.Emplacement;
+        if (nouvelArticle || l.Texte == "" && l.NumeroLigne == 0) l.Texte = string.Join("\n", a.Textes).TrimEnd('\n');
         l.Emballage = a.Emballage;
         l.SaisieEnUc = a.SaisieEnUc;
 
@@ -129,18 +139,24 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         l.PrixNet = MoteurPrixCommande.PrixNet(l.PrixBrut ?? 0, l.Remise ?? 0);
         l.Montant = tnum is null ? 0 : MoteurPrixCommande.Montant(l.PrixNet, l.Quantite ?? 0, tnum.Value);
 
-        // Commission (SPRCTC) si non saisie
-        if (l.TauxCommission is null)
+        // Commission (SPRCTC) : suit le prix et la cession tant que l'utilisateur ne l'a pas saisie
+        if (!l.CommissionSaisie)
         {
             var (seuils, taux) = MoteurPrixCommande.TableCommission(c.SeuilsCommission, c.TauxCommissions);
             l.TauxCommission = MoteurPrixCommande.Commission(l.PrixNet, l.PrixCession ?? 0, c.TypeCommission, seuils, taux, c.TauxCommission);
         }
 
-        // Maxi livrable : paramètre DOS009, client non exclu, ligne nouvelle ou « à la demande », non saisi
-        if (c.CalculMaxi && !c.SansMaxi && l.MaxiLivrable is null or 0 && l.Quantite is > 0
+        RecalculerMaxi(c, l);
+        return l;
+    }
+
+    // Maxi livrable : paramètre DOS009, client non exclu, ligne nouvelle ou « à la demande » ; suit la quantité tant que
+    // l'utilisateur ne l'a pas saisi
+    internal static void RecalculerMaxi(ContexteLigne c, LigneSaisie l)
+    {
+        if (c.CalculMaxi && !c.SansMaxi && !l.MaxiSaisi && l.Quantite is > 0
             && (l.NumeroLigne == 0 || l.Statut == StatutsLigne.ALaDemande))
             l.MaxiLivrable = MoteurPrixCommande.MaxiLivrable(l.Quantite.Value, c.MaxiClient, c.MaxiSociete);
-        return l;
     }
 
     // ------------------------------------------------------------------
@@ -188,8 +204,10 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
             // Stock disponible (forçable)
             if (v.Stock is { } s)
             {
-                var dispo = s.Entree - s.Reserve - (l.Quantite ?? 0) + (ancienne?.Quantite ?? 0);
-                W(dispo < 0, A.StockInsuffisant, $"Disponible insuffisant ({s.Entree - s.Reserve + (ancienne?.Quantite ?? 0):N0}).");
+                // La quantité déjà réservée par la ligne ne compte que si l'article n'a pas changé
+                var dejaReserve = ancienne is not null && ancienne.Article == l.Article && ancienne.Indice == l.Indice ? ancienne.Quantite ?? 0 : 0;
+                var dispo = s.Entree - s.Reserve - (l.Quantite ?? 0) + dejaReserve;
+                W(dispo < 0, A.StockInsuffisant, $"Disponible insuffisant ({s.Entree - s.Reserve + dejaReserve:N0}).");
             }
 
             // Quantités et conditionnement
@@ -231,6 +249,9 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         {
             E(l.Quantite != ancienne.Quantite, nameof(l.Quantite), $"La ligne fait partie de l'OPR n° {opr}.");
             E(l.DateLivraison != ancienne.DateLivraison, nameof(l.DateLivraison), $"La ligne fait partie de l'OPR n° {opr}.");
+            E(l.NumeroAdresse != ancienne.NumeroAdresse || l.AdresseSiege != ancienne.AdresseSiege || l.AdresseRaisonSociale != ancienne.AdresseRaisonSociale
+              || l.AdresseRue1 != ancienne.AdresseRue1 || l.AdresseVille != ancienne.AdresseVille || l.AdresseCodePostal != ancienne.AdresseCodePostal,
+                nameof(l.NumeroAdresse), $"La ligne fait partie de l'OPR n° {opr}.");
         }
 
         // Adresse
@@ -266,9 +287,7 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         if (ancienne is { Soldee: true }) throw new RegleMetierException("Cette ligne est soldée : réactivez-la avant de la modifier.");
         if (a is not null)
         {
-            var tarif = await donnees.DonneesTarifAsync(u.Societe, l.Article, l.Indice, c.CompteGeneral, c.CompteClient, c.Representant, Aujourdhui, ct);
-            var tnum0 = (await donnees.VerifierAsync(u.Societe, commande, c, l.Unite == "" ? Avec(l, x => x.Unite = a.Unite) : l, null, ct)).TnumUnite;
-            l = Completer(c, l, a, tarif, tnum0, Aujourdhui);
+            l = await CompleterAsync(u.Societe, c, l, a, ct);
         }
         var v = await donnees.VerifierAsync(u.Societe, commande, c, l, a, ct);
         var (erreurs, avertissements) = Controler(c, l, a, v, ancienne, Aujourdhui);
@@ -277,7 +296,10 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
 
         // Arrondi d'emballage accepté : la quantité est arrondie (2e Entrée du 5250)
         if (l.AvertissementsAcceptes.Contains(A.QuantiteArrondie) && a is { FractionnableCommande: false, Emballage: > 0 } && l.Quantite is > 0)
+        {
             l.Quantite = (l.Quantite + a.Emballage - 1) / a.Emballage * a.Emballage;
+            RecalculerMaxi(c, l);
+        }
 
         var numero = await donnees.EnregistrerAsync(u.Societe, u.Profil, commande, c, l, v.TnumUnite ?? 0, EmpreinteEcriture, ct);
         await RecalculerStocksAsync(u, c, a, l.Article, l.Indice, ancienne, ct);
@@ -349,9 +371,12 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
 
     // ------------------------------------------------------------------
     // Zones comparées pour détecter une modification concurrente de la ligne
+    // Les montants sont écrits sans zéros non significatifs (DB2 rend 0,00 ou 0 selon la lecture)
     internal static string EmpreinteEcriture(LigneSaisie l) => string.Join("|",
-        l.Article, l.Indice, l.Quantite, l.PrixNet, l.Unite, l.PrixCession ?? 0, l.Statut, l.QuantiteLivree, l.QuantiteFacturee,
-        l.Soldee, l.CodeVente, l.Designation, l.PrixBrut ?? 0, l.Remise ?? 0);
+        l.Article, l.Indice, l.Quantite ?? 0, N(l.PrixNet), l.Unite, N(l.PrixCession ?? 0), l.Statut, l.QuantiteLivree, l.QuantiteFacturee,
+        l.Soldee, l.CodeVente, l.Designation, N(l.PrixBrut ?? 0), N(l.Remise ?? 0));
+
+    private static string N(decimal d) => d.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
 
     internal static string Empreinte(LigneSaisie l) => EmpreinteEcriture(l);
 
@@ -387,12 +412,6 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         return l;
     }
 
-    private static LigneSaisie Avec(LigneSaisie l, Action<LigneSaisie> modifier)
-    {
-        var c = l.Copier();
-        modifier(c);
-        return c;
-    }
 }
 
 // Messages de PRTMSG (NP11P) utilisés par CTL520, sans l'identifiant en tête

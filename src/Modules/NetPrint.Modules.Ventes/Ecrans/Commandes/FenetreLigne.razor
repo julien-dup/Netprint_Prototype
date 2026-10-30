@@ -81,7 +81,7 @@
                             </label>
                             <label class="champ">
                                 <span>Maxi livrable</span>
-                                <input type="number" class="num7" @bind="l.MaxiLivrable" />
+                                <input type="number" class="num7" @bind="l.MaxiLivrable" @bind:after="() => l.MaxiSaisi = l.MaxiLivrable is > 0" />
                             </label>
                         </div>
                         @Message(nameof(l.Quantite))
@@ -103,7 +103,7 @@
                             </label>
                             <label class="champ">
                                 <span>Commission %</span>
-                                <input type="number" step="0.01" class="num6" @bind="l.TauxCommission" />
+                                <input type="number" step="0.01" class="num6" @bind="l.TauxCommission" @bind:after="() => l.CommissionSaisie = l.TauxCommission is not null" />
                             </label>
                         </div>
                         @Message(nameof(l.PrixBrut))

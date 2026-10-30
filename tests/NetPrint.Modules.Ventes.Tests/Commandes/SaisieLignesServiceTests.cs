@@ -242,6 +242,71 @@ public class SaisieLignesServiceTests
         Assert.Equal(2500, colonnes["DNQTEO"]);
     }
 
+    // ---------- Corrections de la revue ----------
+    [Fact]
+    public void Designation_et_unite_saisies_conservees_au_recalcul()
+    {
+        var premiere = SaisieLignesService.Completer(Contexte(), Ligne(), Article(), null, 1000, Aujourdhui);
+        premiere.Designation = "MA DESIGNATION";
+        premiere.Unite = "MI";
+        var seconde = SaisieLignesService.Completer(Contexte(), premiere.Avec(x => x.Quantite = 5000), Article(), null, 1000, Aujourdhui);
+        Assert.Equal(("MA DESIGNATION", "MI"), (seconde.Designation, seconde.Unite));
+
+        // Article changé : les valeurs du nouvel article sont reprises
+        var autre = SaisieLignesService.Completer(Contexte(), seconde.Avec(x => x.Article = "AUTRE"), Article() with { Designation = "AUTRE ARTICLE" }, null, 1000, Aujourdhui);
+        Assert.Equal(("AUTRE ARTICLE", "LM"), (autre.Designation, autre.Unite));
+    }
+
+    [Fact]
+    public void Commission_suit_le_prix_tant_qu_elle_n_est_pas_saisie()
+    {
+        var c = Contexte() with { TypeCommission = "B", SeuilsCommission = "110120130140150160170180190200", TauxCommissions = "0100020003000400050006000700080009001000" };
+        var sansPrix = SaisieLignesService.Completer(c, Ligne(prix: null), Article() with { PrixRevient = 10 }, null, 1, Aujourdhui);
+        var avecPrix = SaisieLignesService.Completer(c, sansPrix.Avec(x => { x.PrixBrut = 13; x.PrixSaisi = true; }), Article() with { PrixRevient = 10 }, null, 1, Aujourdhui);
+        Assert.Equal(3m, avecPrix.TauxCommission);   // rapport 1,30
+        var saisie = SaisieLignesService.Completer(c, avecPrix.Avec(x => { x.TauxCommission = 8; x.CommissionSaisie = true; x.PrixBrut = 25; }), Article() with { PrixRevient = 10 }, null, 1, Aujourdhui);
+        Assert.Equal(8m, saisie.TauxCommission);
+    }
+
+    [Fact]
+    public void Maxi_livrable_suit_la_quantite_tant_qu_il_n_est_pas_saisi()
+    {
+        var c = Contexte() with { CalculMaxi = true, MaxiSociete = [(100000, 10)] };
+        var l = SaisieLignesService.Completer(c, Ligne().Avec(x => x.Quantite = 1000), Article(), null, 1, Aujourdhui);
+        Assert.Equal(1100, l.MaxiLivrable);
+        Assert.Equal(5500, SaisieLignesService.Completer(c, l.Avec(x => x.Quantite = 5000), Article(), null, 1, Aujourdhui).MaxiLivrable);
+        Assert.Equal(1234, SaisieLignesService.Completer(c, l.Avec(x => { x.Quantite = 5000; x.MaxiLivrable = 1234; x.MaxiSaisi = true; }), Article(), null, 1, Aujourdhui).MaxiLivrable);
+    }
+
+    [Fact]
+    public void Empreinte_identique_quelle_que_soit_l_echelle_des_montants()
+    {
+        var a = Ligne().Avec(x => { x.Remise = null; x.PrixCession = null; x.PrixNet = 49m; });
+        var b = Ligne().Avec(x => { x.Remise = 0.00m; x.PrixCession = 0.00m; x.PrixNet = 49.00m; });
+        Assert.Equal(SaisieLignesService.EmpreinteEcriture(a), SaisieLignesService.EmpreinteEcriture(b));
+    }
+
+    [Fact]
+    public void Stock_l_ancienne_quantite_ne_compte_que_pour_le_meme_article()
+    {
+        var ancienne = Ligne().Avec(x => { x.NumeroLigne = 2; x.Quantite = 500; x.Article = "A"; });
+        var v = Verifs() with { Stock = (100, 0) };
+        var memeArticle = ancienne.Avec(x => x.Quantite = 550);
+        Assert.Empty(SaisieLignesService.Controler(Contexte(), memeArticle, Article() with { StockControle = true }, v, ancienne, Aujourdhui).Avertissements);
+        var autreArticle = ancienne.Avec(x => { x.Article = "B"; x.Quantite = 550; });
+        Assert.Contains(SaisieLignesService.Controler(Contexte(), autreArticle, Article() with { StockControle = true }, v, ancienne, Aujourdhui).Avertissements,
+            w => w.Zone == A.StockInsuffisant);
+    }
+
+    [Fact]
+    public void Adresse_d_une_ligne_d_OPR_non_modifiable()
+    {
+        var ancienne = Ligne().Avec(x => x.NumeroLigne = 2);
+        var l = ancienne.Avec(x => x.NumeroAdresse = 5);
+        Assert.Contains(SaisieLignesService.Controler(Contexte(), l, Article(), Verifs() with { OprNonLivre = 77 }, ancienne, Aujourdhui).Erreurs,
+            e => e.Zone == "NumeroAdresse");
+    }
+
     // ---------- Jeux d'essai ----------
     private static (List<ErreurSaisie> Erreurs, List<ErreurSaisie> Avertissements) Controler(LigneSaisie l, ArticleLigne? a = null,
         VerificationsLigne? v = null) =>
