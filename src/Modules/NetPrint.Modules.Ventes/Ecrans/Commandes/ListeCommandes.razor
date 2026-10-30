@@ -21,7 +21,8 @@
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
 
 <fieldset class="barre-outils">
-    <button class="bouton-principal" disabled title="Prochaine étape (en-tête de commande, DOS505)">＋ Nouvelle commande</button>
+    <button class="bouton-principal" disabled="@(contexte?.Droits.Creer == false)" title="Créer une commande de négoce ou de produit fini"
+            @onclick='() => Navigation.NavigateTo("ventes/commandes/nouvelle")'>＋ Nouvelle commande</button>
     <span class="separateur-vertical"></span>
     <div class="bascule" title="Présentation de la liste">
         <button class="@(Etat.Vue == "C" ? "actif" : "")" @onclick='() => ChangerVueAsync("C")'>Par commande</button>

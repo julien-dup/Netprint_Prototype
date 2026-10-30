@@ -50,6 +50,8 @@ public static class VentesModule
         services.AddScoped<IConsultationCommandes, ConsultationCommandesService>();
         services.AddScoped<ISourceCommandes, ConsultationCommandesDb2>();
         services.AddScoped<EtatListeCommandes>();
+        services.AddScoped<ISaisieCommandes, SaisieCommandesService>();   // en-tête de commande (DOS505)
+        services.AddScoped<ISourceSaisieCommandes, SaisieCommandesDb2>();
         return services;
     }
 

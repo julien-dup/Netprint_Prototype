@@ -19,7 +19,8 @@
 <fieldset class="barre-outils">
     <button @onclick="Retour" title="Retour à la liste des commandes">← Liste des commandes</button>
     <span class="separateur-vertical"></span>
-    <button disabled title="Prochaine étape (DOS505)">✏️ Modifier l'en-tête</button>
+    <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Modifier l'en-tête de la commande" : RaisonNonModifiable)"
+            @onclick='() => Navigation.NavigateTo(Adresse(CleCourante) + "/entete")'>✏️ Modifier l'en-tête</button>
     <button disabled title="Prochaine étape (NEG520)">＋ Ajouter une ligne</button>
     <button disabled title="Prochaine étape">✔ Solder</button>
     <span class="espace"></span>
@@ -181,6 +182,14 @@
     }
 
     private void Retour() => Navigation.NavigateTo("ventes/commandes");
+
+    // Modification de l'en-tête : droit DOS500C, commande ni soldée ni sous-traitée (NEG510 R3)
+    private bool PeutModifier => fiche is { Entete.Soldee: false, Entete.SousTraitee: false, Droits.Modifier: true };
+
+    private string RaisonNonModifiable => fiche is null ? ""
+        : fiche.Entete.Soldee ? "Commande soldée"
+        : fiche.Entete.SousTraitee ? "Commande sous-traitée : modification impossible"
+        : "Vous n'êtes pas autorisé à modifier les commandes";
 
 
 

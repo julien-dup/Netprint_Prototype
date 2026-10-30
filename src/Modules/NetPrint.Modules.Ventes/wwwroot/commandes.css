@@ -103,3 +103,20 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .badge-journal.journal-m { background: #e0edff; color: var(--accent-fonce); }
 .badge-journal.journal-s { background: var(--danger-clair); color: var(--danger); }
 .ancien { text-decoration: line-through; }
+
+/* ---------- Saisie de l'en-tête ---------- */
+.saisie-entete .etape-client { max-width: 860px; gap: 14px; }
+.grille-champs { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-start; }
+.pied-etape { display: flex; justify-content: flex-end; }
+.formulaire-entete { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; align-items: start; }
+.formulaire-entete .carte { gap: 10px; background: var(--surface); }
+.formulaire-entete .champ.large, .formulaire-entete .champ.large input { width: 100%; }
+.formulaire-entete .champ.large input + input { margin-top: 4px; }
+.formulaire-entete details > summary { cursor: pointer; list-style: none; }
+.formulaire-entete details > summary h3 { display: inline; }
+.formulaire-entete .ou { align-self: flex-end; padding-bottom: 8px; color: var(--texte-3, #8a94a6); }
+.ligne-cases { display: flex; gap: 18px; flex-wrap: wrap; }
+.champ.en-erreur input, .champ.en-erreur select, .en-erreur > .ligne-champs input { border-color: var(--danger); background: var(--danger-clair); }
+.message-erreur { display: block; color: var(--danger); font-size: 12px; margin-top: 2px; }
+.erreur-saisie { margin: 0; color: var(--danger); font-weight: 600; }
+.avertissement-saisie { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--orange-clair); color: var(--orange); }

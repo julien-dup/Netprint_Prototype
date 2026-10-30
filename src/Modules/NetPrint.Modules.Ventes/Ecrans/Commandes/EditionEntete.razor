@@ -1,0 +1,521 @@
+@page "/ventes/commandes/nouvelle"
+@page "/ventes/commandes/{Numero:int}/{Cle}/entete"
+@* =====================================================================
+   En-tête d'une commande client — reprise de DOS505 (écrans DOS50501 et DOS50512).
+   Création : 1) client, type, enseigne, date (contrôles du client, valeurs par défaut) ; 2) en-tête complet.
+   Modification : l'en-tête seul ; client, date, enseigne et type ne changent pas, la facturation est figée
+   dès qu'une ligne existe. Les erreurs s'affichent sous chaque zone (messages de PRTMSG).
+   ===================================================================== *@
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@inject ISaisieCommandes Saisie
+@inject NetPrint.Socle.Session.IUtilisateurCourant UtilisateurCourant
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>@(Creation ? "Nouvelle commande" : $"En-tête de la commande {CleCourante.Libelle}") · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick="Annuler">← @(Creation ? "Liste des commandes" : "Retour à la commande")</button>
+    <span class="espace"></span>
+    @if (entete is not null)
+    {
+        <button class="bouton-principal" disabled="@enregistrement" @onclick="EnregistrerAsync">
+            @(Creation ? "✔ Créer la commande" : "✔ Enregistrer")
+        </button>
+    }
+</fieldset>
+
+<div class="contenu contenu-detail saisie-entete">
+    @if (chargement)
+    {
+        <p class="compteur"><span class="chargement">Chargement…</span></p>
+    }
+    else if (contexte is null)
+    {
+        <div class="carte carte-message"><p>Saisie indisponible.</p></div>
+    }
+    else if (!Creation && entete is null)
+    {
+        <div class="carte carte-message"><p>La commande @CleCourante.Libelle n'existe pas ou ne vous est pas accessible.</p></div>
+    }
+    else if (entete is null)
+    {
+        @* ---------- Étape 1 : client, type, enseigne, date ---------- *@
+        <form class="carte etape-client" @onsubmit="PreparerAsync">
+            <div class="titre-panneau">
+                <span class="sur-titre">Nouvelle commande</span>
+                <span class="code-titre">Client et type</span>
+            </div>
+            <div class="grille-champs">
+                <div class="champ @Classe(nameof(DebutCommande.CompteClient))">
+                    <span>Client</span>
+                    <div class="ligne-champs">
+                        <input type="number" class="num6" title="Compte général" @bind="debut.CompteGeneral" />
+                        <input type="number" class="num7" title="Compte client (auxiliaire)" @bind="debut.CompteClient" autofocus />
+                        <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+                    </div>
+                    @Message(nameof(DebutCommande.CompteGeneral))
+                    @Message(nameof(DebutCommande.CompteClient))
+                </div>
+                <div class="champ">
+                    <span>Type de commande</span>
+                    <div class="bascule">
+                        <button type="button" class="@(debut.TypeCommande == TypesCommande.ProduitFini ? "actif" : "")"
+                                @onclick="() => debut.TypeCommande = TypesCommande.ProduitFini">Produit fini</button>
+                        <button type="button" class="@(debut.TypeCommande == TypesCommande.Negoce ? "actif" : "")"
+                                @onclick="() => debut.TypeCommande = TypesCommande.Negoce">Négoce</button>
+                    </div>
+                </div>
+                @if (contexte.GereEnseignes)
+                {
+                    <label class="champ @Classe(nameof(DebutCommande.Enseigne))">
+                        <span>Enseigne</span>
+                        <select @bind="debut.Enseigne">
+                            <option value=""></option>
+                            @foreach (var e in contexte.Enseignes)
+                            {
+                                <option value="@e.Code">@e.Code · @e.Libelle</option>
+                            }
+                        </select>
+                        @Message(nameof(DebutCommande.Enseigne))
+                    </label>
+                }
+                <label class="champ">
+                    <span>Date du dossier</span>
+                    <input type="date" @bind="debut.Date" @bind:format="yyyy-MM-dd" />
+                </label>
+            </div>
+            <div class="pied-etape">
+                <button type="submit" class="bouton-principal" disabled="@enregistrement">Continuer →</button>
+            </div>
+        </form>
+    }
+    else
+    {
+        var e = entete;
+        <section class="entete-commande">
+            <div class="titre-panneau">
+                <span class="sur-titre">@(Creation ? "Nouvelle commande" : "Commande") @TypesCommande.Libelle(e.TypeCommande).ToLowerInvariant()</span>
+                <span class="code-titre">@(Creation ? e.NomClient : CleCourante.Libelle)</span>
+                <span class="discret">@e.CompteGeneral @e.CompteClient @(Creation ? "" : e.NomClient)</span>
+                @if (e.Enseigne != "") { <span class="badge badge-appel">Enseigne @e.Enseigne</span> }
+                <span class="discret">dossier du @Date(e.DateDossier)</span>
+            </div>
+            @foreach (var a in e.Avertissements)
+            {
+                <p class="avertissement-saisie">⚠ @a</p>
+            }
+            @if (erreurs.Count > 0)
+            {
+                <p class="erreur-saisie">@erreurs.Count zone@(erreurs.Count > 1 ? "s" : "") à corriger.</p>
+            }
+        </section>
+
+        <div class="formulaire-entete">
+            <div class="carte">
+                <h3>Commande</h3>
+                <label class="champ large @Classe(nameof(e.Designation1))">
+                    <span>Désignation</span>
+                    <input maxlength="40" @bind="e.Designation1" />
+                    <input maxlength="40" @bind="e.Designation2" />
+                    @Message(nameof(e.Designation1))
+                </label>
+                <div class="ligne-champs">
+                    <label class="champ @Classe(nameof(e.ReferenceCommandeClient))">
+                        <span>Réf. commande client</span>
+                        <input maxlength="15" class="court" @bind="e.ReferenceCommandeClient" />
+                    </label>
+                    <label class="champ">
+                        <span>Du</span>
+                        <input type="date" @bind="e.DateCommandeClient" @bind:format="yyyy-MM-dd" />
+                    </label>
+                </div>
+                <label class="champ large @Classe(nameof(e.Interlocuteur))">
+                    <span>Interlocuteur</span>
+                    <input maxlength="39" @bind="e.Interlocuteur" />
+                    @Message(nameof(e.Interlocuteur))
+                </label>
+                <label class="champ @Classe(nameof(e.TypeFacturation))">
+                    <span>Facturation</span>
+                    <select @bind="e.TypeFacturation" disabled="@(e.AvecLignes)" title="@(e.AvecLignes ? "Figée : la commande a des lignes" : null)">
+                        <option value="1">À chaque livraison</option>
+                        <option value="2">En totalité</option>
+                        <option value="3">En totalité, multi-échéance</option>
+                    </select>
+                    @Message(nameof(e.TypeFacturation))
+                </label>
+            </div>
+
+            <div class="carte">
+                <h3>Livraison</h3>
+                <div class="ligne-champs">
+                    <label class="champ @Classe(nameof(e.DateLivraison))">
+                        <span>Date de livraison</span>
+                        <input type="date" @bind="e.DateLivraison" @bind:format="yyyy-MM-dd" />
+                    </label>
+                    <span class="ou">ou</span>
+                    <label class="champ @Classe(nameof(e.SemaineLivraison))">
+                        <span>Semaine</span>
+                        <input type="number" class="num3" min="1" max="53" @bind="e.SemaineLivraison" disabled="@(e.DateLivraison is not null)" />
+                    </label>
+                    <label class="champ @Classe(nameof(e.AnneeLivraison))">
+                        <span>Année</span>
+                        <input type="number" class="num6" @bind="e.AnneeLivraison" disabled="@(e.DateLivraison is not null)" />
+                    </label>
+                </div>
+                @Message(nameof(e.DateLivraison))
+                @Message(nameof(e.SemaineLivraison))
+                @Message(nameof(e.AnneeLivraison))
+                <div class="champ">
+                    <span>Mode</span>
+                    <div class="bascule">
+                        <button type="button" class="@(e.EnlevementOuLivraison == "A" ? "actif" : "")" @onclick='() => ChangerMode("A")'>À livrer</button>
+                        <button type="button" class="@(e.EnlevementOuLivraison == "E" ? "actif" : "")" @onclick='() => ChangerMode("E")'>Enlèvement par le client</button>
+                    </div>
+                </div>
+                @if (e.EnlevementOuLivraison == "A")
+                {
+                    <div class="ligne-champs">
+                        <label class="champ @Classe(nameof(e.Port))">
+                            <span>Port</span>
+                            <select @bind="e.Port">
+                                <option value="F">Franco</option>
+                                <option value="D">Port dû</option>
+                                <option value="A">Port avancé</option>
+                            </select>
+                        </label>
+                        <label class="champ @Classe(nameof(e.NbLieux))">
+                            <span>Nb de lieux</span>
+                            <input type="number" class="num3" min="1" @bind="e.NbLieux" />
+                        </label>
+                        <label class="champ @Classe(nameof(e.AdresseFacturation))">
+                            <span>Adresse de facturation</span>
+                            <select @bind="e.AdresseFacturation">
+                                <option value="F">Facturation</option>
+                                <option value="L">Livraison</option>
+                                <option value="R">Routeur</option>
+                                <option value="C">Combiné</option>
+                            </select>
+                        </label>
+                    </div>
+                    @Message(nameof(e.NbLieux))
+                }
+                <label class="champ @Classe(nameof(e.AdresseArc))">
+                    <span>N° d'adresse d'envoi de l'ARC</span>
+                    <input type="number" class="num6" @bind="e.AdresseArc" />
+                    @Message(nameof(e.AdresseArc))
+                </label>
+            </div>
+
+            <div class="carte">
+                <h3>Commercial</h3>
+                <div class="ligne-champs">
+                    <div class="champ @Classe(nameof(e.Representant))">
+                        <span>Représentant</span>
+                        <div class="ligne-champs">
+                            <input type="number" class="num3" @bind="e.Representant" />
+                            <BoutonRecherche Liste="ListeChoix.Representant" OnChoix='l => e.Representant = EntierCode(l.Code)' />
+                        </div>
+                    </div>
+                    <label class="champ @Classe(nameof(e.TauxCommission))">
+                        <span>Commission %</span>
+                        <input type="number" step="0.01" class="num6" @bind="e.TauxCommission" />
+                    </label>
+                </div>
+                @Message(nameof(e.Representant))
+                @Message(nameof(e.TauxCommission))
+                <div class="ligne-champs">
+                    <div class="champ @Classe(nameof(e.Fabricant))">
+                        <span>Fabricant</span>
+                        <div class="ligne-champs">
+                            <input class="code" maxlength="3" @bind="e.Fabricant" />
+                            <BoutonRecherche Liste="ListeChoix.Fabricant" OnChoix='l => e.Fabricant = l.Code' />
+                        </div>
+                    </div>
+                    <label class="champ @Classe(nameof(e.CodeVente))">
+                        <span>Code ligne de vente</span>
+                        <select @bind="e.CodeVente">
+                            <option value=""></option>
+                            @foreach (var c in contexte.CodesVente)
+                            {
+                                <option value="@c.Code">@c.Code · @c.Libelle</option>
+                            }
+                        </select>
+                    </label>
+                </div>
+                @Message(nameof(e.Fabricant))
+                @Message(nameof(e.CodeVente))
+                <div class="champ @Classe(nameof(e.CompteClientFacture))">
+                    <span>Client facturé (s'il diffère)</span>
+                    <div class="ligne-champs">
+                        <input type="number" class="num6" title="Compte général" @bind="e.CompteGeneralFacture" />
+                        <input type="number" class="num7" title="Compte client" @bind="e.CompteClientFacture" />
+                        <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher le client facturé" OnChoix="ChoisirClientFacture" />
+                    </div>
+                    @Message(nameof(e.CompteGeneralFacture))
+                    @Message(nameof(e.CompteClientFacture))
+                </div>
+                <div class="ligne-cases">
+                    <label class="champ-case"><input type="checkbox" @bind="e.Revendeur" /> <span>Revendeur</span></label>
+                    @if (contexte.SousTraitanceSaisissable)
+                    {
+                        <label class="champ-case"><input type="checkbox" @bind="e.SousTraitee" /> <span>Sous-traitée</span></label>
+                    }
+                    <label class="champ-case"><input type="checkbox" @bind="e.EditionEtiquettes" /> <span>Édition des étiquettes</span></label>
+                </div>
+            </div>
+
+            <div class="carte">
+                <h3>Règlement</h3>
+                <label class="champ @Classe(nameof(e.ModeReglement))">
+                    <span>Mode de règlement</span>
+                    <select @bind="e.ModeReglement">
+                        <option value=""></option>
+                        @foreach (var m in contexte.ModesReglement)
+                        {
+                            <option value="@m.Code">@m.Code · @m.Libelle</option>
+                        }
+                    </select>
+                    @Message(nameof(e.ModeReglement))
+                </label>
+                <div class="ligne-champs">
+                    <label class="champ @Classe(nameof(e.Echeance))">
+                        <span>Échéance</span>
+                        <select @bind="EcheanceTexte">
+                            @foreach (var j in ValeursEntete.Echeances)
+                            {
+                                <option value="@j">@(j == 0 ? "—" : $"{j} jours")</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="champ @Classe(nameof(e.Le))">
+                        <span>Le</span>
+                        <input type="number" class="num3" min="0" max="31" @bind="e.Le" />
+                    </label>
+                    <label class="champ @Classe(nameof(e.Arrete))">
+                        <span>Arrêté au</span>
+                        <input type="number" class="num3" min="0" max="31" @bind="e.Arrete" />
+                    </label>
+                </div>
+                @Message(nameof(e.Echeance))
+                @Message(nameof(e.Le))
+                @Message(nameof(e.Arrete))
+                <div class="ligne-champs">
+                    <label class="champ @Classe(nameof(e.Escompte))">
+                        <span>Escompte %</span>
+                        <input type="number" step="0.1" class="num3" @bind="e.Escompte" />
+                    </label>
+                    <label class="champ @Classe(nameof(e.Releve))">
+                        <span>Relevé</span>
+                        <select @bind="e.Releve">
+                            <option value=""></option>
+                            @foreach (var r in ValeursEntete.Releves)
+                            {
+                                <option value="@r">@r</option>
+                            }
+                        </select>
+                    </label>
+                </div>
+                @Message(nameof(e.Escompte))
+                @Message(nameof(e.Releve))
+            </div>
+
+            <details class="carte" open="@(e.NomHonoraires != "" || e.CommandesGroupees is > 0)">
+                <summary><h3>Divers</h3></summary>
+                <div class="ligne-champs">
+                    <label class="champ"><span>Honoraires (nom)</span><input maxlength="12" class="court" @bind="e.NomHonoraires" /></label>
+                    <label class="champ"><span>Montant</span><input type="number" step="0.01" class="num7" @bind="e.MontantHonoraires" /></label>
+                    <label class="champ"><span>Taux %</span><input type="number" step="0.01" class="num6" @bind="e.TauxHonoraires" /></label>
+                </div>
+                <div class="ligne-champs">
+                    <label class="champ"><span>Commandes groupées</span><input type="number" class="num3" @bind="e.CommandesGroupees" /></label>
+                    <label class="champ large"><span>Texte</span><input maxlength="20" @bind="e.TexteCommandesGroupees" /></label>
+                </div>
+            </details>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int? Numero { get; set; }
+    [Parameter] public string? Cle { get; set; }
+
+    private bool Creation => Numero is null;
+    private CleCommande CleCourante => new(Numero ?? 0, (Cle ?? "").Trim().ToUpperInvariant());
+
+    private ContexteSaisieCommande? contexte;
+    private readonly DebutCommande debut = new();
+    private EnteteSaisie? entete;
+    private List<ErreurSaisie> erreurs = [];
+    private bool chargement = true;
+    private bool enregistrement;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            contexte = await Saisie.LireContexteAsync();
+            if (Creation)
+            {
+                if (!contexte.Droits.Creer)
+                {
+                    await Dialogues.AlerterAsync("Vous n'êtes pas autorisé à créer des commandes.");
+                    contexte = null;
+                }
+                else if (contexte.Enseignes.Count == 1) debut.Enseigne = contexte.Enseignes[0].Code;
+                // Compte général et client par défaut de la session (Paramètres), comme la liste
+                var u = await UtilisateurCourant.LireAsync();
+                debut.CompteGeneral = u.CompteGeneral;
+                if (u.CompteClient > 0) debut.CompteClient = u.CompteClient;
+            }
+            else
+            {
+                entete = await Saisie.LireAsync(CleCourante);
+                if (entete is { Soldee: true }) { await Dialogues.AlerterAsync("Option impossible, dossier soldé."); Retour(); }
+                else if (entete is { Bloquee: true }) { await Dialogues.AlerterAsync("Commande sous-traitée. Modification impossible."); Retour(); }
+                else if (!contexte.Droits.Modifier) { await Dialogues.AlerterAsync("Vous n'êtes pas autorisé à modifier les commandes."); Retour(); }
+            }
+        }
+        catch (Exception ex)
+        {
+            contexte = null;
+            Notifications.Erreur($"Ouverture de la saisie impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    // ---------- Étape 1 ----------
+    private async Task PreparerAsync()
+    {
+        enregistrement = true;
+        erreurs = [];
+        try
+        {
+            entete = await Saisie.PreparerAsync(debut);
+        }
+        catch (SaisieInvalideException ex) when (ex.Forcable)
+        {
+            // Qualité client 1 ou 5 : l'utilisateur peut continuer (F19 du 5250)
+            if (await Dialogues.ConfirmerAsync(ex.Message + "\n\nCréer la commande malgré tout ?", "Client sous surveillance", "Continuer"))
+            {
+                debut.ForcerQualite = true;
+                await PreparerAsync();
+                return;
+            }
+        }
+        catch (SaisieInvalideException ex)
+        {
+            erreurs = [.. ex.Erreurs];
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Contrôle du client impossible : {ex.Message}");
+        }
+        finally
+        {
+            enregistrement = false;
+        }
+    }
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        debut.CompteGeneral = EntierCode(l.Codes[0]);
+        debut.CompteClient = l.Codes.Count > 1 ? EntierCode(l.Codes[1]) : null;
+    }
+
+    // ---------- Étape 2 ----------
+    private async Task EnregistrerAsync()
+    {
+        if (entete is null) return;
+        enregistrement = true;
+        erreurs = [];
+        try
+        {
+            if (Creation)
+            {
+                var cle = await Saisie.CreerAsync(entete);
+                Notifications.Succes($"Commande {cle.Libelle} créée.");
+                Navigation.NavigateTo(Adresse(cle));
+            }
+            else
+            {
+                await Saisie.ModifierAsync(CleCourante, entete);
+                Notifications.Succes($"En-tête de la commande {CleCourante.Libelle} enregistré.");
+                Retour();
+            }
+        }
+        catch (SaisieInvalideException ex)
+        {
+            erreurs = [.. ex.Erreurs];
+            // Contrôle du client à l'enregistrement (clôturé entre-temps, qualité...) : zones de l'étape 1, non affichées ici
+            if (erreurs.Any(x => x.Zone is nameof(DebutCommande.CompteGeneral) or nameof(DebutCommande.CompteClient) or nameof(DebutCommande.Enseigne)))
+                await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Enregistrement impossible : {ex.Message}");
+        }
+        finally
+        {
+            enregistrement = false;
+        }
+    }
+
+    private void ChoisirClientFacture(LigneChoix l)
+    {
+        entete!.CompteGeneralFacture = EntierCode(l.Codes[0]);
+        entete.CompteClientFacture = l.Codes.Count > 1 ? EntierCode(l.Codes[1]) : null;
+    }
+
+    private void ChangerMode(string mode)
+    {
+        entete!.EnlevementOuLivraison = mode;
+        if (mode == "A")
+        {
+            if (entete.Port == "") entete.Port = "F";
+            entete.NbLieux ??= 1;
+            if (entete.AdresseFacturation == "") entete.AdresseFacturation = "F";
+        }
+    }
+
+    // Échéance : liste fermée (table TJE) ; 0 = pas d'échéance
+    private string EcheanceTexte
+    {
+        get => (entete?.Echeance ?? 0).ToString();
+        set { if (entete is not null) entete.Echeance = int.TryParse(value, out var j) && j > 0 ? j : null; }
+    }
+
+    private void Annuler()
+    {
+        if (Creation) Navigation.NavigateTo("ventes/commandes");
+        else Retour();
+    }
+
+    private void Retour() => Navigation.NavigateTo(Adresse(CleCourante));
+
+    private static int? EntierCode(string code) => int.TryParse(code, out var n) ? n : null;
+
+    // ---------- Erreurs par zone ----------
+    private string Classe(string zone) => erreurs.Any(x => x.Zone == zone) ? "en-erreur" : "";
+
+    private RenderFragment Message(string zone) => __builder =>
+    {
+        foreach (var m in erreurs.Where(x => x.Zone == zone))
+        {
+            <span class="message-erreur">@m.Message</span>
+        }
+    };
+}

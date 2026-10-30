@@ -27,3 +27,15 @@ public sealed class FactDb2Attribute : FactAttribute
         if (!BaseDeTest.Disponible) Skip = "Pas de connexion DB2 de test (ConnectionStrings:Db2) sur ce poste.";
     }
 }
+
+// Tests qui écrivent dans NP11F de test (et consomment des n° de dossier) : seulement sur demande,
+// avec la variable d'environnement NETPRINT_TESTS_ECRITURE=1. Ils nettoient ce qu'ils ont créé.
+public sealed class FactDb2EcritureAttribute : FactAttribute
+{
+    public FactDb2EcritureAttribute()
+    {
+        if (!BaseDeTest.Disponible) Skip = "Pas de connexion DB2 de test (ConnectionStrings:Db2) sur ce poste.";
+        else if (Environment.GetEnvironmentVariable("NETPRINT_TESTS_ECRITURE") != "1")
+            Skip = "Test d'écriture dans NP11F : lancer avec NETPRINT_TESTS_ECRITURE=1.";
+    }
+}
