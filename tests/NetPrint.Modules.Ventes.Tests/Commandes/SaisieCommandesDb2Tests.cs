@@ -148,8 +148,9 @@ public class SaisieCommandesDb2Tests(ITestOutputHelper sortie)
             var of = await production.DemanderOfAsync(demande);
             crees.Add(of);
             sortie.WriteLine($"Commande {cle.Libelle} → OF {of.Libelle}");
-            Assert.Equal(cle.Numero, of.Numero);   // n° de la commande, clé chiffre libre
-            Assert.Contains(of.Cle, "1234567890");
+            // n° de la commande ; clé calculée par GETCLE (les tests n'ont pas Production:CleOf = PremierChiffreLibre)
+            Assert.Equal(cle.Numero, of.Numero);
+            Assert.Equal(NetPrint.Noyau.Compteurs.NumerosDossier.CleCalculee(cle.Numero, BaseDeTest.CompteClient), of.Cle);
             Assert.Equal(NetPrint.Modules.Production.Contrats.EtatOf.AOuvrir, await production.EtatAsync(of));
 
             var lue = (await production.LireDemandeOfAsync(of, origine))!;

@@ -11,15 +11,18 @@ namespace NetPrint.Modules.Production.Donnees;
 // =====================================================================
 // Demandes d'OF (« dossiers à ouvrir ») : en-tête AB001T (CCTYPC '2') et liens AB0020 article ↔ OF ↔ commande, écrits
 // comme NEG515 SPVAL / NEG510 SPVALLANC, mais en une transaction (le RPG n'en avait pas).
-// Numérotation (DOS005.POPT02 ≠ 'N', toutes les sociétés de NP11F) : n° de la commande, clé = premier chiffre libre
-// ('1' à '9' puis '0') dans AB001 et AB001T — c'est ce que montrent les données (commande 68537/9 → OF 68537/2) :
-// la clé lettre de PRTCLEF est remplacée par le programme spécifique RAUCLEF, absent des sources. À confirmer.
-// POPT02 = 'N' : compteur GETDOSSIER (enseigne ou catégorie), puis clé libre.
+// Numérotation (DOS005.POPT02 ≠ 'N', toutes les sociétés de NP11F) : n° de la commande ; POPT02 = 'N' : compteur
+// GETDOSSIER (enseigne ou catégorie). Clé (Production:CleOf) :
+//   - « Calculee » (défaut) : la lettre de GETCLE (calcul de GETDOSSIER / PRTCLEF, modulo 26 du n° et du client) ;
+//   - « PremierChiffreLibre » : ce que fait le programme spécifique RAUCLEF, qui remplace ce calcul chez certains clients
+//     (constaté sur les données du pilote : commande 68537/9 → OF 68537/2, alors que GETCLE donnerait « D »).
+// Si la clé est prise (AB001 ou AB001T) : chiffres 1 à 9 puis 0 (DEBLEC de NEG515).
 // Modèle : compteur NK (AA00082), lu et incrémenté dans la transaction (GETNUM sans appel RPG).
 // =====================================================================
 internal sealed class DemandesOfDb2(IConfiguration config)
 {
     private string Bib => BaseDb2.Bibliotheque(config);
+    private bool CleCalculee => !string.Equals(config["Production:CleOf"], "PremierChiffreLibre", StringComparison.OrdinalIgnoreCase);
 
     public async Task<NumeroOf> CreerAsync(int societe, string profil, DemandeOf d, CancellationToken ct)
     {
@@ -37,7 +40,10 @@ internal sealed class DemandesOfDb2(IConfiguration config)
             await using (var rd = await Lire(cnx, tx, $"SELECT POPT02 FROM {b}.DOS005 WHERE RSOC = ?", ct, societe))
                 if (await rd.ReadAsync(ct)) parCommande = rd.Texte(0) != "N";
 
-            var (numero, preferee) = parCommande ? (d.Commande.Numero, (string?)null) : await GetDossierAsync(cnx, tx, b, societe, d, ct);
+            var (numero, cleGetDossier) = parCommande ? (d.Commande.Numero, (string?)null) : await GetDossierAsync(cnx, tx, b, societe, d, ct);
+            string? Preferee(int n, string? cleCompteur) =>
+                !CleCalculee ? null : cleCompteur is { Length: 1 } ? cleCompteur : Noyau.Compteurs.NumerosDossier.CleCalculee(n, d.CompteClient);
+            var preferee = Preferee(numero, cleGetDossier);
             var (modele, indice) = d.Modele > 0 ? (d.Modele, d.IndiceComposition == "" ? "A" : d.IndiceComposition)
                 : (await NouveauModeleAsync(cnx, tx, b, societe, ct), "A");
 
@@ -50,7 +56,8 @@ internal sealed class DemandesOfDb2(IConfiguration config)
                 if (cle is null && parCommande && essai == 0)
                 {
                     // Toutes les clés du n° de la commande sont prises : compteur (comme NEG515 l. 2804-2827)
-                    (numero, preferee) = await GetDossierAsync(cnx, tx, b, societe, d, ct);
+                    (numero, cleGetDossier) = await GetDossierAsync(cnx, tx, b, societe, d, ct);
+                    preferee = Preferee(numero, cleGetDossier);
                     cle = await CleLibreAsync(cnx, tx, b, societe, numero, preferee, ct);
                 }
                 if (cle is null) throw new RegleMetierException($"Toutes les clés du dossier n° {numero} sont déjà utilisées.");

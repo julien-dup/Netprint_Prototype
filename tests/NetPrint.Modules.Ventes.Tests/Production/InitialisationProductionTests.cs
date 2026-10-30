@@ -38,6 +38,9 @@ public class InitialisationProductionTests
         Assert.Equal("B", NetPrint.Noyau.Compteurs.NumerosDossier.PremiereCleLibre(new HashSet<string> { "1" }, "B"));
         Assert.Equal((12345, "B"), NetPrint.Noyau.Compteurs.NumerosDossier.Decouper("12345 B"));
         Assert.Null(NetPrint.Noyau.Compteurs.NumerosDossier.Decouper("-1"));
+        // GETCLE (= PRTCLEF) : commande 68537, client 376 → « D »
+        Assert.Equal("D", NetPrint.Noyau.Compteurs.NumerosDossier.CleCalculee(68537, 376));
+        Assert.Equal("A", NetPrint.Noyau.Compteurs.NumerosDossier.CleCalculee(26, 0));
     }
 
     [Fact]
