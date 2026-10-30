@@ -1,0 +1,427 @@
+@page "/ventes/commandes/{Numero:int}/{Cle}"
+@* =====================================================================
+   Fiche d'une commande client (négoce ou produit fini), en lecture seule.
+   Reprise de NEG510 (en-tête, menu de la commande) et de FEN_commandes (HistoriqueDossiers) :
+   en-tête complet, lignes (détail dépliable), livraisons (BL), factures, journal des lignes (NEG100E),
+   historique du dossier (DOS040).
+   Une adresse par commande : /ventes/commandes/n° de dossier/clé.
+   Prochaines étapes : modification de l'en-tête (DOS505), saisie des lignes (NEG520), solde, ARC.
+   ===================================================================== *@
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@inject IConsultationCommandes Consultation
+@inject EtatListeCommandes Etat
+@inject NavigationManager Navigation
+@inject Notifications Notifications
+
+<PageTitle>Commande @CleCourante.Libelle · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick="Retour" title="Retour à la liste des commandes">← Liste des commandes</button>
+    <span class="separateur-vertical"></span>
+    <button disabled title="Prochaine étape (DOS505)">✏️ Modifier l'en-tête</button>
+    <button disabled title="Prochaine étape (NEG520)">＋ Ajouter une ligne</button>
+    <button disabled title="Prochaine étape">✔ Solder</button>
+    <span class="espace"></span>
+    <button disabled title="Prochaine étape (ARC105P)">🖨 ARC</button>
+</fieldset>
+
+<div class="contenu contenu-detail fiche-commande">
+    @if (chargement)
+    {
+        <p class="compteur"><span class="chargement">Chargement de la commande…</span></p>
+    }
+    else if (fiche is null)
+    {
+        <div class="carte carte-message">
+            <p>La commande @CleCourante.Libelle n'existe pas ou ne vous est pas accessible.</p>
+            <p><button @onclick="Retour">← Liste des commandes</button></p>
+        </div>
+    }
+    else
+    {
+        var e = fiche.Entete;
+        <section class="entete-commande">
+            <div class="titre-panneau">
+                <span class="sur-titre">Commande @TypesCommande.Libelle(e.TypeCommande).ToLowerInvariant()</span>
+                <span class="code-titre">@e.Cle.Libelle</span>
+                <span class="badge badge-etat etat-@Classe(e.Etat)">@Libelle(e.Etat)@(e.DateSolde is { } ds ? $" le {ds:dd/MM/yyyy}" : "")</span>
+                @if (e.SousTraitee)
+                {
+                    <span class="badge badge-alerte" title="Commande sous-traitée : elle ne peut plus être modifiée (NEG510 R3)">Sous-traitée</span>
+                }
+                @if (e.MultiSite)
+                {
+                    <span class="badge badge-appel" title="Commande synchronisée avec un site distant">Multi-site</span>
+                }
+                <span class="titre-designation">@e.Designation1 @e.Designation2</span>
+            </div>
+
+            <div class="indicateurs">
+                <div class="indicateur"><span class="valeur-indicateur">@Montant(e.Valeur)</span><span>valeur</span></div>
+                <div class="indicateur"><span class="valeur-indicateur">@fiche.Lignes.Count</span><span>ligne@(fiche.Lignes.Count > 1 ? "s" : "")</span></div>
+                <div class="indicateur">
+                    <span class="valeur-indicateur">@(TauxLivraison is { } t ? t.ToString("P0") : "—")</span>
+                    <span>livré</span>
+                    @if (TauxLivraison is { } taux)
+                    {
+                        <span class="avancement large"><span class="barre" style="width:@((int)(taux * 100))%"></span></span>
+                    }
+                </div>
+                <div class="indicateur"><span class="valeur-indicateur">@fiche.Livraisons.Count</span><span>BL</span></div>
+                <div class="indicateur"><span class="valeur-indicateur">@fiche.Factures.Count</span><span>facture@(fiche.Factures.Count > 1 ? "s" : "")</span></div>
+            </div>
+
+            <div class="cartes-entete">
+                <div class="carte">
+                    <h3>Client</h3>
+                    <div><b>@e.NomClient</b> <span class="discret">@e.Client</span>@if (e.Revendeur) {<span class="badge badge-appel">Revendeur</span>}</div>
+                    @Info("Facturé à", e.ClientFacture)
+                    @Info("Enseigne", e.Enseigne)
+                    @Info("Interlocuteur", e.Interlocuteur)
+                </div>
+                <div class="carte">
+                    <h3>Commande</h3>
+                    @Info("Réf. client", e.ReferenceCommandeClient)
+                    @Info("Du", Date(e.DateCommandeClient))
+                    @Info("Ouverte le", Date(e.DateOuverture))
+                    @Info("Profil", e.Profil)
+                </div>
+                <div class="carte">
+                    <h3>Livraison</h3>
+                    @Info("Date", e.SemaineLivraison != "" ? $"semaine {e.SemaineLivraison}" : Date(e.DateLivraison))
+                    @Info("Mode", e.Livraison)
+                    @Info("Port", e.Port)
+                </div>
+                <div class="carte">
+                    <h3>Commercial</h3>
+                    @Info("Représentant", e.Representant)
+                    @Info("Commission", e.TauxCommission == 0 ? "" : $"{e.TauxCommission:0.##} %")
+                    @Info("Fabricant", e.Fabricant)
+                    @Info("Catégorie", $"{e.Categorie} {e.SousCategorie}".Trim())
+                    @Info("Code vente", e.CodeVente)
+                    @Info("Remise", e.TauxRemise == 0 ? "" : $"{e.TauxRemise} %")
+                </div>
+                <div class="carte">
+                    <h3>Facturation</h3>
+                    @Info("Type", e.TypeFacturation)
+                    @Info("Règlement", e.Reglement)
+                    @Info("Devise", e.Devise)
+                    @Info("Adresse ARC", e.AdresseArc == 0 ? "" : $"n° {e.AdresseArc}")
+                    @Info("Documents", fiche.NbDocuments > 0 ? $"📎 {fiche.NbDocuments}" : "")
+                </div>
+            </div>
+        </section>
+
+        <nav class="onglets onglets-detail">
+            @foreach (var (cle, libelle, nombre) in Onglets)
+            {
+                <button class="@(cle == onglet ? "actif" : "")" @onclick="() => onglet = cle">
+                    @libelle <span class="nombre-onglet">@nombre</span>
+                </button>
+            }
+        </nav>
+
+        <div class="zone-detail">
+            @switch (onglet)
+            {
+                case "lignes":
+                    @TableLignes
+                    break;
+                case "livraisons":
+                    @TableLivraisons
+                    break;
+                case "factures":
+                    @TableFactures
+                    break;
+                case "journal":
+                    @TableJournal
+                    break;
+                default:
+                    @TableHistorique
+                    break;
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+    [Parameter] public string Cle { get; set; } = "";
+
+    private CleCommande CleCourante => new(Numero, Cle.ToUpperInvariant());
+
+    private FicheCommande? fiche;
+    private bool chargement = true;
+    private string onglet = "lignes";
+    private readonly HashSet<int> lignesOuvertes = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        chargement = true;
+        lignesOuvertes.Clear();
+        try
+        {
+            fiche = await Consultation.LireAsync(CleCourante);
+            Etat.Selection = CleCourante;
+        }
+        catch (Exception ex)
+        {
+            fiche = null;
+            Notifications.Erreur($"Lecture de la commande impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    private void Retour() => Navigation.NavigateTo("ventes/commandes");
+
+    private IEnumerable<(string Cle, string Libelle, int Nombre)> Onglets =>
+    [
+        ("lignes", "Lignes", fiche!.Lignes.Count),
+        ("livraisons", "Livraisons", fiche.Livraisons.Count),
+        ("factures", "Factures", fiche.Factures.Count),
+        ("journal", "Journal des lignes", fiche.Journal.Count),
+        ("historique", "Historique", fiche.Historique.Count),
+    ];
+
+    // Part livrée des lignes fermes (même règle que la liste)
+    private decimal? TauxLivraison
+    {
+        get
+        {
+            var fermes = fiche!.Lignes.Select(l => l.Ligne).Where(l => !l.ALaDemande && l.Quantite > 0).ToList();
+            var total = fermes.Sum(l => (decimal)l.Quantite);
+            return total == 0 ? null : fermes.Sum(l => (decimal)Math.Min(l.QuantiteLivree, l.Quantite)) / total;
+        }
+    }
+
+    private void BasculerLigne(int n)
+    {
+        if (!lignesOuvertes.Remove(n)) lignesOuvertes.Add(n);
+    }
+
+    // ---------- Onglets ----------
+    private RenderFragment TableLignes => __builder =>
+    {
+        <table class="grille grille-fiche">
+            <thead>
+                <tr>
+                    <th class="col-chevron"></th>
+                    <th class="nombre">L.</th><th>Article</th><th>Désignation</th><th>Statut</th><th>Livraison</th>
+                    <th class="nombre">Quantité</th><th class="nombre">Livrée</th><th class="nombre">Facturée</th><th class="nombre">Reste</th>
+                    <th class="nombre">Prix</th><th class="centre">UV</th><th class="nombre">Valeur</th><th>Adresse de livraison</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var lf in fiche!.Lignes)
+                {
+                    var l = lf.Ligne;
+                    var ouverte = lignesOuvertes.Contains(l.NumeroLigne);
+                    <tr class="@(l.Soldee ? "ligne-soldee" : "")" @onclick="() => BasculerLigne(l.NumeroLigne)">
+                        <td class="col-chevron"><button type="button" class="chevron @(ouverte ? "ouvert" : "")" title="Détail de la ligne">▸</button></td>
+                        <td class="nombre">@l.NumeroLigne</td>
+                        <td><b>@(l.Indice != "" ? $"{l.Article} {l.Indice}" : l.Article)</b>@if (l.ReferenceImprime != "") {<span class="discret"> · @l.ReferenceImprime</span>}</td>
+                        <td title="@string.Join("\n", new[] { l.Designation, l.Texte }.Where(t => t != ""))">@l.Designation</td>
+                        <td>
+                            @if (l.ALaDemande) { <span class="badge badge-demande">À la demande</span> }
+                            else if (l.EstAppel) { <span class="badge badge-appel" title="Appel de la ligne @lf.LigneOrigine">Appel @l.NumeroAppel</span> }
+                            @if (l.Soldee) { <span class="badge badge-etat etat-soldee">Soldée</span> }
+                        </td>
+                        <td>@(l.ALaDemande ? "" : Date(l.DateLivraison))@if (lf.DateConfirmee is { } dc && dc != l.DateLivraison) {<span class="discret" title="Date confirmée"> → @Date(dc)</span>}</td>
+                        <td class="nombre">@Entier(l.Quantite)</td>
+                        <td class="nombre">@Entier(l.QuantiteLivree)</td>
+                        <td class="nombre">@Entier(l.QuantiteFacturee)</td>
+                        <td class="nombre">@Entier(l.ResteALivrer)</td>
+                        <td class="nombre">@l.Prix</td>
+                        <td class="centre">@l.Unite</td>
+                        <td class="nombre"><b>@Montant(l.Valeur)</b></td>
+                        <td title="@lf.AdresseLivraison">@lf.AdresseLivraison</td>
+                    </tr>
+                    @if (ouverte)
+                    {
+                        <tr class="detail-ligne">
+                            <td></td>
+                            <td colspan="13">
+                                <div class="champs-detail">
+                                    @Info("Texte", l.Texte)
+                                    @Info("Commentaires", lf.Commentaires)
+                                    @Info("N° d'appel", l.NumeroAppel)
+                                    @Info("Ligne d'origine", lf.LigneOrigine == 0 ? "" : lf.LigneOrigine.ToString())
+                                    @Info("Qté appelée", Entier(lf.QuantiteAppelee))
+                                    @Info("Maxi livrable", Entier(lf.MaxiLivrable))
+                                    @Info("Prix de cession", Montant(lf.PrixCession))
+                                    @Info("Commission", lf.TauxCommission == 0 ? "" : $"{lf.TauxCommission:0.##} %")
+                                    @Info("Remise", lf.TauxRemise == 0 ? "" : $"{lf.TauxRemise} %")
+                                    @Info("Devis", lf.Devis)
+                                    @Info("Facturé à", lf.ClientFacture)
+                                    @Info("Norme", l.Norme)
+                                    @Info("N° produit", l.Produit == 0 ? "" : l.Produit.ToString())
+                                    @Info("Catégorie", $"{l.Categorie} {l.SousCategorie}".Trim())
+                                    @Info("Emplacement", lf.Emplacement)
+                                    @Info("Commentaires (évts)", l.NbCommentaires == 0 ? "" : l.NbCommentaires.ToString())
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                @if (fiche.Lignes.Count == 0)
+                {
+                    <tr class="ligne-vide"><td colspan="14">Cette commande n'a pas encore de ligne.</td></tr>
+                }
+            </tbody>
+            @if (fiche.Lignes.Count > 1)
+            {
+                <tfoot>
+                    <tr class="ligne-total">
+                        <td colspan="6">Total</td>
+                        <td class="nombre">@Entier(fiche.Lignes.Sum(l => l.Ligne.Quantite))</td>
+                        <td class="nombre">@Entier(fiche.Lignes.Sum(l => l.Ligne.QuantiteLivree))</td>
+                        <td class="nombre">@Entier(fiche.Lignes.Sum(l => l.Ligne.QuantiteFacturee))</td>
+                        <td class="nombre">@Entier(fiche.Lignes.Sum(l => l.Ligne.ResteALivrer))</td>
+                        <td colspan="2"></td>
+                        <td class="nombre">@Montant(fiche.Entete.Valeur)</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            }
+        </table>
+    };
+
+    private RenderFragment TableLivraisons => __builder =>
+    {
+        if (fiche!.Livraisons.Count == 0)
+        {
+            <p class="aide">Aucun bon de livraison pour cette commande.</p>
+            return;
+        }
+        <div class="liste-bl">
+            @foreach (var bl in fiche.Livraisons)
+            {
+                <div class="carte carte-bl">
+                    <div class="titre-bl">
+                        <b>BL @bl.BonLivraison</b>
+                        <span>@(bl.DateExpedition is { } d ? $"expédié le {d:dd/MM/yyyy}" : "non expédié")</span>
+                        @if (bl.Facture)
+                        {
+                            <span class="badge badge-etat etat-livree">Facturé@(bl.NumeroFacture != 0 ? $" n° {bl.NumeroFacture}" : "")@(bl.DateFacture is { } df ? $" le {df:dd/MM/yyyy}" : "")</span>
+                        }
+                        else
+                        {
+                            <span class="badge badge-etat etat-partielle">À facturer</span>
+                        }
+                        <span class="discret">@bl.Adresse</span>
+                    </div>
+                    <table class="grille grille-compacte">
+                        <thead><tr><th class="nombre">L. cde</th><th>Article</th><th>Désignation</th><th class="nombre">Quantité</th></tr></thead>
+                        <tbody>
+                            @foreach (var l in bl.Lignes)
+                            {
+                                <tr><td class="nombre">@l.LigneCommande</td><td>@l.Article</td><td>@l.Designation</td><td class="nombre">@Entier(l.Quantite)</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    };
+
+    private RenderFragment TableFactures => __builder =>
+    {
+        <table class="grille grille-fiche grille-etroite">
+            <thead><tr><th class="nombre">N° facture</th><th>Date</th><th class="nombre">Quantité</th><th class="nombre">Montant HT</th></tr></thead>
+            <tbody>
+                @foreach (var f in fiche!.Factures)
+                {
+                    <tr><td class="nombre">@f.Numero</td><td>@Date(f.Date)</td><td class="nombre">@Entier(f.Quantite)</td><td class="nombre">@Montant(f.Montant)</td></tr>
+                }
+                @if (fiche.Factures.Count == 0)
+                {
+                    <tr class="ligne-vide"><td colspan="4">Aucune facture pour cette commande.</td></tr>
+                }
+            </tbody>
+        </table>
+    };
+
+    private RenderFragment TableJournal => __builder =>
+    {
+        <table class="grille grille-fiche">
+            <thead>
+                <tr><th>Date</th><th>Opération</th><th class="nombre">Ligne</th><th>Profil</th><th>Article</th><th class="nombre">Quantité</th><th class="nombre">Prix</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var j in fiche!.Journal)
+                {
+                    <tr>
+                        <td>@(j.Date?.ToString("dd/MM/yyyy HH:mm") ?? "")</td>
+                        <td><span class="badge badge-journal journal-@j.Type.ToLowerInvariant()">@j.LibelleType</span></td>
+                        <td class="nombre">@j.Ligne</td>
+                        <td>@j.Profil</td>
+                        <td>@Avant(j.AncienArticle, j.Article)</td>
+                        <td class="nombre">@Avant(Entier(j.AncienneQuantite), Entier(j.Quantite))</td>
+                        <td class="nombre">@Avant(Montant(j.AncienPrix), Montant(j.Prix))</td>
+                    </tr>
+                }
+                @if (fiche.Journal.Count == 0)
+                {
+                    <tr class="ligne-vide"><td colspan="7">Aucun mouvement enregistré.</td></tr>
+                }
+            </tbody>
+        </table>
+    };
+
+    private RenderFragment TableHistorique => __builder =>
+    {
+        <table class="grille grille-fiche grille-etroite">
+            <thead><tr><th>Date</th><th>Type</th><th>Initiales</th></tr></thead>
+            <tbody>
+                @foreach (var h in fiche!.Historique)
+                {
+                    <tr><td>@(h.Date?.ToString("dd/MM/yyyy HH:mm") ?? "")</td><td>@TypeHistorique(h.Type)</td><td>@h.Initiales</td></tr>
+                }
+                @if (fiche.Historique.Count == 0)
+                {
+                    <tr class="ligne-vide"><td colspan="3">Aucun historique.</td></tr>
+                }
+            </tbody>
+        </table>
+    };
+
+    // ---------- Mise en forme ----------
+    private static RenderFragment Info(string libelle, string? valeur) => __builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(valeur))
+        {
+            <div class="info"><span class="libelle-info">@libelle</span> <span class="valeur-info">@valeur</span></div>
+        }
+    };
+
+    // « ancien → nouveau » quand la valeur a changé (modification), sinon la valeur
+    private static RenderFragment Avant(string ancien, string nouveau) => __builder =>
+    {
+        if (ancien != "" && ancien != nouveau)
+        {
+            <span class="discret ancien">@ancien</span> <span>→ @nouveau</span>
+        }
+        else
+        {
+            @nouveau
+        }
+    };
+
+    // Types d'historique DOS040 connus par la rétro-doc ; les autres codes sont affichés tels quels
+    private static string TypeHistorique(string t) => t switch
+    {
+        "CR" => "Création",
+        "MO" => "Modification",
+        "LV" => "Modification des lignes",
+        "SO" => "Solde",
+        "SU" => "Suppression",
+        _ => t,
+    };
+
+
+
+}

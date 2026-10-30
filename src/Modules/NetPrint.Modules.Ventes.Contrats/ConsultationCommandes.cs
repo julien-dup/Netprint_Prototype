@@ -15,6 +15,9 @@ public interface IConsultationCommandes
 
     // Recherche multicritère : une ligne par ligne de commande (NEG100), regroupées par commande
     Task<ResultatRechercheCommandes> RechercherAsync(CriteresCommandes criteres, CancellationToken ct = default);
+
+    // Fiche d'une commande (NEG510 / FEN_commandes) : null si elle n'existe pas ou n'est pas visible par le représentant imposé
+    Task<FicheCommande?> LireAsync(CleCommande cle, CancellationToken ct = default);
 }
 
 // Clé d'une commande : n° de dossier (RDOSS) + lettre-clé (CCDCLE), souvent un chiffre : affichée « 68916/9 »
@@ -160,3 +163,104 @@ public sealed record LigneCommandeListe(
 {
     public string Prix => Gratuite ? "Gratuit" : PrixADefinir ? "Prix à définir" : PrixUnitaire == 0 ? "" : PrixUnitaire.ToString("N2");
 }
+
+// ---------------------------------------------------------------------
+// Fiche d'une commande (NEG510 : menu de la commande ; FEN_commandes de HistoriqueDossiers)
+// ---------------------------------------------------------------------
+public sealed record FicheCommande(
+    EnteteCommande Entete,
+    IReadOnlyList<LigneFiche> Lignes,
+    IReadOnlyList<LivraisonCommande> Livraisons,
+    IReadOnlyList<FactureCommande> Factures,
+    IReadOnlyList<EvenementLigne> Journal,          // NEG100E : créations, modifications, suppressions de lignes
+    IReadOnlyList<HistoriqueDossier> Historique,    // DOS040 : créations, modifications, soldes du dossier
+    int NbDocuments,
+    DroitsCommandes Droits);
+
+public static class TypesFacturation
+{
+    public static string Libelle(string code) => code switch
+    {
+        "1" => "À chaque livraison",
+        "2" => "En totalité",
+        "3" => "En totalité, multi-échéance",
+        _ => code,
+    };
+}
+
+public sealed record EnteteCommande(
+    CleCommande Cle,
+    string TypeCommande,
+    string TypeFacturation,
+    string Client,                    // « 411100 376 »
+    string NomClient,
+    string ClientFacture,             // « 411100 376 NOM » s'il diffère du client
+    string Enseigne,
+    string Designation1,
+    string Designation2,
+    string ReferenceCommandeClient,
+    string Interlocuteur,
+    DateOnly? DateOuverture,
+    DateOnly? DateCommandeClient,
+    DateOnly? DateLivraison,
+    string SemaineLivraison,          // « S45/2026 » si la livraison est donnée à la semaine
+    string Representant,
+    decimal TauxCommission,
+    string Fabricant,
+    string Categorie,
+    string SousCategorie,
+    string Profil,
+    string Livraison,                 // « À livrer » / « Enlèvement par le client »
+    string Port,                      // CCPORT D / A / F
+    string Reglement,                 // mode + échéance
+    string Devise,
+    string CodeVente,                 // code ligne de vente par défaut (CCTYPV)
+    int TauxRemise,                   // CTXRM
+    bool Revendeur,                   // CCRCVD
+    int AdresseArc,                   // n° d'adresse d'envoi de l'ARC (CCNAEA)
+    bool SousTraitee,                // CCOP11 = 'O' : plus modifiable
+    bool MultiSite,                   // CCOP10 = 'O' : synchronisée avec un site distant
+    DateOnly? DateSolde,
+    EtatCommande Etat,
+    decimal Valeur)
+{
+    public bool Soldee => Etat == EtatCommande.Soldee;
+}
+
+// Ligne de la fiche : la ligne de liste et ses compléments
+public sealed record LigneFiche(
+    LigneCommandeListe Ligne,
+    string AdresseLivraison,
+    DateOnly? DateConfirmee,
+    string Commentaires,
+    decimal TauxCommission,
+    int TauxRemise,
+    int LigneOrigine,                 // appel de livraison : n° de la ligne « à la demande »
+    int QuantiteAppelee,              // ligne « à la demande » : total de ses appels
+    int MaxiLivrable,
+    decimal PrixCession,
+    string Devis,                     // « 12345/0/1 »
+    string ClientFacture,
+    string Emplacement);
+
+public sealed record LivraisonCommande(
+    int BonLivraison,
+    DateOnly? DateExpedition,
+    string Adresse,
+    bool Facture,
+    int NumeroFacture,
+    DateOnly? DateFacture,
+    IReadOnlyList<LigneLivree> Lignes);
+
+public sealed record LigneLivree(int LigneCommande, string Article, string Designation, int Quantite);
+
+public sealed record FactureCommande(int Numero, DateOnly? Date, int Quantite, decimal Montant);
+
+public sealed record EvenementLigne(
+    DateTime? Date, string Type, int Ligne, string Profil,
+    string AncienArticle, string Article, int AncienneQuantite, int Quantite, decimal AncienPrix, decimal Prix)
+{
+    public string LibelleType => Type switch { "C" => "Création", "M" => "Modification", "S" => "Suppression", _ => Type };
+}
+
+public sealed record HistoriqueDossier(DateTime? Date, string Type, string Initiales);

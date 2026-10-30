@@ -63,3 +63,41 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .avancement { display: inline-block; width: 60px; height: 6px; margin-right: 6px; border-radius: 3px; background: #e6eaf0; vertical-align: middle; overflow: hidden; }
 .avancement .barre { display: block; height: 100%; background: var(--vert); border-radius: 3px; }
 .taux { font-size: 12px; color: var(--texte-2, #5b6475); font-variant-numeric: tabular-nums; }
+
+/* ---------- Fiche d'une commande ---------- */
+.fiche-commande .discret { color: var(--texte-3, #8a94a6); font-weight: normal; }
+.entete-commande { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--bord); border-radius: var(--rayon); }
+.entete-commande .titre-designation { flex: 1 1 100%; color: var(--texte-2, #5b6475); font-size: 14px; }
+.badge-alerte { background: var(--danger-clair); color: var(--danger); }
+
+.indicateurs { display: flex; gap: 10px; flex-wrap: wrap; }
+.indicateur {
+    display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 110px; padding: 8px 12px;
+    border-radius: var(--rayon); background: #f6f8fc; font-size: 12px; color: var(--texte-2, #5b6475);
+}
+.indicateur .valeur-indicateur { font-size: 18px; font-weight: 700; color: var(--texte); font-variant-numeric: tabular-nums; }
+.avancement.large { width: 100%; margin: 2px 0 0; }
+
+.cartes-entete { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.cartes-entete .carte { gap: 4px; }
+.info { display: flex; gap: 6px; align-items: baseline; font-size: 13px; }
+.info .libelle-info { margin: 0; min-width: 92px; }
+.info .valeur-info { white-space: pre-line; }
+
+.nombre-onglet { margin-left: 4px; padding: 0 6px; border-radius: 999px; background: #eef2f8; font-size: 11px; color: var(--texte-2, #5b6475); }
+.onglets button.actif .nombre-onglet { background: var(--accent-clair); color: var(--accent-fonce); }
+
+.grille-fiche { table-layout: auto; }
+.grille-fiche td { white-space: nowrap; }
+.grille-etroite { width: auto; min-width: 480px; }
+.grille tbody tr.detail-ligne { background: #f8fafd; cursor: default; }
+.grille tbody tr.detail-ligne td { white-space: normal; }
+.champs-detail { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; padding: 6px 0; }
+.grille tfoot tr.ligne-total td { font-weight: 700; border-top: 2px solid var(--bord-fort); background: #f6f8fc; }
+
+.liste-bl { display: flex; flex-direction: column; gap: 10px; }
+.carte-bl .titre-bl { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.badge-journal.journal-c { background: #dcfce7; color: var(--vert); }
+.badge-journal.journal-m { background: #e0edff; color: var(--accent-fonce); }
+.badge-journal.journal-s { background: var(--danger-clair); color: var(--danger); }
+.ancien { text-decoration: line-through; }

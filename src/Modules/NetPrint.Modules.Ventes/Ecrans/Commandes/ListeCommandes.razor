@@ -6,9 +6,11 @@
    Pastilles d'état (en cours, partiellement livrée, livrée, soldée) : filtre rapide sur la liste chargée.
    Prochaines étapes : fiche de la commande, création (DOS505), lignes (NEG520).
    ===================================================================== *@
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
 @inject IConsultationCommandes Consultation
 @inject EtatListeCommandes Etat
 @inject NetPrint.Socle.Session.IUtilisateurCourant UtilisateurCourant
+@inject NavigationManager Navigation
 @inject Dialogues Dialogues
 @inject Notifications Notifications
 @inject IPreferencesGrilles PreferencesGrilles
@@ -31,7 +33,7 @@
         <button title="Replier toutes les commandes" @onclick="() => Etat.Depliees.Clear()">⊟ Tout replier</button>
     }
     <span class="espace"></span>
-    <button disabled="@(Selection is null)" title="Prochaine étape (fiche de la commande)">🔎 Ouvrir la commande</button>
+    <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche de la commande sélectionnée (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir la commande</button>
 </fieldset>
 
 <form class="panneau-criteres" @onsubmit="RechercherAsync">
@@ -74,7 +76,7 @@
         <div class="ligne-champs">
             <input type="number" class="num3" @bind="C.Representant" disabled="@(contexte?.RepresentantImpose is not null)"
                    title="@(contexte?.RepresentantImpose is not null ? "Vous ne voyez que vos commandes" : null)" />
-            <BoutonRecherche Liste="ListeChoix.Representant" Disabled="@(contexte?.RepresentantImpose is not null)" OnChoix='l => C.Representant = Entier(l.Code)' />
+            <BoutonRecherche Liste="ListeChoix.Representant" Disabled="@(contexte?.RepresentantImpose is not null)" OnChoix='l => C.Representant = EntierCode(l.Code)' />
         </div>
     </div>
     <label class="champ">
@@ -244,7 +246,7 @@
                                 var cde = rg.Commande;
                                 var depliee = Etat.Depliees.Contains(cde.Cle);
                                 <tr class="@(Etat.Selection == cde.Cle ? "selection" : "") commande-@Classe(cde.Etat)"
-                                    @onclick="() => Etat.Selection = cde.Cle" @ondblclick="() => Basculer(cde)">
+                                    @onclick="() => Etat.Selection = cde.Cle" @ondblclick="() => Ouvrir(cde.Cle)">
                                     <td class="col-chevron" @onclick="() => Basculer(cde)" @onclick:stopPropagation="true">
                                         @if (cde.NbLignes > 0)
                                         {
@@ -260,7 +262,7 @@
                             else
                             {
                                 var l = rg.Ligne;
-                                <tr class="sous-ligne @(l.Soldee ? "ligne-soldee" : "")" @onclick="() => Etat.Selection = rg.Commande.Cle">
+                                <tr class="sous-ligne @(l.Soldee ? "ligne-soldee" : "")" @onclick="() => Etat.Selection = rg.Commande.Cle" @ondblclick="() => Ouvrir(rg.Commande.Cle)">
                                     <td></td>
                                     <td colspan="@colonnesCommandes.Length">@ResumeLigne(l)</td>
                                 </tr>
@@ -293,7 +295,7 @@
                     <tbody>
                         <Virtualize Items="lignesAffichees" Context="la" ItemSize="36" OverscanCount="20" SpacerElement="tr">
                             <tr class="@(Etat.Selection == la.Commande.Cle ? "selection" : "") @(la.Ligne.Soldee ? "ligne-soldee" : "") commande-@Classe(la.Commande.Etat)"
-                                @onclick="() => Etat.Selection = la.Commande.Cle">
+                                @onclick="() => Etat.Selection = la.Commande.Cle" @ondblclick="() => Ouvrir(la.Commande.Cle)">
                                 @foreach (var c in colonnesLignes)
                                 {
                                     <td class="@c.Classe" title="@(c.Bulle?.Invoke(la))">@c.Texte(la)</td>
@@ -495,11 +497,11 @@
 
     private void ChoisirClient(LigneChoix l)
     {
-        C.CompteGeneral = Entier(l.Codes[0]);
-        C.CompteClient = l.Codes.Count > 1 ? Entier(l.Codes[1]) : null;
+        C.CompteGeneral = EntierCode(l.Codes[0]);
+        C.CompteClient = l.Codes.Count > 1 ? EntierCode(l.Codes[1]) : null;
     }
 
-    private static int? Entier(string code) => int.TryParse(code, out var n) ? n : null;
+    private static int? EntierCode(string code) => int.TryParse(code, out var n) ? n : null;
 
     // ---------- Vue, dépliage, état ----------
     private async Task ChangerVueAsync(string vue)
@@ -510,6 +512,13 @@
         Actualiser();
         Etat.GrilleCommandes.Preferences.Valeurs[EtatListeCommandes.DefautVue] = vue;
         await PreferencesGrilles.EcrireAsync(Etat.GrilleCommandes.Nom, Etat.GrilleCommandes.Preferences);
+    }
+
+    private void Ouvrir(CleCommande? cle)
+    {
+        if (cle is null) return;
+        Etat.Selection = cle;
+        Navigation.NavigateTo($"ventes/commandes/{cle.Numero}/{Uri.EscapeDataString(cle.Cle)}");
     }
 
     private void Basculer(CommandeListe c)
@@ -678,28 +687,10 @@
         }
     };
 
-    private static string ArticleIndice(LigneCommandeListe l) => l.Indice != "" ? $"{l.Article} {l.Indice}" : l.Article;
 
     private static string BulleLigne(LigneCommandeListe l) =>
         string.Join("\n", new[] { l.Designation, l.Texte }.Where(t => t != ""));
 
-    private static string Libelle(EtatCommande e) => e switch
-    {
-        EtatCommande.EnCours => "En cours",
-        EtatCommande.PartiellementLivree => "Partiellement livrée",
-        EtatCommande.Livree => "Livrée",
-        _ => "Soldée",
-    };
 
-    private static string Classe(EtatCommande e) => e switch
-    {
-        EtatCommande.EnCours => "encours",
-        EtatCommande.PartiellementLivree => "partielle",
-        EtatCommande.Livree => "livree",
-        _ => "soldee",
-    };
 
-    private static string Entier(int v) => v == 0 ? "" : v.ToString("N0");
-    private static string Montant(decimal v) => v == 0 ? "" : v.ToString("N2");
-    private static string Date(DateOnly? d) => d?.ToString("dd/MM/yyyy") ?? "";
 }

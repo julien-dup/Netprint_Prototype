@@ -76,6 +76,29 @@ public class ConsultationCommandesDb2Tests(ITestOutputHelper sortie)
             Assert.NotNull(await Donnees.RechercherAsync(BaseDeTest.Societe, new CriteresCommandes { Article = article, TypeCommande = "4" }, default));
     }
 
+    // Fiche : la plus récente commande soldée du client (avec BL et factures) et une commande en cours
+    [FactDb2]
+    public async Task Fiches_du_client_d_essai()
+    {
+        var commandes = ConsultationCommandesService.Regrouper(await Donnees.RechercherAsync(BaseDeTest.Societe, Client(), default));
+        foreach (var c in new[] { commandes.FirstOrDefault(c => c.Soldee), commandes.FirstOrDefault(c => !c.Soldee) }.OfType<CommandeListe>())
+        {
+            var brut = await Donnees.LireFicheAsync(BaseDeTest.Societe, c.Cle, default);
+            Assert.NotNull(brut);
+            var fiche = ConsultationCommandesService.VersFiche(brut, DroitsCommandes.Tous);
+            Assert.Equal(c.Cle, fiche.Entete.Cle);
+            Assert.True(fiche.Lignes.Count >= c.NbLignes);   // la fiche montre aussi les lignes « à la demande » non mouvementées
+            sortie.WriteLine($"{c.Numero} {fiche.Entete.Etat} : {fiche.Lignes.Count} lignes, {fiche.Livraisons.Count} BL " +
+                $"({fiche.Livraisons.Sum(l => l.Lignes.Count)} lignes livrées), {fiche.Factures.Count} factures, " +
+                $"{fiche.Journal.Count} mouvements, {fiche.Historique.Count} historiques ; règlement « {fiche.Entete.Reglement} », " +
+                $"facturation « {fiche.Entete.TypeFacturation} », {fiche.Entete.Livraison}, {fiche.Entete.Port}");
+        }
+    }
+
+    [FactDb2]
+    public async Task Fiche_inexistante() =>
+        Assert.Null(await Donnees.LireFicheAsync(BaseDeTest.Societe, new CleCommande(99999, "Z"), default));
+
     [FactDb2]
     public async Task Representant_et_droits_lisibles()
     {

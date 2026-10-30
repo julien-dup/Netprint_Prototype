@@ -32,6 +32,47 @@ internal static class RequeteListeCommandes
         """;
 
     public const int NbTextes = 5;
+    public const int NbColonnes = 57;   // colonnes de liste ; la fiche ajoute ColonnesFiche à la suite
+
+    // En-tête AB001 et lignes NEG100 avec leurs références. La liste ne garde que les lignes fermes et les lignes
+    // « à la demande » mouvementées (comme HistoriqueDossiers) ; la fiche les montre toutes.
+    private static string Source(string b, bool toutesLesLignes) => $"""
+        FROM {b}.AB001 a
+        LEFT OUTER JOIN {b}.NEG100 b ON b.RSOC = a.RSOC AND b.RDOSS = a.RDOSS AND b.DNDCLE = a.CCDCLE
+        {(toutesLesLignes ? "" : "     AND (b.DNSTAT = '1' OR (b.DNSTAT = '3' AND (b.DNQTEC > 0 OR b.DNQTEL > 0)))")}
+        LEFT OUTER JOIN {b}.SPF010 c ON c.RSOC = b.RSOC AND c.AARTIC = b.DNART AND c.AINDIC = b.DNIND
+        LEFT OUTER JOIN {b}.AA0003 e ON e.RSOC = a.RSOC AND e.RGEN = a.RGEN AND e.RCLI = a.RCLI
+        LEFT OUTER JOIN {b}.AA0003 f1 ON f1.RSOC = b.RSOC AND f1.RGEN = b.DNGENF AND f1.RCLI = b.DNCLIF AND b.DNCLIF <> 0
+        LEFT OUTER JOIN {b}.AA0003 f2 ON f2.RSOC = a.RSOC AND f2.RGEN = a.CGENF AND f2.RCLI = a.CCLIF AND a.CCLIF <> 0
+             AND (a.CGENF <> a.RGEN OR a.CCLIF <> a.RCLI)
+        LEFT OUTER JOIN {b}.NEG100T t ON t.RSOC = b.RSOC AND t.RDOSS = b.RDOSS AND t.DNDCLE = b.DNDCLE AND t.DNNLIG = b.DNNLIG
+        LEFT OUTER JOIN {b}.AA00083 u ON u.RSOC = b.RSOC AND u.RARG = b.DNUV AND u.RTABLE = 'UV' AND u.TTAG <> '*'
+        LEFT OUTER JOIN {b}.B000F r ON r.RSOC = a.RSOC AND r.RREPR = a.CCREP AND r.ITAG <> '*'
+        """;
+
+    // Compléments de la fiche (en-tête puis ligne), lus après les colonnes de liste : voir ConsultationCommandesDb2.Fiche
+    private const string ColonnesFiche = """
+        a.CCFACT, a.CCNINT, a.CCDTSA, a.CCDTSS, a.CCTXCO, a.CCAT, a.CCSCAT, a.CCPROF, a.CCECAL, a.CCPORT,
+        a.CCMOD, rg.TLIB1, a.CCECH, a.CCLE, a.CCART, a.CCCDEV, a.CCOP11, a.CCOP10, a.CGENF, a.CCLIF, f2.CNOM,
+        b.DNRS, b.DNPOST, b.DNVILL, b.DNLIGA, b.DNDATB, b.DNCOMM, b.DNCOM2, b.DNCOM3, b.DNTXCO, b.DNTXRE,
+        b.DNQTEA, b.DNQMAX, b.DNPXCE, b.DNDEV, b.DNVERS, b.DNHYPO, b.DNGENF, b.DNCLIF, f1.CNOM, b.DEMP,
+        a.CCTYPV, a.CCNAEA, a.CTXRM, a.CCRCVD
+        """;
+
+    // Fiche : une commande de type 3 ou 4, toutes ses lignes, dans l'ordre des n° de ligne
+    public static Requete ConstruireFiche(string bib, int societe, CleCommande cle)
+    {
+        var b = BaseDb2.Bibliotheque(bib);
+        var sql = $"""
+            SELECT {Colonnes.Replace("{b}", b)},
+            {ColonnesFiche}
+            {Source(b, toutesLesLignes: true)}
+            LEFT OUTER JOIN {b}.AA00081 rg ON rg.RSOC = a.RSOC AND rg.RTABLE = 'RG' AND rg.RARG = a.CCMOD AND rg.TTAG <> '*'
+            WHERE a.RSOC = ? AND a.RDOSS = ? AND a.CCDCLE = ? AND a.CCTYPC IN ('3', '4')
+            ORDER BY b.DNNLIG
+            """;
+        return new Requete(sql, [societe, cle.Numero, cle.Cle]);
+    }
 
     public static Requete Construire(string bib, int societe, CriteresCommandes c)
     {
@@ -39,17 +80,7 @@ internal static class RequeteListeCommandes
         var parametres = new List<object?>();
         var sql = new StringBuilder($"""
             SELECT {Colonnes.Replace("{b}", b)}
-            FROM {b}.AB001 a
-            LEFT OUTER JOIN {b}.NEG100 b ON b.RSOC = a.RSOC AND b.RDOSS = a.RDOSS AND b.DNDCLE = a.CCDCLE
-                 AND (b.DNSTAT = '1' OR (b.DNSTAT = '3' AND (b.DNQTEC > 0 OR b.DNQTEL > 0)))
-            LEFT OUTER JOIN {b}.SPF010 c ON c.RSOC = b.RSOC AND c.AARTIC = b.DNART AND c.AINDIC = b.DNIND
-            LEFT OUTER JOIN {b}.AA0003 e ON e.RSOC = a.RSOC AND e.RGEN = a.RGEN AND e.RCLI = a.RCLI
-            LEFT OUTER JOIN {b}.AA0003 f1 ON f1.RSOC = b.RSOC AND f1.RGEN = b.DNGENF AND f1.RCLI = b.DNCLIF AND b.DNCLIF <> 0
-            LEFT OUTER JOIN {b}.AA0003 f2 ON f2.RSOC = a.RSOC AND f2.RGEN = a.CGENF AND f2.RCLI = a.CCLIF AND a.CCLIF <> 0
-                 AND (a.CGENF <> a.RGEN OR a.CCLIF <> a.RCLI)
-            LEFT OUTER JOIN {b}.NEG100T t ON t.RSOC = b.RSOC AND t.RDOSS = b.RDOSS AND t.DNDCLE = b.DNDCLE AND t.DNNLIG = b.DNNLIG
-            LEFT OUTER JOIN {b}.AA00083 u ON u.RSOC = b.RSOC AND u.RARG = b.DNUV AND u.RTABLE = 'UV' AND u.TTAG <> '*'
-            LEFT OUTER JOIN {b}.B000F r ON r.RSOC = a.RSOC AND r.RREPR = a.CCREP AND r.ITAG <> '*'
+            {Source(b, toutesLesLignes: false)}
             WHERE a.RSOC = ?
             """);
         parametres.Add(societe);

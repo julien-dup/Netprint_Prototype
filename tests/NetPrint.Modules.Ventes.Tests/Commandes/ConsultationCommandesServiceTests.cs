@@ -266,6 +266,82 @@ public class ConsultationCommandesServiceTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.RechercherAsync(new CriteresCommandes { Numero = 1 }));
     }
 
+    // ---------- Fiche ----------
+    [Fact]
+    public async Task Fiche_introuvable()
+    {
+        var service = new ConsultationCommandesService(new SourceFactice(), new UtilisateurFactice());
+        Assert.Null(await service.LireAsync(new CleCommande(1, "A")));
+    }
+
+    [Fact]
+    public async Task Fiche_d_un_autre_representant_invisible_si_representant_impose()
+    {
+        var source = new SourceFactice { RepresentantImpose = 99, Fiche = Fiche(Brut(1, "A", 1)) };   // commande du représentant 12
+        Assert.Null(await new ConsultationCommandesService(source, new UtilisateurFactice()).LireAsync(new CleCommande(1, "A")));
+    }
+
+    [Fact]
+    public async Task Fiche_du_representant_impose_visible_et_cle_en_majuscules()
+    {
+        var source = new SourceFactice { RepresentantImpose = 12, Fiche = Fiche(Brut(1, "A", 1)) };
+        var fiche = await new ConsultationCommandesService(source, new UtilisateurFactice()).LireAsync(new CleCommande(1, " a "));
+        Assert.NotNull(fiche);
+        Assert.Equal("A", source.DerniereCle!.Cle);
+    }
+
+    [Fact]
+    public void Mise_en_forme_de_la_fiche()
+    {
+        var brut = Fiche(Brut(1, "A", 1) with { Dnpus = 2, Dnqtec = 100, Tnum = 1 }, Brut(1, "A", 2) with { Dnstat = "3" }) with { };
+        brut = brut with
+        {
+            Entete = brut.Entete with
+            {
+                Ccfact = "2", Ccecal = "E", Ccport = "F", Ccdtsa = 2026, Ccdtss = 45, Cgenf = 411000, Cclif = 99,
+                NomFactureEntete = "CENTRALE", Ccop11 = "O", Ccrcvd = "O", Ctxrm = 5,
+            },
+        };
+        var f = ConsultationCommandesService.VersFiche(brut, DroitsCommandes.Tous);
+        Assert.Equal("En totalité", f.Entete.TypeFacturation);
+        Assert.Equal("Enlèvement par le client", f.Entete.Livraison);
+        Assert.Equal("Franco", f.Entete.Port);
+        Assert.Equal("S45/2026", f.Entete.SemaineLivraison);
+        Assert.Equal("411000 99 CENTRALE", f.Entete.ClientFacture);
+        Assert.True(f.Entete.SousTraitee);
+        Assert.True(f.Entete.Revendeur);
+        Assert.Equal(5, f.Entete.TauxRemise);
+        Assert.Equal(200m, f.Entete.Valeur);
+        Assert.Equal(2, f.Lignes.Count);
+        Assert.True(f.Lignes[1].Ligne.ALaDemande);
+    }
+
+    [Fact]
+    public void Client_facture_identique_au_client_non_affiche()
+    {
+        var brut = Fiche(Brut(1, "A", 1));
+        brut = brut with { Entete = brut.Entete with { Cgenf = 411000, Cclif = 1234 } };
+        Assert.Equal("", ConsultationCommandesService.VersFiche(brut, DroitsCommandes.Tous).Entete.ClientFacture);
+    }
+
+    [Theory]
+    [InlineData("Virement", "VI", 30, 10, 0, "Virement · 30 jours, le 10")]
+    [InlineData("", "LCR", 60, 0, 31, "LCR · 60 jours, arrêté au 31")]
+    [InlineData("Chèque", "CH", 0, 0, 0, "Chèque")]
+    [InlineData("", "", 0, 0, 0, "")]
+    public void Reglement(string libelle, string mode, int jours, int le, int arrete, string attendu)
+    {
+        var e = Fiche(Brut(1, "A", 1)).Entete with { LibReglement = libelle, Ccmod = mode, Ccech = jours, Ccle = le, Ccart = arrete };
+        Assert.Equal(attendu, ConsultationCommandesService.Reglement(e));
+    }
+
+    private static FicheBrute Fiche(params LigneCommandeBrute[] lignes) => new(
+        new ComplementEnteteBrut(lignes[0], Ccfact: "1", Ccnint: "", Ccdtsa: 0, Ccdtss: 0, Cctxco: 0, Ccat: "", Ccscat: "",
+            Ccprof: "", Ccecal: "A", Ccport: "D", Ccmod: "", LibReglement: "", Ccech: 0, Ccle: 0, Ccart: 0, Cccdev: "",
+            Ccop11: "", Ccop10: "", Cgenf: 0, Cclif: 0, NomFactureEntete: "", Cctypv: "", Ccnaea: 0, Ctxrm: 0, Ccrcvd: ""),
+        lignes.Select(l => (l, new ComplementLigneBrut("", "", "", 0, 0, "", "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "", ""))).ToList(),
+        [], [], [], []);
+
     // ---------- Jeux d'essai ----------
     private static LigneCommandeListe Ligne(int quantite, int livree, bool aLaDemande = false, bool soldee = false) =>
         new(new CleCommande(1, "A"), 1, "ART", "", "", "", "", aLaDemande, false, "", null, quantite, livree, 0,
@@ -279,12 +355,12 @@ public class ConsultationCommandesServiceTests
         Dnlori: 0, Dnappe: "", Dndliv: 0, Dnqtec: 10, Dnqtel: 0, Dnqtef: 0, Dnqter: 10, Dnpus: 0, Dnuv: "U", Dnopt2: "",
         Dnopt5: "", Tnum: 1, Dnnorm: "", Amodel: 0, Afam: "", Asfam: "", Dnsold: "", Dnccom: 0, Texte: "", NbDocuments: 0);
 
-    private sealed class UtilisateurFactice(UtilisateurConnecte? u = null) : IUtilisateurCourant
+    internal sealed class UtilisateurFactice(UtilisateurConnecte? u = null) : IUtilisateurCourant
     {
         public Task<UtilisateurConnecte> LireAsync() => Task.FromResult(u ?? new UtilisateurConnecte("DLP", 55, "TEST", 411000));
     }
 
-    private sealed class SourceFactice : ISourceCommandes
+    internal sealed class SourceFactice : ISourceCommandes
     {
         public int? RepresentantImpose { get; init; }
         public IReadOnlyList<string>? Options { get; init; }
@@ -306,6 +382,15 @@ public class ConsultationCommandesServiceTests
             DerniereSociete = societe;
             DerniersCriteres = criteres;
             return Task.FromResult<IReadOnlyList<LigneCommandeBrute>>(Lignes);
+        }
+
+        public FicheBrute? Fiche { get; init; }
+        public CleCommande? DerniereCle { get; private set; }
+
+        public Task<FicheBrute?> LireFicheAsync(int societe, CleCommande cle, CancellationToken ct)
+        {
+            DerniereCle = cle;
+            return Task.FromResult(Fiche);
         }
     }
 }

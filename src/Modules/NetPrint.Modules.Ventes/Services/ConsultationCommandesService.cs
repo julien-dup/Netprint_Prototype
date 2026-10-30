@@ -78,6 +78,103 @@ internal sealed class ConsultationCommandesService(ISourceCommandes donnees, IUt
     }
 
     // ------------------------------------------------------------------
+    // Fiche
+    // ------------------------------------------------------------------
+    public async Task<FicheCommande?> LireAsync(CleCommande cle, CancellationToken ct = default)
+    {
+        var u = await utilisateur.ExigerAsync();
+        var brut = await donnees.LireFicheAsync(u.Societe, cle with { Cle = cle.Cle.Trim().ToUpperInvariant() }, ct);
+        if (brut is null) return null;
+
+        // Représentant limité : une commande d'un autre représentant n'est pas visible (DOS500S R6, FEN_commandes)
+        var impose = await donnees.RepresentantImposeAsync(u.Societe, u.Profil, ct);
+        if (impose is not null && brut.Entete.Commune.Ccrep != impose) return null;
+
+        var droits = Droits(await donnees.OptionsProgrammeAsync(ProgrammeDroits, u.Profil, ct));
+        return VersFiche(brut, droits);
+    }
+
+    internal static FicheCommande VersFiche(FicheBrute brut, DroitsCommandes droits)
+    {
+        var e = brut.Entete;
+        var c = e.Commune;
+        var cle = new CleCommande(c.Rdoss, c.Ccdcle);
+        var lignes = brut.Lignes.Select(l => VersLigneFiche(cle, l.Ligne, l.Complement)).ToList();
+        var soldee = c.Cctags != "";
+        var factureAutre = e.Cclif != 0 && (e.Cgenf != c.Rgen || e.Cclif != c.Rcli);
+
+        var entete = new EnteteCommande(
+            Cle: cle,
+            TypeCommande: c.Cctypc,
+            TypeFacturation: TypesFacturation.Libelle(e.Ccfact),
+            Client: $"{c.Rgen} {c.Rcli}",
+            NomClient: c.Cnom,
+            ClientFacture: factureAutre ? $"{e.Cgenf} {e.Cclif} {e.NomFactureEntete}".Trim() : "",
+            Enseigne: c.Ccense,
+            Designation1: c.Ccdes1,
+            Designation2: c.Ccdes2,
+            ReferenceCommandeClient: c.Ccrefc,
+            Interlocuteur: e.Ccnint,
+            DateOuverture: c.DateOuverture,
+            DateCommandeClient: c.DateCommandeClient,
+            DateLivraison: c.DateLivraisonEntete,
+            SemaineLivraison: e.Ccdtss != 0 ? $"S{e.Ccdtss:00}/{e.Ccdtsa}" : "",
+            Representant: c.Ccrep != 0 ? $"{c.Ccrep} {c.NomRepresentant}".Trim() : "",
+            TauxCommission: e.Cctxco,
+            Fabricant: c.Ccinat,
+            Categorie: e.Ccat,
+            SousCategorie: e.Ccscat,
+            Profil: e.Ccprof,
+            Livraison: e.Ccecal switch { "E" => "Enlèvement par le client", "A" => "À livrer", _ => e.Ccecal },
+            Port: e.Ccport switch { "D" => "Port dû", "A" => "Port avancé", "F" => "Franco", _ => e.Ccport },
+            Reglement: Reglement(e),
+            Devise: e.Cccdev,
+            CodeVente: e.Cctypv,
+            TauxRemise: e.Ctxrm,
+            Revendeur: e.Ccrcvd == "O",
+            AdresseArc: e.Ccnaea,
+            SousTraitee: e.Ccop11 == "O",
+            MultiSite: e.Ccop10 == "O",
+            DateSolde: soldee ? c.DateSolde : null,
+            Etat: Etat(soldee, lignes.Select(l => l.Ligne).ToList()),
+            Valeur: lignes.Sum(l => l.Ligne.Valeur));
+
+        return new FicheCommande(entete, lignes, brut.Livraisons, brut.Factures, brut.Journal, brut.Historique,
+            c.NbDocuments, droits);
+    }
+
+    // Mode de règlement (table RG) et échéance : « 30 jours le 10, arrêté au 31 »
+    internal static string Reglement(ComplementEnteteBrut e)
+    {
+        var mode = e.LibReglement != "" ? e.LibReglement : e.Ccmod;
+        var echeance = new List<string>();
+        if (e.Ccech > 0) echeance.Add($"{e.Ccech} jours");
+        if (e.Ccle > 0) echeance.Add($"le {e.Ccle}");
+        if (e.Ccart > 0) echeance.Add($"arrêté au {e.Ccart}");
+        return echeance.Count == 0 ? mode : $"{mode} · {string.Join(", ", echeance)}".Trim(' ', '·');
+    }
+
+    private static LigneFiche VersLigneFiche(CleCommande cle, LigneCommandeBrute l, ComplementLigneBrut x)
+    {
+        var adresse = string.Join(" ", new[] { x.Dnrs, x.Dnpost, x.Dnvill }.Where(s => s != ""));
+        if (adresse == "" && x.Dnliga != 0) adresse = $"Adresse n° {x.Dnliga}";
+        return new LigneFiche(
+            Ligne: VersLigne(cle, l),
+            AdresseLivraison: adresse,
+            DateConfirmee: x.Dndatb != 0 ? BaseDb2.DateAAAAMMJJ(x.Dndatb) : null,
+            Commentaires: string.Join("\n", new[] { x.Dncomm, x.Dncom2, x.Dncom3 }.Where(s => s != "")),
+            TauxCommission: x.Dntxco,
+            TauxRemise: x.Dntxre,
+            LigneOrigine: l.Dnlori,
+            QuantiteAppelee: x.Dnqtea,
+            MaxiLivrable: x.Dnqmax,
+            PrixCession: x.Dnpxce,
+            Devis: x.Dndev != 0 ? $"{x.Dndev:00000}/{x.Dnvers}/{x.Dnhypo}" : "",
+            ClientFacture: x.Dnclif != 0 ? $"{x.Dngenf} {x.Dnclif} {x.NomFactureLigne}".Trim() : "",
+            Emplacement: x.Demp);
+    }
+
+    // ------------------------------------------------------------------
     // Mise en forme : lignes regroupées par commande, dans l'ordre de lecture
     // ------------------------------------------------------------------
     internal static List<CommandeListe> Regrouper(IEnumerable<LigneCommandeBrute> brut)

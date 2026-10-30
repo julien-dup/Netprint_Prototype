@@ -15,6 +15,9 @@ internal interface ISourceCommandes
     Task<IReadOnlyList<string>?> OptionsProgrammeAsync(string programme, string profil, CancellationToken ct);
 
     Task<IReadOnlyList<LigneCommandeBrute>> RechercherAsync(int societe, CriteresCommandes criteres, CancellationToken ct);
+
+    // Fiche d'une commande (types 3 et 4) ; null si elle n'existe pas
+    Task<FicheBrute?> LireFicheAsync(int societe, CleCommande cle, CancellationToken ct);
 }
 
 // Ligne lue telle quelle (une ligne NEG100 et son en-tête AB001 ; zones de ligne à vide si la commande n'a pas de ligne)
@@ -26,7 +29,7 @@ internal sealed record LigneCommandeBrute(
     int Dndliv, int Dnqtec, int Dnqtel, int Dnqtef, int Dnqter, decimal Dnpus, string Dnuv, string Dnopt2, string Dnopt5,
     long Tnum, string Dnnorm, int Amodel, string Afam, string Asfam, string Dnsold, int Dnccom, string Texte, int NbDocuments);
 
-internal sealed class ConsultationCommandesDb2(IConfiguration config) : ISourceCommandes
+internal sealed partial class ConsultationCommandesDb2(IConfiguration config) : ISourceCommandes
 {
     private string Bib => BaseDb2.Bibliotheque(config);
 
@@ -80,7 +83,7 @@ internal sealed class ConsultationCommandesDb2(IConfiguration config) : ISourceC
     }
 
     // Ordre des colonnes : RequeteListeCommandes.Colonnes
-    private static LigneCommandeBrute Lire(DbDataReader rd)
+    internal static LigneCommandeBrute Lire(DbDataReader rd)
     {
         var textes = Enumerable.Range(51, RequeteListeCommandes.NbTextes).Select(rd.Texte).Where(t => t != "");
         return new(
