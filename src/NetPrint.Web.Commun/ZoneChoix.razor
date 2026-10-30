@@ -1,0 +1,14 @@
+@* Affiche la fenêtre de choix demandée par le service FenetresChoix (bouton « … » / F4). Placée une fois dans la mise en page. *@
+@implements IDisposable
+@inject FenetresChoix FenetresChoix
+
+@if (FenetresChoix.Courante is { } d)
+{
+    <FenetreChoix @key="d" Liste="d.Liste" Parent="@d.Parent" OnChoix="l => FenetresChoix.Repondre(l)" OnFermer="() => FenetresChoix.Repondre(null)" />
+}
+
+@code {
+    protected override void OnInitialized() => FenetresChoix.Change += Rafraichir;
+    private void Rafraichir() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => FenetresChoix.Change -= Rafraichir;
+}

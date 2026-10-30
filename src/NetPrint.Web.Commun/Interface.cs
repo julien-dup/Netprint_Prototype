@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using NetPrint.Noyau.ListesDeChoix;
 
 namespace NetPrint.Web.Commun;
 
@@ -10,6 +11,7 @@ public static class InterfaceNetPrint
     {
         services.AddScoped<Dialogues>();
         services.AddScoped<Notifications>();
+        services.AddScoped<FenetresChoix>();
         services.AddScoped<IPreferencesGrilles, PreferencesGrillesFichier>();
         return services;
     }
@@ -69,3 +71,31 @@ public sealed class Notifications
         Change?.Invoke();
     }
 }
+
+// Fenêtre de choix (recherche F4 / bouton « … ») : demandée par BoutonRecherche, affichée par ZoneChoix
+public sealed class FenetresChoix
+{
+    public sealed record Demande(ListeChoix Liste, string? Parent, TaskCompletionSource<LigneChoix?> Reponse);
+
+    public Demande? Courante { get; private set; }
+    public event Action? Change;
+
+    // Ligne choisie, ou null si l'utilisateur annule
+    public Task<LigneChoix?> ChoisirAsync(ListeChoix liste, string? parent = null)
+    {
+        Courante?.Reponse.TrySetResult(null);
+        var d = new Demande(liste, parent, new TaskCompletionSource<LigneChoix?>());
+        Courante = d;
+        Change?.Invoke();
+        return d.Reponse.Task;
+    }
+
+    public void Repondre(LigneChoix? ligne)
+    {
+        var d = Courante;
+        Courante = null;
+        Change?.Invoke();
+        d?.Reponse.TrySetResult(ligne);
+    }
+}
+

@@ -1,0 +1,412 @@
+@* =====================================================================
+   Décomposition analytique et prix remis (ex-FEN_Decomposition), lot E — règles R15 à R24.
+   Arbre du chiffrage (éléments, papier, matières, machines / sections / opérations, sous-traitance, transport) ;
+   pour chaque ligne : PR, PV et PV unitaire recalculés à chaque saisie du prix remis ou de l'unité de vente,
+   puis la ventilation sur les chapitres de la légende (valeur + %). Une saisie sur une ligne de regroupement
+   s'applique à toutes les lignes qu'elle contient.
+   Valider : contrôle (R18), puis écriture en transaction (prix remis, unité, légende, ventilations).
+   Impression de la décomposition et modèles de légende : livraison suivante.
+   ===================================================================== *@
+@inject IDecompositionDevis Decomposition
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<div class="voile">
+    <div class="fenetre complement decomposition" role="dialog" aria-modal="true" @onkeydown="Clavier">
+        <div class="titre-fenetre">⚖ Décomposition analytique et prix remis</div>
+        <div class="corps-fenetre">
+            @if (chargement)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else if (d is null || calcul is null)
+            {
+                <p>Le devis @Cle.Libelle n'existe pas ou ne vous est pas accessible.</p>
+            }
+            else
+            {
+                <BandeauComplement Entete="d.Entete" />
+                <div class="barre-decomposition">
+                    <label class="champ-ligne">
+                        <span>Prix de vente remis</span>
+                        <input type="number" step="0.01" min="0" class="saisie-prix-remis"
+                               @bind="prix" @bind:event="oninput" @bind:after="Recalculer" />
+                    </label>
+                    <label class="champ-ligne">
+                        <span>pour</span>
+                        <select @bind="unite" @bind:after="Recalculer">
+                            @if (d.Unites.All(u => u.Code != unite))
+                            {
+                                <option value="@unite"></option>
+                            }
+                            @foreach (var u in d.Unites)
+                            {
+                                <option value="@u.Code">@u.Libelle</option>
+                            }
+                        </select>
+                    </label>
+                    <span class="separateur-vertical"></span>
+                    <span class="total-decomposition">Quantité <b>@Affichage.Entier(d.Parametres.Quantite)</b></span>
+                    <span class="total-decomposition">Prix de revient <b>@calcul.TotalPrixRevient.ToString("N2")</b></span>
+                    <span class="total-decomposition">Prix de vente <b>@calcul.TotalPrixVente.ToString("N2")</b></span>
+                    <span class="total-decomposition">Coefficient de vente <b>@(calcul.Coefficient?.ToString("N4") ?? "")</b></span>
+                    <span class="espace"></span>
+                    <button type="button" @onclick="() => legendeOuverte = true">🏷 Légende…</button>
+                    <button type="button" title="Déplier toutes les lignes" @onclick="ToutDeplier">▾ Tout déplier</button>
+                    <button type="button" title="Replier toutes les lignes" @onclick="ToutReplier">▸ Tout replier</button>
+                </div>
+                @if (message is not null)
+                {
+                    <p class="erreur" role="alert">⚠ @message</p>
+                }
+                @if (legende.Count == 0)
+                {
+                    <p class="aide">Ce devis n'a pas encore de légende : cliquez sur « Légende… » pour définir les chapitres de la décomposition.</p>
+                }
+                <div class="zone-defilement zone-decomposition">
+                    <table class="grille grille-complement grille-decomposition">
+                        <thead>
+                            <tr>
+                                <th rowspan="2" class="col-libelle">Libellé</th>
+                                <th rowspan="2" class="nombre col-montant col-pr">Prix de revient</th>
+                                <th rowspan="2" class="nombre col-montant col-pv">Prix de vente</th>
+                                <th rowspan="2" class="nombre col-montant col-pvu" title="@calcul.LibelleUnitaire">@calcul.LibelleUnitaire</th>
+                                @for (var i = 0; i < legende.Count; i++)
+                                {
+                                    <th colspan="2" class="entete-chapitre-decomposition" title="@BulleChapitre(i)">
+                                        @LimitesDecomposition.Lettre(i) · @legende[i].Titre
+                                    </th>
+                                }
+                            </tr>
+                            <tr>
+                                @for (var i = 0; i < legende.Count; i++)
+                                {
+                                    <th class="sous-entete-chapitre">Valeur</th>
+                                    <th class="sous-entete-chapitre">%</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var l in LignesVisibles())
+                            {
+                                var ligne = l;
+                                var m = calcul.Lignes[ligne.Id];
+                                <tr class="@ClasseLigne(ligne)">
+                                    <td class="col-libelle" title="@ligne.Libelle">
+                                        <span class="retrait-arbre" style="width: @(ligne.Niveau * 18)px"></span>
+                                        @if (ligne.EstFeuille)
+                                        {
+                                            <span class="puce-arbre"></span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="bouton-arbre" title="@(replies.Contains(ligne.Id) ? "Déplier" : "Replier")"
+                                                    @onclick="() => Basculer(ligne.Id)">@(replies.Contains(ligne.Id) ? "▸" : "▾")</button>
+                                        }
+                                        @ligne.Libelle
+                                        @if (ligne.Commentaire != "")
+                                        {
+                                            <span class="commentaire-ligne">@ligne.Commentaire</span>
+                                        }
+                                    </td>
+                                    <td class="nombre col-montant col-pr">@Affichage.Montant(m.PrixRevient)</td>
+                                    <td class="nombre col-montant col-pv">@Affichage.Montant(m.PrixVente)</td>
+                                    <td class="nombre col-montant col-pvu">@Affichage.Montant(m.PrixVenteUnitaire)</td>
+                                    @for (var i = 0; i < legende.Count; i++)
+                                    {
+                                        var j = i;
+                                        var valeur = Affiche(ligne, j, valeurs);
+                                        var pourcent = Affiche(ligne, j, pourcents);
+                                        var enErreur = erreur is { } e && e.IdLigne == ligne.Id && e.Chapitre == j;
+                                        <td class="cellule-chapitre @(enErreur ? "en-erreur" : "")">
+                                            <input class="saisie-chapitre @(valeur is null ? "mixte" : "")" inputmode="numeric" maxlength="2"
+                                                   list="@IdListe(j)" value="@valeur" placeholder="@(valeur is null ? "≠" : "")"
+                                                   title="@LibelleValeur(j, valeur)"
+                                                   @onchange="ev => Changer(ligne, j, ev.Value, valeurs)" />
+                                        </td>
+                                        <td class="cellule-chapitre @(enErreur ? "en-erreur" : "")">
+                                            <input class="saisie-chapitre @(pourcent is null ? "mixte" : "")" inputmode="numeric" maxlength="2"
+                                                   value="@pourcent" placeholder="@(pourcent is null ? "≠" : "")"
+                                                   @onchange="ev => Changer(ligne, j, ev.Value, pourcents)" />
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @for (var i = 0; i < legende.Count; i++)
+                {
+                    <datalist id="@IdListe(i)">
+                        @for (var v = 0; v < legende[i].Valeurs.Count; v++)
+                        {
+                            <option value="@(v + 1)">@legende[i].Valeurs[v]</option>
+                        }
+                    </datalist>
+                }
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="aide">Une valeur saisie sur une ligne de regroupement s'applique à toutes les lignes qu'elle contient.</span>
+            <span class="espace"></span>
+            <button type="button" @onclick="AnnulerAsync">Annuler</button>
+            <button type="button" class="bouton-principal" disabled="@(d is null || enCours)" @onclick="ValiderAsync">Valider</button>
+        </div>
+    </div>
+</div>
+
+@if (legendeOuverte)
+{
+    <FenetreLegende Legende="legende" OnFermer="FermerLegende" />
+}
+
+@code {
+    [Parameter, EditorRequired] public CleDevis Cle { get; set; } = default!;
+    // Prix du devis après validation, null si rien n'a été enregistré
+    [Parameter] public EventCallback<PrixDevis?> OnFermer { get; set; }
+
+    private DecompositionDevis? d;
+    private CalculDecomposition? calcul;
+    private bool chargement = true;
+    private bool enCours;
+    private bool modifie;
+    private bool legendeOuverte;
+    private string? message;
+    private ErreurDecomposition? erreur;
+
+    private decimal prix;
+    private string unite = "";
+    private List<ChapitreLegende> legende = [];
+
+    // Ventilation en cours de saisie, par feuille (15 chapitres)
+    private readonly Dictionary<int, int[]> valeurs = new();
+    private readonly Dictionary<int, int[]> pourcents = new();
+    private readonly Dictionary<int, LigneDecomposition> parLigne = new();
+    private readonly Dictionary<int, List<int>> feuillesDe = new();   // nœud → feuilles qu'il contient
+    private readonly HashSet<int> replies = [];
+    private int idFenetre = Random.Shared.Next();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            d = await Decomposition.LireAsync(Cle);
+            if (d is not null)
+            {
+                prix = d.PrixRemis;
+                unite = d.Unite;
+                legende = [.. d.Legende];
+                foreach (var l in d.Lignes)
+                {
+                    parLigne[l.Id] = l;
+                    if (!l.EstFeuille) continue;
+                    valeurs[l.Id] = [.. l.Valeurs];
+                    pourcents[l.Id] = [.. l.Pourcents];
+                    var parent = l.Parent;
+                    while (parent is { } id)
+                    {
+                        if (!feuillesDe.TryGetValue(id, out var liste)) feuillesDe[id] = liste = [];
+                        liste.Add(l.Id);
+                        parent = parLigne[id].Parent;
+                    }
+                }
+                // Comme le WinDev : une section dont toutes les opérations ont la même ventilation est repliée
+                foreach (var l in d.Lignes.Where(x => x.Nature == NatureLigneDecomposition.Section))
+                    if (VentilationCommune(l) is not null) replies.Add(l.Id);
+                Recalculer();
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture de la décomposition impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    private void Recalculer()
+    {
+        if (d is not null) calcul = Decomposition.Calculer(d, prix, unite);
+        if (d is not null && (prix != d.PrixRemis || unite != d.Unite)) modifie = true;
+    }
+
+    // ---------- Arbre ----------
+    private IEnumerable<LigneDecomposition> LignesVisibles()
+    {
+        if (d is null) yield break;
+        var niveauReplie = int.MaxValue;
+        foreach (var l in d.Lignes)
+        {
+            if (l.Niveau > niveauReplie) continue;
+            niveauReplie = replies.Contains(l.Id) ? l.Niveau : int.MaxValue;
+            yield return l;
+        }
+    }
+
+    private void Basculer(int id)
+    {
+        if (!replies.Remove(id)) replies.Add(id);
+    }
+
+    private void ToutDeplier() => replies.Clear();
+
+    private void ToutReplier()
+    {
+        if (d is null) return;
+        foreach (var l in d.Lignes.Where(x => !x.EstFeuille)) replies.Add(l.Id);
+    }
+
+    private void Deplier(int id)
+    {
+        var parent = parLigne[id].Parent;
+        while (parent is { } n)
+        {
+            replies.Remove(n);
+            parent = parLigne[n].Parent;
+        }
+    }
+
+    private static string ClasseLigne(LigneDecomposition l) => l.Nature switch
+    {
+        NatureLigneDecomposition.Element or NatureLigneDecomposition.Transport => "ligne-element",
+        NatureLigneDecomposition.Rubrique => "ligne-rubrique",
+        NatureLigneDecomposition.Section => "ligne-section",
+        _ => "ligne-feuille",
+    };
+
+    private IEnumerable<int> Feuilles(LigneDecomposition l) =>
+        l.EstFeuille ? [l.Id] : feuillesDe.TryGetValue(l.Id, out var f) ? f : [];
+
+    // Valeur affichée d'un chapitre : celle de la feuille, ou celle commune à toutes les feuilles d'un nœud
+    // (null si elles diffèrent).
+    private string? Affiche(LigneDecomposition l, int j, Dictionary<int, int[]> source)
+    {
+        int? commun = null;
+        foreach (var f in Feuilles(l))
+        {
+            var v = source[f][j];
+            if (commun is null) commun = v;
+            else if (commun != v) return null;
+        }
+        return commun is null or 0 ? "" : commun.Value.ToString();
+    }
+
+    // Ventilation complète (valeurs et %) commune à toutes les feuilles d'un nœud, null si elles diffèrent
+
+    private string? VentilationCommune(LigneDecomposition l)
+    {
+        string? reference = null;
+        foreach (var f in Feuilles(l))
+        {
+            var cle = string.Join(",", valeurs[f]) + "|" + string.Join(",", pourcents[f]);
+            if (reference is null) reference = cle;
+            else if (reference != cle) return null;
+        }
+        return reference;
+    }
+
+    private void Changer(LigneDecomposition l, int j, object? saisie, Dictionary<int, int[]> cible)
+    {
+        var texte = saisie?.ToString()?.Trim() ?? "";
+        int nombre;
+        if (texte == "") nombre = 0;
+        else if (!int.TryParse(texte, out nombre) || nombre < 0 || nombre > 99)
+        {
+            message = "Saisissez un nombre de 1 à 99.";
+            return;
+        }
+        foreach (var f in Feuilles(l)) cible[f][j] = nombre;
+        modifie = true;
+        message = null;
+        erreur = null;
+    }
+
+    // ---------- Légende ----------
+    private string IdListe(int chapitre) => $"legende-{idFenetre}-{chapitre}";
+
+    private string BulleChapitre(int i) =>
+        string.Join("\n", legende[i].Valeurs.Select((v, k) => $"{k + 1}. {v}").Prepend(legende[i].Titre));
+
+    private string? LibelleValeur(int chapitre, string? valeur) =>
+        int.TryParse(valeur, out var v) && v >= 1 && v <= legende[chapitre].Valeurs.Count
+            ? $"{v}. {legende[chapitre].Valeurs[v - 1]}"
+            : null;
+
+    private void FermerLegende(FenetreLegende.Resultat? r)
+    {
+        legendeOuverte = false;
+        if (r is null) return;
+        // La ventilation suit son chapitre ; les chapitres supprimés (ou au-delà de la légende) sont remis à zéro
+        foreach (var id in valeurs.Keys)
+        {
+            var v = new int[LimitesDecomposition.Chapitres];
+            var p = new int[LimitesDecomposition.Chapitres];
+            for (var j = 0; j < LimitesDecomposition.Chapitres; j++)
+            {
+                var k = r.Correspondance[j];
+                if (k < 0) continue;
+                v[k] = valeurs[id][j];
+                p[k] = pourcents[id][j];
+            }
+            valeurs[id] = v;
+            pourcents[id] = p;
+        }
+        legende = [.. r.Legende];
+        modifie = true;
+        message = null;
+        erreur = null;
+    }
+
+    // ---------- Validation ----------
+    private async Task ValiderAsync()
+    {
+        if (d is null || enCours) return;
+        message = null;
+        erreur = null;
+        var lignes = d.Lignes.Where(l => l.EstFeuille)
+            .Select(l => new VentilationLigne(l.Id, l.Cible!, valeurs[l.Id], pourcents[l.Id]))
+            .ToList();
+        if (Decomposition.Controler(legende, lignes) is { } e)
+        {
+            erreur = e;
+            message = $"{parLigne[e.IdLigne].Libelle} : {e.Message}";
+            Deplier(e.IdLigne);
+            return;
+        }
+
+        enCours = true;
+        try
+        {
+            var resultat = await Decomposition.ValiderAsync(Cle,
+                new SaisieDecomposition(prix, unite, legende, lignes, d.PrixRemis, d.Unite));
+            Notifications.Succes($"Décomposition du devis {Cle.Libelle} enregistrée.");
+            await OnFermer.InvokeAsync(resultat);
+        }
+        catch (RegleMetierException ex)
+        {
+            message = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Enregistrement impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private async Task AnnulerAsync()
+    {
+        if (modifie && !await Dialogues.ConfirmerAsync("Abandonner les modifications de la décomposition ?",
+                "Décomposition analytique", "Abandonner")) return;
+        await OnFermer.InvokeAsync(null);
+    }
+
+    private async Task Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !legendeOuverte) await AnnulerAsync();
+    }
+}

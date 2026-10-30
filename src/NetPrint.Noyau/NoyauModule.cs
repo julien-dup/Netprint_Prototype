@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using NetPrint.Noyau.ListesDeChoix;
 using NetPrint.Noyau.Societes;
 
 namespace NetPrint.Noyau;
@@ -9,6 +10,7 @@ public static class NoyauModule
     public static IServiceCollection AddNoyau(this IServiceCollection services)
     {
         services.AddScoped<ISocietes, SocietesDb2>();
+        services.AddScoped<IListesDeChoix, ListesDeChoixDb2>();   // recherches F4 / bouton « … »
         return services;
     }
 }

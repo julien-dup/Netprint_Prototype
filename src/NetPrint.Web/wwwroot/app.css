@@ -69,6 +69,9 @@ input:focus, select:focus, textarea:focus {
 }
 input[readonly] { background: var(--surface-2); color: var(--texte-2); }
 input[type='checkbox'] { min-height: 0; width: 16px; height: 16px; accent-color: var(--accent); vertical-align: middle; }
+/* Zones numériques sans flèches d'incrément (inutiles ; molette et touches haut / bas neutralisées par saisie.js) */
+input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+input[type='number']::-webkit-inner-spin-button, input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 input.num3 { width: 60px; }
 input.num6 { width: 90px; }
 input.num7 { width: 100px; }
@@ -557,3 +560,159 @@ input.code { width: 90px; text-transform: uppercase; }
 .logo-connexion { color: var(--accent); }
 .fenetre.connexion .formulaire { grid-template-columns: 130px 1fr; }
 .bouton-lien-plein { display: inline-flex; align-items: center; min-height: 32px; padding: 5px 12px; border-radius: 6px; text-decoration: none; }
+
+/* ---------- Compléments d'un devis (texte libre, sous-totaux, coefficients) ---------- */
+.fenetre.complement { width: 720px; }
+.fenetre.complement.large { width: 980px; }
+.fenetre.complement:focus { outline: none; }
+.bandeau-complement {
+  display: flex; flex-direction: column; gap: 4px; padding: 10px 12px;
+  background: var(--surface-2); border: 1px solid var(--bord); border-radius: var(--rayon);
+}
+.bandeau-complement .libelle-info { display: inline-block; min-width: 90px; margin: 0 4px 0 0; }
+.texte-libre {
+  margin: 0; padding: 12px; max-height: 50vh; overflow: auto; white-space: pre-wrap;
+  font-family: Consolas, 'Courier New', monospace; font-size: 13px; line-height: 1.5;
+  background: var(--surface); border: 1px solid var(--bord); border-radius: var(--rayon);
+}
+.grille-complement td { max-width: none; }
+.grille-complement tbody tr { cursor: default; }
+.tableau-coefficients th.coefficient { color: #b91c1c; font-style: italic; }
+.tableau-coefficients td.prix-coefficient { background: #fffbe6; }
+.seulement-impression { display: none; }
+.entete-impression { justify-content: space-between; font-size: 12px; color: var(--texte-2); }
+
+/* Impression d'une fenêtre (bouton « Imprimer ») : seule la fenêtre .zone-impression est imprimée */
+@media print {
+  body * { visibility: hidden; }
+  .zone-impression, .zone-impression * { visibility: visible; }
+  .voile { position: static; background: none; display: block; }
+  .zone-impression {
+    position: absolute; left: 0; top: 0; width: 100% !important; max-width: none; max-height: none;
+    box-shadow: none; border-radius: 0; overflow: visible;
+  }
+  .zone-impression .corps-fenetre, .zone-impression .zone-defilement { overflow: visible; max-height: none; border: none; }
+  .zone-impression .pied-fenetre { display: none; }
+  .zone-impression .seulement-impression { display: flex; }
+  .zone-impression .grille th { position: static; }
+}
+
+/* ---------- Lot B : échec, documents, tags ---------- */
+.pied-fenetre .espace { flex: 1; }
+.formulaire-echec { grid-template-columns: 130px 1fr; align-items: start; }
+.formulaire-echec > span { padding-top: 6px; }
+.formulaire-echec select, .formulaire-echec textarea { width: 100%; }
+.formulaire-echec textarea { resize: vertical; font: inherit; }
+.grille-complement .col-action { width: 44px; text-align: center; }
+.fenetre.complement .zone-depot {
+  position: relative; display: flex; align-items: center; justify-content: center; min-height: 90px; padding: 14px;
+  text-align: center; cursor: pointer; border: 2px dashed var(--bord-fort); border-radius: var(--rayon); background: var(--surface-2);
+}
+.fenetre.complement .zone-depot:hover, .fenetre.complement .zone-depot.survol { border-color: var(--accent); background: var(--accent-clair); }
+.fenetre.complement .zone-depot input[type='file'] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.texte-depot { display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
+.liste-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag {
+  min-height: 30px; padding: 4px 12px; border-radius: 999px; font-weight: 600;
+  background: #ffedd5; border: 1px solid #fdba74; color: #7c2d12;
+}
+.tag:hover:not(:disabled) { background: #fed7aa; border-color: #fb923c; }
+.tag.actif, .tag.actif:hover:not(:disabled) { background: #15803d; border-color: #15803d; color: #fff; }
+.tag.actif::before { content: '✓ '; }
+.ajout-tag { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.ajout-tag .champ input { width: 220px; }
+
+/* Fenêtres internes déplaçables par leur barre de titre (saisie.js) */
+.voile .fenetre > .titre-fenetre { cursor: move; user-select: none; }
+body.deplacement, body.deplacement * { cursor: move !important; user-select: none; }
+
+/* ---------- Lot C : tableau des prix, récapitulatif PDF ---------- */
+a.bouton-ancre {
+  display: inline-flex; align-items: center; min-height: 32px; padding: 5px 12px; box-sizing: border-box;
+  border: 1px solid var(--bord-fort); border-radius: 6px; background: var(--surface); color: var(--texte);
+  text-decoration: none; white-space: nowrap;
+}
+a.bouton-ancre:hover { background: var(--surface-2); border-color: var(--texte-3); }
+.menu-contextuel li.li-lien { padding: 0; }
+.menu-contextuel li.li-lien a { display: block; padding: 7px 12px; color: inherit; text-decoration: none; border-radius: 6px; }
+.fenetre.complement.tres-large { width: 1240px; }
+.tableau-prix .col-rubrique { min-width: 170px; white-space: nowrap; }
+.tableau-prix td.colonne-devis, .tableau-prix th.colonne-devis { background: #eef4ff; }
+.tableau-prix .mille-plus { color: var(--texte-2); font-size: 12px; }
+.tableau-prix tr.ligne-prix-total td { font-weight: 700; }
+.tableau-prix tr.ligne-prix-unite td { font-weight: 600; font-style: italic; color: #2563eb; }
+.tableau-prix tr.ligne-prix-coefficient td { font-weight: 700; color: #b91c1c; }
+.tableau-prix tr.ligne-prix-vide td { height: 10px; border-bottom: none; }
+@media print { .zone-impression .sans-impression { display: none; } }
+
+/* ---------- Lot D : recherches F4 / bouton « … » (fenêtre de choix) ---------- */
+.ligne-champs .bouton-liste { min-height: 30px; padding: 3px 8px; }
+.fenetre.choix { width: 900px; }
+.fenetre.choix .ligne-criteres input { width: 340px; }
+.grille-choix tbody tr { cursor: pointer; }
+.grille-choix td { max-width: 320px; }
+.grille-choix tbody tr.inactive td { color: var(--danger); }
+
+
+/* ---------- Lot E : décomposition analytique et prix remis ---------- */
+.fenetre.complement.decomposition { width: min(1600px, 97vw); height: 92vh; max-height: 92vh; }
+.fenetre.decomposition .corps-fenetre { flex: 1; min-height: 0; }
+.barre-decomposition { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+.champ-ligne { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--texte-2); font-size: 13px; }
+.saisie-prix-remis { width: 130px; text-align: right; font-weight: 700; color: var(--texte); }
+.total-decomposition { font-size: 13px; color: var(--texte-2); white-space: nowrap; }
+.total-decomposition b { color: var(--texte); margin-left: 4px; font-variant-numeric: tabular-nums; }
+.zone-decomposition { flex: 1; min-height: 0; max-height: none; }
+.grille-decomposition { width: max-content; min-width: 100%; }
+.grille-decomposition thead tr:first-child th { height: 34px; }
+.grille-decomposition thead tr:nth-child(2) th { top: 34px; height: 26px; }
+.grille-decomposition th, .grille-decomposition td { border-right: 1px solid #eef1f5; }
+.grille-decomposition td { height: 30px; }
+.grille-decomposition .col-libelle {
+  position: sticky; left: 0; z-index: 1; width: 360px; min-width: 360px; max-width: 360px; background: var(--surface);
+}
+.grille-decomposition .col-montant { position: sticky; z-index: 1; width: 104px; min-width: 104px; max-width: 104px; background: var(--surface); }
+.grille-decomposition .col-pr { left: 360px; }
+.grille-decomposition .col-pv { left: 464px; }
+.grille-decomposition .col-pvu { left: 568px; box-shadow: inset -2px 0 0 var(--bord); }
+.grille-decomposition thead .col-libelle, .grille-decomposition thead .col-montant { z-index: 4; background: var(--surface-2); }
+.grille-decomposition th.col-montant { white-space: normal; line-height: 1.15; text-transform: none; }
+.entete-chapitre-decomposition { text-align: center !important; max-width: 220px; text-transform: none !important; color: var(--texte) !important; }
+.sous-entete-chapitre { text-align: center !important; font-size: 11px !important; }
+.grille-decomposition td.cellule-chapitre { padding: 0 3px; width: 44px; min-width: 44px; max-width: 44px; text-align: center; }
+.saisie-chapitre {
+  width: 38px; min-height: 24px; padding: 1px 4px; text-align: center; font-variant-numeric: tabular-nums;
+  border-color: transparent; background: transparent;
+}
+.saisie-chapitre:hover { border-color: var(--bord-fort); background: var(--surface); }
+.saisie-chapitre:focus { background: var(--surface); }
+.saisie-chapitre.mixte::placeholder { color: var(--orange); font-weight: 700; }
+.cellule-chapitre.en-erreur { background: var(--danger-clair); }
+.cellule-chapitre.en-erreur .saisie-chapitre { border-color: var(--danger); background: var(--surface); }
+.retrait-arbre { display: inline-block; }
+.bouton-arbre {
+  min-height: 0; width: 20px; height: 20px; padding: 0; margin-right: 4px; border: none; background: none;
+  color: var(--accent); font-size: 12px; line-height: 20px;
+}
+.puce-arbre { display: inline-block; width: 6px; height: 6px; margin: 0 11px 1px 7px; border-radius: 50%; background: var(--bord-fort); }
+.commentaire-ligne { margin-left: 8px; color: var(--texte-3); font-size: 12px; }
+.grille-decomposition tr.ligne-element td { font-weight: 700; }
+.grille-decomposition tr.ligne-element td.col-libelle { color: var(--accent-fonce); }
+.grille-decomposition tr.ligne-rubrique td, .grille-decomposition tr.ligne-section td { font-weight: 600; }
+.grille-decomposition tbody tr.ligne-element td { background: #f3f7ff; }
+.grille-decomposition tbody tr:hover td { background: #eef3fc; }
+
+/* Légende */
+.fenetre.complement.legende-decomposition { width: 760px; max-height: 90vh; }
+.chapitre-legende { padding: 10px 12px; border: 1px solid var(--bord); border-radius: var(--rayon); background: var(--surface-2); }
+.chapitre-legende.en-erreur { border-color: var(--danger); background: var(--danger-clair); }
+.entete-chapitre { display: flex; align-items: center; gap: 6px; }
+.lettre-chapitre {
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: none;
+  border-radius: 6px; background: var(--accent); color: #fff; font-weight: 700;
+}
+.titre-chapitre { flex: 1; font-weight: 600; }
+.valeurs-chapitre { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin: 8px 0 4px 34px; }
+.valeur-chapitre { display: flex; align-items: center; gap: 6px; }
+.valeur-chapitre input { flex: 1; min-width: 0; min-height: 28px; padding: 3px 6px; }
+.numero-valeur { width: 34px; flex: none; font: 12px ui-monospace, Consolas, monospace; color: var(--texte-2); text-align: right; }

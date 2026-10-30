@@ -1,0 +1,65 @@
+@* =====================================================================
+   Valeurs par défaut de la consultation (ex-FEN_ValeursDefaut, enregistrées dans ConsultationDevis.Ini du poste) :
+   filtres « Devis » et « Type devis » proposés à l'ouverture et après la gomme, présentation du détail.
+   Elles sont maintenant mémorisées par utilisateur et par société, côté serveur.
+   ===================================================================== *@
+@inject EtatConsultationDevis Etat
+@inject IPreferencesGrilles PreferencesGrilles
+
+<div class="voile" @onclick="() => OnFermer.InvokeAsync(false)">
+    <form class="fenetre parametrage" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onsubmit="ValiderAsync">
+        <div class="titre-fenetre">⚙ Valeurs par défaut</div>
+        <div class="corps-fenetre">
+            <div class="formulaire">
+                <span>Devis</span>
+                <select @bind="devis">
+                    <option value="">Tous</option>
+                    <option value="1">Uniquement en cours</option>
+                    <option value="2">Uniquement en commande</option>
+                </select>
+                <span>Type devis</span>
+                <select @bind="typeDevis">
+                    <option value="">Tous</option>
+                    <option value="T">Devis type</option>
+                    <option value="C">Devis client</option>
+                </select>
+                <span>Détail du devis</span>
+                <select @bind="detail">
+                    <option value="A">Par atelier</option>
+                    <option value="E">Par élément</option>
+                </select>
+            </div>
+        </div>
+        <div class="pied-fenetre">
+            <button type="button" @onclick="() => OnFermer.InvokeAsync(false)">Annuler</button>
+            <button type="submit" class="bouton-principal">Valider</button>
+        </div>
+    </form>
+</div>
+
+@code {
+    // true : valeurs enregistrées
+    [Parameter] public EventCallback<bool> OnFermer { get; set; }
+
+    private string devis = "";
+    private string typeDevis = "";
+    private string detail = "A";
+
+    protected override void OnInitialized()
+    {
+        devis = EtatConsultationDevis.Valeur(Etat.Preferences, EtatConsultationDevis.DefautDevis);
+        typeDevis = EtatConsultationDevis.Valeur(Etat.Preferences, EtatConsultationDevis.DefautTypeDevis);
+        detail = EtatConsultationDevis.Valeur(Etat.Preferences, EtatConsultationDevis.DefautDetail, "A");
+    }
+
+    private async Task ValiderAsync()
+    {
+        var p = Etat.Preferences ??= new PreferencesGrille();
+        p.Valeurs[EtatConsultationDevis.DefautDevis] = devis;
+        p.Valeurs[EtatConsultationDevis.DefautTypeDevis] = typeDevis;
+        p.Valeurs[EtatConsultationDevis.DefautDetail] = detail;
+        Etat.AppliquerVueParDefaut();
+        await PreferencesGrilles.EcrireAsync(EtatConsultationDevis.NomGrille, p);
+        await OnFermer.InvokeAsync(true);
+    }
+}

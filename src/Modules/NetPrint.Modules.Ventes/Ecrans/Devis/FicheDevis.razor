@@ -12,6 +12,7 @@
 @inject EtatConsultationDevis Etat
 @inject NavigationManager Navigation
 @inject Notifications Notifications
+@inject IPreferencesGrilles PreferencesGrilles
 
 <PageTitle>Devis @Cle.Libelle · NetPrint</PageTitle>
 
@@ -23,15 +24,43 @@
         <button class="@(Etat.VueDetail == "E" ? "actif" : "")" @onclick='() => ChangerVue("E")'>Par élément</button>
     </div>
     <span class="separateur-vertical"></span>
-    <button disabled title="Prochaine étape">📝 Texte libre</button>
-    <button disabled title="Prochaine étape">Σ Sous-totaux</button>
-    <button disabled title="Prochaine étape">💶 Tableau des prix</button>
-    <button disabled title="Prochaine étape">⚖ Décomposition</button>
-    <button disabled title="Prochaine étape">✖ Échec</button>
-    <button disabled title="Prochaine étape">📎 Documents</button>
+    <button disabled="@(detail is null)" title="Texte libre du devis" @onclick='() => OuvrirComplement("texte")'>📝 Texte libre</button>
+    <button disabled="@(detail is null)" title="Récapitulatif des sous-totaux" @onclick='() => OuvrirComplement("soustotaux")'>Σ Sous-totaux</button>
+    <button disabled="@(detail is null)" title="Tableau des coefficients" @onclick='() => OuvrirComplement("coefficients")'>🧮 Coefficients</button>
+    <button disabled="@(detail is null)" title="Tableau des prix (toutes les quantités)" @onclick='() => OuvrirComplement("prix")'>💶 Tableau des prix</button>
+    <button disabled="@(detail is null)" title="Décomposition analytique et prix remis" @onclick='() => OuvrirComplement("decomposition")'>⚖ Décomposition</button>
+    <button disabled="@(detail is null)" title="Saisie de l'échec du devis" @onclick='() => OuvrirComplement("echec")'>✖ Échec</button>
+    <button disabled="@(detail is null)" title="Documents du devis" @onclick='() => OuvrirComplement("documents")'>📎 Documents</button>
+    <button disabled="@(detail is null)" title="Tags du devis" @onclick='() => OuvrirComplement("tags")'>🏷 Tags</button>
     <button disabled title="Prochaine étape">📄 Offre</button>
-    <button disabled title="Prochaine étape (récapitulatif PDF généré par le serveur)">🖨 Récapitulatif</button>
+    <a class="bouton-ancre" href="@($"api/ventes/devis/{Cle.Numero}/{Cle.Version}/{Cle.Hypothese}/{Cle.TypeCout}/recapitulatif")"
+       target="_blank" rel="noopener" title="Récapitulatif PDF du devis (édité par l'IBM i, s'ouvre dans un nouvel onglet)">🖨 Récapitulatif</a>
 </fieldset>
+
+@if (complement is { Type: "echec" })
+{
+    <FenetreEchec Cle="Cle" OnFermer="FermerEchec" />
+}
+else if (complement is { Type: "documents" })
+{
+    <FenetreDocuments Cle="Cle" OnFermer="FermerDocuments" />
+}
+else if (complement is { Type: "prix" })
+{
+    <FenetreTableauPrix Cle="Cle" OnFermer="() => complement = null" />
+}
+else if (complement is { Type: "tags" })
+{
+    <FenetreTags Cle="Cle" OnFermer="() => complement = null" />
+}
+else if (complement is { Type: "decomposition" })
+{
+    <FenetreDecomposition Cle="Cle" OnFermer="FermerDecomposition" />
+}
+else if (complement is not null)
+{
+    <FenetreComplement Type="@complement.Type" Cle="Cle" Element="complement.Element" OnFermer="() => complement = null" />
+}
 
 <div class="contenu contenu-detail">
     @if (chargement)
@@ -143,7 +172,7 @@
                         <CarteSupport Papier="el.Papier" Outil="el.Outil" />
                         @if (el.AvecTexteLibre)
                         {
-                            <p class="aide">📝 Cet élément a un texte libre (affichage : prochaine étape).</p>
+                            <p><button class="bouton-lien" @onclick='() => OuvrirComplement("texte", el.Numero)'>📝 Texte libre de l'élément</button></p>
                         }
                     </div>
                 </div>
@@ -172,10 +201,18 @@
     private DetailDevis? detail;
     private bool chargement = true;
     private string onglet = "";
+    private sealed record Complement(string Type, int Element);
+    private Complement? complement;
 
     protected override async Task OnParametersSetAsync()
     {
         chargement = true;
+        // Ouverture directe d'un devis (adresse) : présentation par défaut de l'utilisateur
+        if (!Etat.VueDetailLue)
+        {
+            Etat.Preferences ??= await PreferencesGrilles.LireAsync(EtatConsultationDevis.NomGrille);
+            Etat.AppliquerVueParDefaut();
+        }
         try
         {
             detail = await Consultation.LireDetailAsync(Cle);
@@ -225,4 +262,36 @@
     }
 
     private void Retour() => Navigation.NavigateTo("ventes/devis");
+
+    private void OuvrirComplement(string type, int element = 0) => complement = new Complement(type, element);
+
+    // La liste conservée (retour au détail → liste) suit l'échec et le nombre de documents du n° de devis
+    private void FermerEchec(FenetreEchec.Resultat? r)
+    {
+        complement = null;
+        if (r is not null) MettreAJourListe(l => l with { MotifEchec = r.Motif, DateEchec = r.Motif == "" ? null : r.Date });
+    }
+
+    private void FermerDocuments(int nombre)
+    {
+        complement = null;
+        MettreAJourListe(l => l with { NbDocuments = nombre });
+    }
+
+    // Décomposition validée : prix mini, conseillé et remis de ce devis dans la liste conservée
+    private void FermerDecomposition(PrixDevis? prix)
+    {
+        complement = null;
+        if (prix is null || Etat.Lignes is null) return;
+        for (var i = 0; i < Etat.Lignes.Count; i++)
+            if (Etat.Lignes[i].Cle == Cle)
+                Etat.Lignes[i] = Etat.Lignes[i] with { PvMini = prix.PvMini, PvConseille = prix.PvConseille, PvRemis = prix.PvRemis };
+    }
+
+    private void MettreAJourListe(Func<LigneListeDevis, LigneListeDevis> modifier)
+    {
+        if (Etat.Lignes is null) return;
+        for (var i = 0; i < Etat.Lignes.Count; i++)
+            if (Etat.Lignes[i].Cle.Numero == Numero) Etat.Lignes[i] = modifier(Etat.Lignes[i]);
+    }
 }

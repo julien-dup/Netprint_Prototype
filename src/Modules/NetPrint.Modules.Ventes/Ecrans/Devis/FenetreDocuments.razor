@@ -1,0 +1,189 @@
+@* =====================================================================
+   Documents d'un devis (ex-FEN_Documents, table D50008), rattachés au n° de devis (R10) :
+   liste, ouverture (nouvel onglet), ajout par sélection ou glisser-déposer de fichiers (7 Mo au plus chacun),
+   suppression selon le droit PRT000P1 « PCDOCUMENT » (R9).
+   Un e-mail Outlook s'ajoute une fois enregistré en fichier .msg (le glisser direct depuis Outlook
+   n'existe pas dans un navigateur).
+   ===================================================================== *@
+@inject IComplementsDevis Complements
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<div class="voile" @onclick="FermerAsync">
+    <div class="fenetre complement" role="dialog" aria-modal="true" tabindex="-1" @ref="fenetre"
+         @onclick:stopPropagation="true" @onkeydown="Clavier">
+        <div class="titre-fenetre">📎 Documents du devis n° @Cle.Numero.ToString("00000")</div>
+        <div class="corps-fenetre">
+            @if (chargement)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else if (documents is null)
+            {
+                <p>Le devis @Cle.Libelle n'existe pas ou ne vous est pas accessible.</p>
+            }
+            else
+            {
+                <BandeauComplement Entete="documents.Entete" Libelle="@Cle.Numero.ToString("00000")"
+                                   Remarque="Les documents sont communs à toutes les versions du devis." />
+
+                <div class="zone-defilement">
+                    <table class="grille grille-complement">
+                        <thead>
+                            <tr>
+                                <th>Document</th>
+                                <th>Ajouté le</th>
+                                <th class="col-action"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (liste.Count == 0)
+                            {
+                                <tr class="ligne-vide"><td colspan="3">Aucun document.</td></tr>
+                            }
+                            @foreach (var d in liste)
+                            {
+                                <tr>
+                                    <td>
+                                        <a href="api/ventes/devis/documents/@d.Id" target="_blank" rel="noopener"
+                                           title="Ouvrir le document">@d.Nom</a>
+                                    </td>
+                                    <td>@(d.Date?.ToString("dd/MM/yyyy HH:mm"))</td>
+                                    <td class="col-action">
+                                        @if (documents.PeutSupprimer)
+                                        {
+                                            <button class="bouton-icone bouton-danger-discret" title="Supprimer ce document"
+                                                    @onclick="() => SupprimerAsync(d)">🗑</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <label class="zone-depot @(survol ? "survol" : "")" @ondragenter="() => survol = true"
+                       @ondragleave="() => survol = false" @ondrop="() => survol = false">
+                    <InputFile multiple OnChange="AjouterAsync" disabled="@enCours" />
+                    <span class="texte-depot">
+                        @if (enCours)
+                        {
+                            <span class="chargement">Enregistrement de @enregistrement…</span>
+                        }
+                        else
+                        {
+                            <span>📥 Déposez des fichiers ici, ou <u>cliquez pour les choisir</u></span>
+                            <span class="aide">7 Mo au plus par fichier. Un e-mail Outlook : enregistrez-le d'abord en fichier .msg.</span>
+                        }
+                    </span>
+                </label>
+            }
+        </div>
+        <div class="pied-fenetre">
+            <button class="bouton-principal" @onclick="FermerAsync">Fermer</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleDevis Cle { get; set; } = default!;
+    // Nombre de documents du devis à la fermeture (colonne « Docs » de la liste)
+    [Parameter] public EventCallback<int> OnFermer { get; set; }
+
+    private ElementReference fenetre;
+    private DocumentsDevis? documents;
+    private List<DocumentDevis> liste = [];
+    private bool chargement = true;
+    private bool enCours;
+    private bool survol;
+    private string enregistrement = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            documents = await Complements.LireDocumentsAsync(Cle);
+            liste = documents?.Documents.ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture des documents impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool premierAffichage)
+    {
+        if (premierAffichage)
+        {
+            try { await fenetre.FocusAsync(); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
+    }
+
+    // Fichiers choisis ou déposés : enregistrés un par un ; un fichier trop gros est signalé et ignoré
+    private async Task AjouterAsync(InputFileChangeEventArgs e)
+    {
+        enCours = true;
+        try
+        {
+            foreach (var f in e.GetMultipleFiles(50))
+            {
+                if (f.Size > LimitesDocuments.TailleMaximum)
+                {
+                    await Dialogues.AlerterAsync($"La taille du fichier {f.Name} est supérieure à 7 Mo.", "Documents");
+                    continue;
+                }
+                enregistrement = f.Name;
+                StateHasChanged();
+                using var memoire = new MemoryStream();
+                await using (var flux = f.OpenReadStream(LimitesDocuments.TailleMaximum))
+                    await flux.CopyToAsync(memoire);
+                try
+                {
+                    liste.Add(await Complements.AjouterDocumentAsync(Cle, f.Name, memoire.ToArray()));
+                }
+                catch (RegleMetierException ex)
+                {
+                    await Dialogues.AlerterAsync(ex.Message, "Documents");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Ajout impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+            enregistrement = "";
+        }
+    }
+
+    private async Task SupprimerAsync(DocumentDevis d)
+    {
+        if (!await Dialogues.ConfirmerAsync($"Confirmez-vous la suppression du fichier « {d.Nom} » ?", "Documents", "Supprimer")) return;
+        try
+        {
+            await Complements.SupprimerDocumentAsync(Cle, d.Id);
+            liste.Remove(d);
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message, "Documents");
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Suppression impossible : {ex.Message}");
+        }
+    }
+
+    private Task FermerAsync() => enCours ? Task.CompletedTask : OnFermer.InvokeAsync(liste.Count);
+
+    private async Task Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await FermerAsync();
+    }
+}

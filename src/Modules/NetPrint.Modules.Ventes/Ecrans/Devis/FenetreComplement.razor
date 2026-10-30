@@ -1,0 +1,221 @@
+@* =====================================================================
+   Fenêtres de complément d'un devis (lot A, lecture seule), ouvertes depuis la liste (menu, barre d'outils)
+   ou depuis le détail :
+     - "texte"        : FEN_VisuTexteLibre (texte du devis, ou d'un élément si Element > 0) ;
+     - "soustotaux"   : FEN_RecapSousTotaux ;
+     - "coefficients" : FEN_CalculRecap (+ impression, ex-ETAT_CalculRecap).
+   Fermeture : bouton Fermer, Échap ou clic à côté. « Imprimer » n'imprime que la fenêtre.
+   ===================================================================== *@
+@inject IComplementsDevis Complements
+@inject NetPrint.Socle.Session.IUtilisateurCourant UtilisateurCourant
+@inject IJSRuntime JS
+@inject Notifications Notifications
+
+<div class="voile" @onclick="FermerAsync">
+    <div class="fenetre complement zone-impression @Classe" role="dialog" aria-modal="true" tabindex="-1"
+         @ref="fenetre" @onclick:stopPropagation="true" @onkeydown="Clavier">
+        <div class="titre-fenetre">@Titre</div>
+        <div class="corps-fenetre">
+            <div class="seulement-impression entete-impression">
+                <span>@nomSociete</span>
+                <span>Édité le @DateTime.Now.ToString("dd/MM/yyyy HH:mm")</span>
+            </div>
+            @if (chargement)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else if (entete is null)
+            {
+                <p>Le devis @Cle.Libelle n'existe pas ou ne vous est pas accessible.</p>
+            }
+            else
+            {
+                <div class="bandeau-complement">
+                    <div>
+                        <span class="libelle-info">Devis</span>
+                        <b>@(Type == "coefficients" ? $"{Cle.Numero:00000}/{Cle.Version}" : Cle.Libelle)</b>
+                        @if (Cle.TypeCout == "T")
+                        {
+                            <span class="badge badge-offre">Devis type</span>
+                        }
+                    </div>
+                    <div><span class="libelle-info">@(entete.EstClient ? "Client" : "Prospect")</span> <b>@entete.CodeTiers</b> @entete.NomTiers</div>
+                    <div><span class="libelle-info">Désignation</span> <b>@entete.Designation1</b> @entete.Designation2</div>
+                </div>
+
+                switch (Type)
+                {
+                    case "texte":
+                        if (texte is { Lignes.Count: > 0 })
+                        {
+                            <pre class="texte-libre">@(string.Join("\n", texte.Lignes))</pre>
+                        }
+                        else
+                        {
+                            <p class="aide">Aucun texte libre.</p>
+                        }
+                        break;
+
+                    case "soustotaux":
+                        <div class="zone-defilement">
+                            <table class="grille grille-complement">
+                                <thead>
+                                    <tr>
+                                        <th>Sous-total</th>
+                                        <th class="nombre">Frais fixes</th>
+                                        <th class="nombre">Frais variables</th>
+                                        <th class="nombre">Total</th>
+                                        <th class="nombre">Valeur mille +</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var l in sousTotaux?.Lignes ?? [])
+                                    {
+                                        <tr class="@(l.EstTotal ? "ligne-sous-total" : "")">
+                                            <td>@l.Libelle</td>
+                                            <td class="nombre">@Montant(l.FraisFixes)</td>
+                                            <td class="nombre">@Montant(l.FraisVariables)</td>
+                                            <td class="nombre">@Montant(l.Total)</td>
+                                            <td class="nombre">@Montant(l.MillePlus)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        break;
+
+                    case "coefficients":
+                        if (coefficients is null || coefficients.Lignes.Count == 0)
+                        {
+                            <p class="aide">Aucune hypothèse pour cette version.</p>
+                        }
+                        else
+                        {
+                            if (coefficients.Coefficients.Count == 0)
+                            {
+                                <p class="aide">Aucun coefficient n'est saisi pour cette version du devis.</p>
+                            }
+                            <div class="zone-defilement">
+                                <table class="grille grille-complement tableau-coefficients">
+                                    <thead>
+                                        <tr>
+                                            <th class="nombre">Quantité</th>
+                                            <th class="nombre">@coefficients.LibelleBase</th>
+                                            @foreach (var c in coefficients.Coefficients)
+                                            {
+                                                <th class="nombre coefficient">× @c.ToString("0.000")</th>
+                                            }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var l in coefficients.Lignes)
+                                        {
+                                            <tr class="@(l.Hypothese == Cle.Hypothese ? "selection" : "")">
+                                                <td class="nombre">@Affichage.Entier(l.Quantite)</td>
+                                                <td class="nombre">@l.Base.ToString("N2")</td>
+                                                @foreach (var p in l.Prix)
+                                                {
+                                                    <td class="nombre prix-coefficient">@p.ToString("N2")</td>
+                                                }
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p class="aide">Prix = base × coefficient, tronqué au centime (sans arrondi).</p>
+                        }
+                        break;
+                }
+            }
+        </div>
+        <div class="pied-fenetre">
+            @if (Type == "coefficients" && coefficients is { Lignes.Count: > 0 })
+            {
+                <button @onclick="ImprimerAsync">🖨 Imprimer</button>
+            }
+            <button class="bouton-principal" @onclick="FermerAsync">Fermer</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Type { get; set; } = "";
+    [Parameter, EditorRequired] public CleDevis Cle { get; set; } = default!;
+    [Parameter] public int Element { get; set; }
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private ElementReference fenetre;
+    private bool chargement = true;
+    private string nomSociete = "";
+    private EnteteComplement? entete;
+    private TexteLibreDevis? texte;
+    private RecapSousTotaux? sousTotaux;
+    private TableauCoefficients? coefficients;
+
+    private string Titre => Type switch
+    {
+        "texte" => Element > 0 ? $"📝 Texte libre de l'élément {Element}" : "📝 Texte libre du devis",
+        "soustotaux" => "Σ Récapitulatif des sous-totaux",
+        "coefficients" => "🧮 Tableau des coefficients",
+        _ => "",
+    };
+
+    private string Classe => Type == "coefficients" ? "large" : "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var u = await UtilisateurCourant.LireAsync();
+            nomSociete = $"{u.Societe} · {u.NomSociete}";
+            switch (Type)
+            {
+                case "texte":
+                    texte = await Complements.LireTexteLibreAsync(Cle, Element);
+                    entete = texte?.Entete;
+                    break;
+                case "soustotaux":
+                    sousTotaux = await Complements.LireSousTotauxAsync(Cle);
+                    entete = sousTotaux?.Entete;
+                    break;
+                case "coefficients":
+                    coefficients = await Complements.LireCoefficientsAsync(Cle);
+                    entete = coefficients?.Entete;
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool premierAffichage)
+    {
+        // Focus sur la fenêtre pour que Échap la ferme
+        if (premierAffichage)
+        {
+            try { await fenetre.FocusAsync(); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
+    }
+
+    private async Task Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await FermerAsync();
+    }
+
+    private Task FermerAsync() => OnFermer.InvokeAsync();
+
+    // Impression du navigateur ; la feuille de style d'impression n'affiche que la fenêtre (.zone-impression)
+    private async Task ImprimerAsync()
+    {
+        try { await JS.InvokeVoidAsync("print"); }
+        catch (JSException ex) { Notifications.Erreur($"Impression impossible : {ex.Message}"); }
+    }
+
+    private static string Montant(decimal? v) => v is null ? "" : Affichage.Montant(v.Value);
+}

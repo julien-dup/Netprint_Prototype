@@ -1,0 +1,21 @@
+@* Bouton « … » de recherche à côté d'une zone de saisie (comme GestionOutils), ouvert aussi par F4 dans la zone
+   (saisie.js : F4 clique le bouton « … » du même champ). La fenêtre de choix est affichée par ZoneChoix,
+   en dehors du formulaire de l'écran. *@
+@using NetPrint.Noyau.ListesDeChoix
+@inject FenetresChoix FenetresChoix
+
+<button type="button" class="bouton-liste" title="@(Titre ?? "Rechercher dans la liste") (F4)" disabled="@Disabled"
+        @onclick="OuvrirAsync">⋯</button>
+
+@code {
+    [Parameter, EditorRequired] public ListeChoix Liste { get; set; }
+    [Parameter] public string? Parent { get; set; }
+    [Parameter] public string? Titre { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<LigneChoix> OnChoix { get; set; }
+
+    private async Task OuvrirAsync()
+    {
+        if (await FenetresChoix.ChoisirAsync(Liste, Parent) is { } ligne) await OnChoix.InvokeAsync(ligne);
+    }
+}

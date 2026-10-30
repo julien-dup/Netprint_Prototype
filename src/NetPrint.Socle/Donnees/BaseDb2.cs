@@ -38,6 +38,14 @@ public static partial class BaseDb2
     public static OdbcParameter Valeur(this OdbcParameterCollection parametres, object? valeur) =>
         parametres.AddWithValue($"p{parametres.Count + 1}", valeur ?? DBNull.Value);
 
+    // Paramètre binaire (BLOB, ex. D50008.DEFILE) : envoyé en SQL_LONGVARBINARY
+    public static OdbcParameter Binaire(this OdbcParameterCollection parametres, byte[] valeur)
+    {
+        var p = parametres.Add($"p{parametres.Count + 1}", OdbcType.Image, valeur.Length);
+        p.Value = valeur;
+        return p;
+    }
+
     // Lecture : les zones alpha AS400 sont complétées par des blancs, on les enlève
     public static string Texte(this DbDataReader rd, int i) => rd.IsDBNull(i) ? "" : Convert.ToString(rd.GetValue(i))!.Trim();
 

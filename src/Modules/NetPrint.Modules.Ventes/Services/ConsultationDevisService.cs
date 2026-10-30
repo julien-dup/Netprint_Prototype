@@ -403,18 +403,8 @@ internal sealed class ConsultationDevisService(ConsultationDevisDb2 donnees, IUt
 
     // R14 : papier en bobine — coefficient de prix et nombre de bobines
     // (longueur utile d'une bobine = conditionnement − perte de fin de bobine AA0002.TPPERB)
-    private static (decimal Coefficient, int NbBobines) CoefficientBobine(ElementBrut el, decimal perteBobine)
-    {
-        if (el.FeuilleBobine != "B" || el.Conditionnement <= perteBobine || el.HauteurTirage <= 0) return (1m, 0);
-        var toursParBobine = Math.Floor((el.Conditionnement - perteBobine) / (el.HauteurTirage / 1000m));
-        var tours = el.Tours + el.GacheFixe;
-        if (toursParBobine <= 0 || tours <= 0) return (1m, 0);
-        var nbBobines = tours / toursParBobine;
-        var reste = tours % toursParBobine;
-        var longueur = tours * el.HauteurTirage / 1000m;
-        var coef = (Math.Truncate(nbBobines) * el.Conditionnement + reste * el.HauteurTirage / 1000m) / longueur;
-        return (coef, (int)Math.Ceiling(nbBobines));
-    }
+    private static (decimal Coefficient, int NbBobines) CoefficientBobine(ElementBrut el, decimal perteBobine) =>
+        CalculBobine.Coefficient(el.FeuilleBobine, el.Conditionnement, perteBobine, el.HauteurTirage, el.Tours + el.GacheFixe);
 
     // ---------- Utilitaires ----------
     private static LigneOperation Operation(LigneFabBrute l) => new(

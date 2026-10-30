@@ -2,7 +2,7 @@
 
   <!-- Composants d'interface partagés par tous les modules, au style de la charte NetPrint
        (repris de GestionOutils, nouvelle interface) : fenêtres de dialogue, notifications, titres de colonnes (tri, filtre, largeur), préférences d'affichage des grilles.
-       Aucune règle métier, aucun accès base. Pas de bibliothèque de composants : HTML + wwwroot/app.css de NetPrint.Web. -->
+       Aucune règle métier, aucun accès base (les listes de choix passent par IListesDeChoix du Noyau). Pas de bibliothèque de composants : HTML + wwwroot/app.css de NetPrint.Web. -->
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NetPrint.Socle\NetPrint.Socle.csproj" />
+    <ProjectReference Include="..\NetPrint.Noyau\NetPrint.Noyau.csproj" />
   </ItemGroup>
 
 </Project>

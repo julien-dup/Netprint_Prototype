@@ -7,7 +7,7 @@ using NetPrint.Socle.Session;
 namespace NetPrint.Web.Commun;
 
 // Affichage d'une grille mémorisé par utilisateur et par société (repris de GestionOutils, preferences.ts) :
-// colonnes masquées, largeurs réglées à la souris, tri.
+// colonnes masquées, largeurs réglées à la souris, tri, valeurs par défaut de l'écran.
 // Charte : rien n'est stocké dans le navigateur. Le prototype range ces réglages côté serveur dans
 // App_Data/preferences/<profil>-<société>.json ; une table PostgreSQL prendra le relais (seule
 // l'implémentation de IPreferencesGrilles changera).
@@ -17,6 +17,9 @@ public sealed class PreferencesGrille
     public Dictionary<string, int> Largeurs { get; set; } = [];
     public string? TriCle { get; set; }
     public bool TriDescendant { get; set; }
+
+    // Valeurs par défaut de l'écran (ex-.ini du poste WinDev), par clé : ex. « devis » = "1" (uniquement en cours)
+    public Dictionary<string, string> Valeurs { get; set; } = [];
 }
 
 public interface IPreferencesGrilles

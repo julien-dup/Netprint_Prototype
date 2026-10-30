@@ -1,0 +1,146 @@
+@* =====================================================================
+   Légende de la décomposition analytique (ex-FEN_Legendes) : jusqu'à 15 chapitres (A à O), chacun avec une
+   désignation et jusqu'à 99 valeurs (60 caractères). Copier / coller d'un chapitre (mémorisé pendant la session).
+   La légende n'est enregistrée (D50007) qu'à la validation de la décomposition, comme le WinDev.
+   Un chapitre sans désignation ni valeur est supprimé à la validation : les suivants prennent sa lettre.
+   ÉCART : la ventilation des lignes suit son chapitre quand il change de lettre (le WinDev la laissait sur
+   l'ancienne lettre). Modèles de légende (DEV025E / DEV025D) : livraison suivante.
+   ===================================================================== *@
+@inject EtatConsultationDevis Etat
+
+<div class="voile">
+    <div class="fenetre complement legende-decomposition" role="dialog" aria-modal="true" @onkeydown="Clavier">
+        <div class="titre-fenetre">🏷 Légende de la décomposition</div>
+        <div class="corps-fenetre">
+            <div class="ligne-criteres">
+                <span class="libelle-info">Charger un modèle</span>
+                <select disabled title="Modèles de légende : livraison suivante">
+                    <option>Modèles de légende : livraison suivante</option>
+                </select>
+            </div>
+            @if (erreur is not null)
+            {
+                <p class="erreur" role="alert">⚠ @erreur</p>
+            }
+            @for (var i = 0; i < chapitres.Count; i++)
+            {
+                var c = chapitres[i];
+                var lettre = LimitesDecomposition.Lettre(i);
+                var index = i;
+                <div class="chapitre-legende @(index == chapitreEnErreur ? "en-erreur" : "")">
+                    <div class="entete-chapitre">
+                        <span class="lettre-chapitre">@lettre</span>
+                        <input class="titre-chapitre" maxlength="@LimitesDecomposition.LongueurTexte"
+                               placeholder="Désignation du chapitre @lettre" @bind="c.Titre" />
+                        <button type="button" class="bouton-icone" title="Copier ce chapitre" @onclick="() => Copier(c)">⧉</button>
+                        <button type="button" class="bouton-icone" title="Coller le chapitre copié à la place de celui-ci"
+                                disabled="@(Etat.ChapitreCopie is null)" @onclick="() => Coller(c)">📋</button>
+                        <button type="button" class="bouton-icone" title="Vider ce chapitre (supprimé à la validation)"
+                                @onclick="() => Vider(c)">✖</button>
+                    </div>
+                    <div class="valeurs-chapitre">
+                        @for (var j = 0; j < c.Valeurs.Count; j++)
+                        {
+                            var k = j;
+                            <label class="valeur-chapitre">
+                                <span class="numero-valeur">@($"{lettre}{k + 1}")</span>
+                                <input maxlength="@LimitesDecomposition.LongueurTexte" value="@c.Valeurs[k]"
+                                       @onchange="e => c.Valeurs[k] = e.Value?.ToString() ?? string.Empty" />
+                            </label>
+                        }
+                    </div>
+                    <button type="button" class="bouton-lien" disabled="@(c.Valeurs.Count >= LimitesDecomposition.Valeurs)"
+                            @onclick="() => c.Valeurs.Add(string.Empty)">+ Valeur</button>
+                </div>
+            }
+            <div>
+                <button type="button" disabled="@(chapitres.Count >= LimitesDecomposition.Chapitres)" @onclick="AjouterChapitre">
+                    + Chapitre
+                </button>
+            </div>
+        </div>
+        <div class="pied-fenetre">
+            <span class="aide">Un chapitre sans désignation ni valeur est supprimé ; les suivants prennent sa lettre.</span>
+            <span class="espace"></span>
+            <button type="button" @onclick="AnnulerAsync">Annuler</button>
+            <button type="button" class="bouton-principal" @onclick="ValiderAsync">OK</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Correspondance : ancien n° de chapitre (0 à 14) → nouveau n°, -1 si le chapitre est supprimé
+    public sealed record Resultat(IReadOnlyList<ChapitreLegende> Legende, int[] Correspondance);
+
+    [Parameter, EditorRequired] public IReadOnlyList<ChapitreLegende> Legende { get; set; } = [];
+    [Parameter] public EventCallback<Resultat?> OnFermer { get; set; }
+
+    private sealed class ChapitreEdite
+    {
+        public int Origine { get; init; } = -1;     // position du chapitre à l'ouverture, -1 pour un nouveau chapitre
+        public string Titre { get; set; } = string.Empty;
+        public List<string> Valeurs { get; set; } = [];
+    }
+
+    private List<ChapitreEdite> chapitres = [];
+    private string? erreur;
+    private int chapitreEnErreur = -1;
+
+    protected override void OnInitialized()
+    {
+        chapitres = [.. Legende.Select((c, i) => new ChapitreEdite { Origine = i, Titre = c.Titre, Valeurs = [.. c.Valeurs] })];
+        if (chapitres.Count == 0) chapitres.Add(new ChapitreEdite { Valeurs = [string.Empty] });
+    }
+
+    private void AjouterChapitre()
+    {
+        if (chapitres.Count < LimitesDecomposition.Chapitres) chapitres.Add(new ChapitreEdite { Valeurs = [string.Empty] });
+    }
+
+    private void Copier(ChapitreEdite c) => Etat.ChapitreCopie = new ChapitreLegende(c.Titre, [.. c.Valeurs]);
+
+    private void Coller(ChapitreEdite c)
+    {
+        if (Etat.ChapitreCopie is not { } copie) return;
+        c.Titre = copie.Titre;
+        c.Valeurs = [.. copie.Valeurs];
+    }
+
+    private static void Vider(ChapitreEdite c)
+    {
+        c.Titre = string.Empty;
+        for (var i = 0; i < c.Valeurs.Count; i++) c.Valeurs[i] = string.Empty;
+    }
+
+    private async Task ValiderAsync()
+    {
+        erreur = null;
+        chapitreEnErreur = -1;
+        for (var i = 0; i < chapitres.Count; i++)
+        {
+            var c = chapitres[i];
+            if (string.IsNullOrWhiteSpace(c.Titre) && c.Valeurs.Any(v => !string.IsNullOrWhiteSpace(v)))
+            {
+                erreur = "La désignation doit être renseignée.";
+                chapitreEnErreur = i;
+                return;
+            }
+        }
+
+        var legende = new List<ChapitreLegende>();
+        var correspondance = Enumerable.Repeat(-1, LimitesDecomposition.Chapitres).ToArray();
+        foreach (var c in chapitres.Where(x => !string.IsNullOrWhiteSpace(x.Titre)))
+        {
+            if (c.Origine >= 0) correspondance[c.Origine] = legende.Count;
+            legende.Add(new ChapitreLegende(c.Titre.Trim(), [.. c.Valeurs.Select(v => v.Trim())]));
+        }
+        await OnFermer.InvokeAsync(new Resultat(legende, correspondance));
+    }
+
+    private Task AnnulerAsync() => OnFermer.InvokeAsync(null);
+
+    private async Task Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await AnnulerAsync();
+    }
+}

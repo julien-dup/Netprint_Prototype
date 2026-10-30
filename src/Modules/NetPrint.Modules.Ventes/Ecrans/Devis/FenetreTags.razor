@@ -1,0 +1,151 @@
+@* =====================================================================
+   Tags d'un devis (ex-FEN_Tags) : liste commune TAG_DEVIS (50 au plus, 20 caractères), toutes sociétés ;
+   un clic allume / éteint un tag, « Enregistrer » remplace les tags du devis / version / hypothèse (D50010).
+   Écart validé : un tag peut être retiré, plus de doublons.
+   ===================================================================== *@
+@inject IComplementsDevis Complements
+@inject Notifications Notifications
+
+<div class="voile" @onclick="AnnulerAsync">
+    <div class="fenetre complement" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onkeydown="Clavier">
+        <div class="titre-fenetre">🏷 Tags du devis</div>
+        <div class="corps-fenetre">
+            @if (chargement)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else if (tags is null)
+            {
+                <p>Le devis @Cle.Libelle n'existe pas ou ne vous est pas accessible.</p>
+            }
+            else
+            {
+                <BandeauComplement Entete="tags.Entete" />
+                <p class="aide">Cliquez sur un tag pour le poser sur le devis ou le retirer.</p>
+                <div class="liste-tags">
+                    @if (tous.Count == 0)
+                    {
+                        <span class="aide">Aucun tag n'est encore défini.</span>
+                    }
+                    @foreach (var t in tous)
+                    {
+                        <button type="button" class="tag @(actifs.Contains(t.Id) ? "actif" : "")" aria-pressed="@(actifs.Contains(t.Id) ? "true" : "false")"
+                                @onclick="() => Basculer(t.Id)">@t.Libelle</button>
+                    }
+                </div>
+                <form class="ajout-tag" @onsubmit="CreerAsync">
+                    <label class="champ">
+                        <span>Nouveau tag</span>
+                        <input @bind="nouveau" maxlength="@LimitesTags.Longueur" placeholder="20 caractères maximum" />
+                    </label>
+                    <button type="submit" disabled="@(enCours || string.IsNullOrWhiteSpace(nouveau))">＋ Ajouter</button>
+                    <span class="aide">@tous.Count / @LimitesTags.Nombre tags</span>
+                </form>
+                @if (erreur is not null)
+                {
+                    <p class="erreur" role="alert">⚠ @erreur</p>
+                }
+            }
+        </div>
+        <div class="pied-fenetre">
+            <button type="button" @onclick="AnnulerAsync">Annuler</button>
+            <button type="button" class="bouton-principal" @onclick="EnregistrerAsync" disabled="@(tags is null || enCours)">Enregistrer</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleDevis Cle { get; set; } = default!;
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private TagsDevis? tags;
+    private List<TagDevis> tous = [];
+    private HashSet<int> actifs = [];
+    private bool chargement = true;
+    private bool enCours;
+    private string nouveau = "";
+    private string? erreur;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            tags = await Complements.LireTagsAsync(Cle);
+            if (tags is not null)
+            {
+                tous = tags.Tous.ToList();
+                actifs = tags.Actifs.ToHashSet();
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture des tags impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    private void Basculer(int id)
+    {
+        if (!actifs.Remove(id)) actifs.Add(id);
+    }
+
+    // Le nouveau tag est créé tout de suite dans la liste commune (comme le WinDev) et allumé pour ce devis
+    private async Task CreerAsync()
+    {
+        erreur = null;
+        enCours = true;
+        try
+        {
+            var t = await Complements.CreerTagAsync(nouveau);
+            tous.Add(t);
+            tous.Sort((a, b) => string.Compare(a.Libelle, b.Libelle, StringComparison.CurrentCultureIgnoreCase));
+            actifs.Add(t.Id);
+            nouveau = "";
+        }
+        catch (RegleMetierException ex)
+        {
+            erreur = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Création du tag impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        enCours = true;
+        try
+        {
+            await Complements.EnregistrerTagsAsync(Cle, actifs);
+            Notifications.Succes($"Tags enregistrés pour le devis {Cle.Libelle}.");
+            await OnFermer.InvokeAsync();
+        }
+        catch (RegleMetierException ex)
+        {
+            erreur = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Enregistrement des tags impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private Task AnnulerAsync() => OnFermer.InvokeAsync();
+
+    private async Task Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await AnnulerAsync();
+    }
+}

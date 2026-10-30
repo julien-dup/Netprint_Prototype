@@ -1,0 +1,147 @@
+@* =====================================================================
+   Tableau des prix (ex-FEN_TableauPrix du projet ComposantsExternes, + impression ex-ETAT_TableauPrix) :
+   toutes les quantités (hypothèses) de la version côte à côte ; ateliers, support, matière consommable,
+   sous-traitance, transport, puis valorisation selon la méthode de la société (AA000Z.CFTYPE).
+   Interrupteur « Unités suivantes » : colonnes « 1000 + » (valeur du mille supplémentaire).
+   ===================================================================== *@
+@inject IComplementsDevis Complements
+@inject NetPrint.Socle.Session.IUtilisateurCourant UtilisateurCourant
+@inject IJSRuntime JS
+@inject Notifications Notifications
+
+<div class="voile" @onclick="FermerAsync">
+    <div class="fenetre complement tres-large zone-impression" role="dialog" aria-modal="true" tabindex="-1" @ref="fenetre"
+         @onclick:stopPropagation="true" @onkeydown="Clavier">
+        <div class="titre-fenetre">💶 Tableau des prix</div>
+        <div class="corps-fenetre">
+            <div class="seulement-impression entete-impression">
+                <span>@nomSociete</span>
+                <span>Édité le @DateTime.Now.ToString("dd/MM/yyyy HH:mm")</span>
+            </div>
+            @if (chargement)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else if (tableau is null)
+            {
+                <p>Le devis @Cle.Libelle n'existe pas ou ne vous est pas accessible.</p>
+            }
+            else
+            {
+                <BandeauComplement Entete="tableau.Entete" />
+                <label class="interrupteur sans-impression">
+                    <input type="checkbox" @bind="unitesSuivantes" /> Unités suivantes (colonnes « 1000 + »)
+                </label>
+                <div class="zone-defilement">
+                    <table class="grille grille-complement tableau-prix">
+                        <thead>
+                            <tr>
+                                <th class="col-rubrique"></th>
+                                @for (var i = 0; i < tableau.Quantites.Count; i++)
+                                {
+                                    <th class="nombre @(tableau.Hypotheses[i] == Cle.Hypothese ? "colonne-devis" : "")"
+                                        title="Hypothèse @tableau.Hypotheses[i]">@Affichage.Entier(tableau.Quantites[i])</th>
+                                    if (unitesSuivantes)
+                                    {
+                                        <th class="nombre mille-plus">1000 +</th>
+                                    }
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var l in tableau.Lignes)
+                            {
+                                <tr class="@ClasseLigne(l.Style)">
+                                    <td class="col-rubrique">@l.Libelle</td>
+                                    @for (var i = 0; i < tableau.Quantites.Count; i++)
+                                    {
+                                        var bulle = l.AvecObservations && tableau.Observations[i] != "" ? tableau.Observations[i] : null;
+                                        <td class="nombre @(tableau.Hypotheses[i] == Cle.Hypothese ? "colonne-devis" : "")" title="@bulle">@Valeur(l, l.Valeurs[i])</td>
+                                        if (unitesSuivantes)
+                                        {
+                                            <td class="nombre mille-plus" title="@bulle">@Valeur(l, l.MillePlus[i])</td>
+                                        }
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p class="aide sans-impression">
+                    Méthode de valorisation @(tableau.MethodeValorisation == "A" ? "A (frais généraux par poste)" : "globale") ;
+                    lignes « @($"pour {tableau.Unite}".Trim()) » : montants ramenés à l'unité de vente du devis.
+                    La colonne surlignée est la quantité du devis ouvert.
+                </p>
+            }
+        </div>
+        <div class="pied-fenetre">
+            @if (tableau is { Quantites.Count: > 0 })
+            {
+                <button @onclick="ImprimerAsync">🖨 Imprimer</button>
+            }
+            <button class="bouton-principal" @onclick="FermerAsync">Fermer</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleDevis Cle { get; set; } = default!;
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private ElementReference fenetre;
+    private TableauPrix? tableau;
+    private bool chargement = true;
+    private bool unitesSuivantes;
+    private string nomSociete = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var u = await UtilisateurCourant.LireAsync();
+            nomSociete = $"{u.Societe} · {u.NomSociete}";
+            tableau = await Complements.LireTableauPrixAsync(Cle);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture du tableau des prix impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool premierAffichage)
+    {
+        if (premierAffichage)
+        {
+            try { await fenetre.FocusAsync(); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
+    }
+
+    private static string ClasseLigne(StyleLignePrix s) => s switch
+    {
+        StyleLignePrix.Total => "ligne-prix-total",
+        StyleLignePrix.Unite => "ligne-prix-unite",
+        StyleLignePrix.Coefficient => "ligne-prix-coefficient",
+        StyleLignePrix.Vide => "ligne-prix-vide",
+        _ => "",
+    };
+
+    private static string Valeur(LigneTableauPrix l, decimal? v) =>
+        v is not { } x || x == 0 ? "" : l.Style == StyleLignePrix.Coefficient ? x.ToString("N3") : x.ToString("N2");
+
+    private async Task ImprimerAsync()
+    {
+        try { await JS.InvokeVoidAsync("print"); }
+        catch (JSException ex) { Notifications.Erreur($"Impression impossible : {ex.Message}"); }
+    }
+
+    private Task FermerAsync() => OnFermer.InvokeAsync();
+
+    private async Task Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await FermerAsync();
+    }
+}

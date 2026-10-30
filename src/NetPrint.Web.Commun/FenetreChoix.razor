@@ -1,0 +1,130 @@
+@* =====================================================================
+   Fenêtre de choix (ex-FEN_Rec* WinDev, « Choix d'un client » de GestionOutils) :
+   zone de recherche par mots + grille ; double-clic ou « Choisir » pour sélectionner, flèches haut / bas
+   pour changer de ligne. Les petites listes s'affichent en entier à l'ouverture.
+   Affichée par ZoneChoix (mise en page), jamais à l'intérieur d'un formulaire d'écran.
+   ===================================================================== *@
+@using NetPrint.Noyau.ListesDeChoix
+@inject IListesDeChoix Listes
+@inject Notifications Notifications
+
+<div class="voile" @onclick="AnnulerAsync">
+    <div class="fenetre choix" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onkeydown="Clavier">
+        <div class="titre-fenetre">@(resultat?.Titre ?? "Recherche")</div>
+        <div class="corps-fenetre">
+            <form class="ligne-criteres" @onsubmit="RechercherAsync">
+                <label>
+                    Recherche :
+                    <input @ref="saisie" @bind="texte" @bind:event="oninput" placeholder="un ou plusieurs mots (DUP* : commence par)" />
+                </label>
+                <button type="submit" disabled="@chargement">🔍 Rechercher</button>
+                @if (chargement)
+                {
+                    <span class="chargement">Recherche…</span>
+                }
+            </form>
+            <div class="zone-defilement">
+                <table class="grille grille-choix">
+                    <thead>
+                        <tr>
+                            @foreach (var c in resultat?.Colonnes ?? [])
+                            {
+                                <th class="@(c.Nombre ? "nombre" : "")">@c.Libelle</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (resultat is { Lignes.Count: 0 } && resultat.Message is not null)
+                        {
+                            <tr class="ligne-vide"><td colspan="@resultat.Colonnes.Count">@resultat.Message</td></tr>
+                        }
+                        @for (var i = 0; i < (resultat?.Lignes.Count ?? 0); i++)
+                        {
+                            var indice = i;
+                            var l = resultat!.Lignes[i];
+                            <tr class="@(indice == selection ? "selection" : "") @(l.Inactif ? "inactive" : "")"
+                                @onclick="() => selection = indice" @ondblclick="() => ChoisirAsync(l)">
+                                @for (var j = 0; j < l.Valeurs.Count; j++)
+                                {
+                                    <td class="@(resultat.Colonnes[j].Nombre ? "nombre" : "")">@l.Valeurs[j]</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="aide">
+                Double-clic sur une ligne pour la choisir.
+                @if (resultat is { Tronque: true })
+                {
+                    <b> Seules les 200 premières lignes sont affichées : précisez la recherche.</b>
+                }
+            </p>
+        </div>
+        <div class="pied-fenetre">
+            <button type="button" @onclick="AnnulerAsync">Annuler</button>
+            <button type="button" class="bouton-principal" disabled="@(Selectionnee is null)"
+                    @onclick="() => ChoisirAsync(Selectionnee!)">Choisir</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ListeChoix Liste { get; set; }
+    [Parameter] public string? Parent { get; set; }
+    [Parameter] public EventCallback<LigneChoix> OnChoix { get; set; }
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private ElementReference saisie;
+    private string texte = "";
+    private ResultatChoix? resultat;
+    private bool chargement;
+    private int selection = -1;
+
+    private LigneChoix? Selectionnee =>
+        resultat is not null && selection >= 0 && selection < resultat.Lignes.Count ? resultat.Lignes[selection] : null;
+
+    protected override Task OnInitializedAsync() => RechercherAsync();
+
+    protected override async Task OnAfterRenderAsync(bool premierAffichage)
+    {
+        if (premierAffichage)
+        {
+            try { await saisie.FocusAsync(); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
+    }
+
+    private async Task RechercherAsync()
+    {
+        chargement = true;
+        try
+        {
+            resultat = await Listes.RechercherAsync(Liste, texte, Parent);
+            selection = resultat.Lignes.Count > 0 ? 0 : -1;
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Recherche impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    // Flèches haut / bas : ligne sélectionnée ; Échap : annuler
+    private async Task Clavier(KeyboardEventArgs e)
+    {
+        var n = resultat?.Lignes.Count ?? 0;
+        switch (e.Key)
+        {
+            case "Escape": await AnnulerAsync(); break;
+            case "ArrowDown" when n > 0: selection = Math.Min(selection + 1, n - 1); break;
+            case "ArrowUp" when n > 0: selection = Math.Max(selection - 1, 0); break;
+        }
+    }
+
+    private Task ChoisirAsync(LigneChoix l) => OnChoix.InvokeAsync(l);
+
+    private Task AnnulerAsync() => OnFermer.InvokeAsync();
+}

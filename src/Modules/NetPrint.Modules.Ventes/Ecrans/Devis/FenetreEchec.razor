@@ -1,0 +1,147 @@
+@* =====================================================================
+   Saisie de l'échec d'un devis (ex-FEN_SaisieEchec, table D50006).
+   Un seul échec par n° de devis, toutes versions et hypothèses confondues (R8).
+   Motif (table ME), date de clôture et descriptif obligatoires ; suppression après confirmation.
+   ===================================================================== *@
+@inject IComplementsDevis Complements
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<div class="voile" @onclick="AnnulerAsync">
+    <form class="fenetre complement" role="dialog" aria-modal="true" @onclick:stopPropagation="true"
+          @onsubmit="ValiderAsync" @onkeydown="Clavier">
+        <div class="titre-fenetre">✖ Échec du devis</div>
+        <div class="corps-fenetre">
+            @if (chargement)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else if (echec is null)
+            {
+                <p>Le devis @Cle.Libelle n'existe pas ou ne vous est pas accessible.</p>
+            }
+            else
+            {
+                <BandeauComplement Entete="echec.Entete"
+                                   Remarque="@($"L'échec concerne toutes les versions du devis n° {Cle.Numero:00000}.")" />
+                @if (erreur is not null)
+                {
+                    <p class="erreur" role="alert">⚠ @erreur</p>
+                }
+                <div class="formulaire formulaire-echec">
+                    <span>Motif</span>
+                    <select @bind="motif">
+                        <option value=""></option>
+                        @foreach (var m in echec.Motifs)
+                        {
+                            <option value="@m.Code">@m.Code — @m.Libelle</option>
+                        }
+                    </select>
+                    <span>Devis clôturé le</span>
+                    <input type="date" @bind="date" @bind:format="yyyy-MM-dd" />
+                    <span>Descriptif</span>
+                    <textarea rows="6" maxlength="800" @bind="descriptif"></textarea>
+                </div>
+            }
+        </div>
+        <div class="pied-fenetre">
+            @if (echec is { Existe: true })
+            {
+                <button type="button" class="bouton-danger" @onclick="SupprimerAsync" disabled="@enCours">Supprimer l'échec</button>
+            }
+            <span class="espace"></span>
+            <button type="button" @onclick="AnnulerAsync">Annuler</button>
+            <button type="submit" class="bouton-principal" disabled="@(echec is null || enCours)">Valider</button>
+        </div>
+    </form>
+</div>
+
+@code {
+    // Résultat : null = rien de changé ; Motif vide = échec supprimé
+    public sealed record Resultat(string Motif, DateOnly? Date);
+
+    [Parameter, EditorRequired] public CleDevis Cle { get; set; } = default!;
+    [Parameter] public EventCallback<Resultat?> OnFermer { get; set; }
+
+    private EchecDevis? echec;
+    private bool chargement = true;
+    private bool enCours;
+    private string? erreur;
+    private string motif = "";
+    private DateOnly? date;
+    private string descriptif = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            echec = await Complements.LireEchecAsync(Cle);
+            if (echec is not null)
+            {
+                motif = echec.Motif;
+                date = echec.DateCloture;
+                descriptif = echec.Descriptif;
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture de l'échec impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    private async Task ValiderAsync()
+    {
+        if (echec is null || enCours) return;
+        enCours = true;
+        erreur = null;
+        try
+        {
+            await Complements.EnregistrerEchecAsync(Cle, new SaisieEchec(motif, date, descriptif));
+            Notifications.Succes($"Échec enregistré pour le devis n° {Cle.Numero:00000}.");
+            await OnFermer.InvokeAsync(new Resultat(motif.Trim().ToUpperInvariant(), date));
+        }
+        catch (RegleMetierException ex)
+        {
+            erreur = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Enregistrement impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private async Task SupprimerAsync()
+    {
+        if (!await Dialogues.ConfirmerAsync("Confirmez-vous la suppression de cet échec ?", "Échec du devis", "Supprimer")) return;
+        enCours = true;
+        try
+        {
+            await Complements.SupprimerEchecAsync(Cle);
+            Notifications.Succes($"Échec supprimé pour le devis n° {Cle.Numero:00000}.");
+            await OnFermer.InvokeAsync(new Resultat("", null));
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Suppression impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private Task AnnulerAsync() => OnFermer.InvokeAsync(null);
+
+    private async Task Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await AnnulerAsync();
+    }
+}

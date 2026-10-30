@@ -1,0 +1,23 @@
+@* Bandeau des fenêtres de complément : devis, client ou prospect, désignations (+ remarque facultative) *@
+<div class="bandeau-complement">
+    <div>
+        <span class="libelle-info">Devis</span>
+        <b>@(Libelle ?? Entete.Cle.Libelle)</b>
+        @if (Entete.Cle.TypeCout == "T")
+        {
+            <span class="badge badge-offre">Devis type</span>
+        }
+    </div>
+    <div><span class="libelle-info">@(Entete.EstClient ? "Client" : "Prospect")</span> <b>@Entete.CodeTiers</b> @Entete.NomTiers</div>
+    <div><span class="libelle-info">Désignation</span> <b>@Entete.Designation1</b> @Entete.Designation2</div>
+    @if (Remarque is not null)
+    {
+        <div class="aide">@Remarque</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public EnteteComplement Entete { get; set; } = default!;
+    [Parameter] public string? Libelle { get; set; }      // à la place de « n°/version/hypothèse »
+    [Parameter] public string? Remarque { get; set; }
+}

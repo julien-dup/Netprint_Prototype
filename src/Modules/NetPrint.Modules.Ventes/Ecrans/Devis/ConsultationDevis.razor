@@ -2,8 +2,8 @@
 @* =====================================================================
    Consultation des devis — reprise de FEN_ConsultationDevis (WinDev, branche DLLNew).
    Critères (zones SAI_*), bouton Chargement, liste TABLE_Devis, menu contextuel, légende.
-   Fonctions pas encore reprises (grisées) : documents, échec, tags, tableau des prix, sous-totaux,
-   texte libre, offre, coefficients, récapitulatif PDF, modification, recherches F4.
+   Compléments repris : texte libre, sous-totaux, coefficients, valeurs par défaut, échec, documents, tags,
+   tableau des prix, récapitulatif PDF, recherches F4 (bouton « … »). Pas encore repris (grisés) : offre, modification.
    ===================================================================== *@
 @inject IConsultationDevis Consultation
 @inject EtatConsultationDevis Etat
@@ -21,15 +21,33 @@
     <button class="bouton-principal" disabled="@(Selection is null)" @onclick="() => Ouvrir(Selection)"
             title="Détail du devis sélectionné (double-clic)">🔎 Détail du devis</button>
     <span class="separateur-vertical"></span>
-    <button disabled title="Prochaine étape">📎 Documents</button>
-    <button disabled title="Prochaine étape">✖ Échec</button>
-    <button disabled title="Prochaine étape">🏷 Tags</button>
+    <button disabled="@(Selection is null)" title="Documents du devis sélectionné"
+            @onclick='() => OuvrirComplement("documents", Selection)'>📎 Documents</button>
+    <button disabled="@(Selection is null)" title="Saisie de l'échec du devis sélectionné"
+            @onclick='() => OuvrirComplement("echec", Selection)'>✖ Échec</button>
+    <button disabled="@(Selection is null)" title="Tags du devis sélectionné"
+            @onclick='() => OuvrirComplement("tags", Selection)'>🏷 Tags</button>
     <span class="separateur-vertical"></span>
-    <button disabled title="Prochaine étape">💶 Tableau des prix</button>
-    <button disabled title="Prochaine étape">Σ Sous-totaux</button>
-    <button disabled title="Prochaine étape">📝 Texte libre</button>
-    <button disabled title="Prochaine étape (récapitulatif PDF généré par le serveur)">🖨 Récapitulatif</button>
+    <button disabled="@(Selection is null)" title="Tableau des prix du devis sélectionné (toutes les quantités)"
+            @onclick='() => OuvrirComplement("prix", Selection)'>💶 Tableau des prix</button>
+    <button disabled="@(Selection is null)" title="Récapitulatif des sous-totaux du devis sélectionné"
+            @onclick='() => OuvrirComplement("soustotaux", Selection)'>Σ Sous-totaux</button>
+    <button disabled="@(Selection is null)" title="Tableau des coefficients du devis sélectionné"
+            @onclick='() => OuvrirComplement("coefficients", Selection)'>🧮 Coefficients</button>
+    <button disabled="@(Selection is null)" title="Texte libre du devis sélectionné"
+            @onclick='() => OuvrirComplement("texte", Selection)'>📝 Texte libre</button>
+    @if (Selection is { } sel)
+    {
+        <a class="bouton-ancre" href="@AdresseRecapitulatif(sel)" target="_blank" rel="noopener"
+           title="Récapitulatif PDF du devis sélectionné (édité par l'IBM i, s'ouvre dans un nouvel onglet)">🖨 Récapitulatif</a>
+    }
+    else
+    {
+        <button disabled title="Récapitulatif PDF du devis sélectionné">🖨 Récapitulatif</button>
+    }
     <span class="espace"></span>
+    <button title="Filtres « Devis » et « Type devis » proposés à l'ouverture, présentation du détail"
+            @onclick="() => valeursDefaut = true">⚙ Valeurs par défaut</button>
     <button disabled title="Prochaine étape (saisie du devis)">✏️ Modifier</button>
 </fieldset>
 
@@ -43,12 +61,16 @@
         <div class="ligne-champs">
             <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
             <input type="number" class="num7" title="Compte client (auxiliaire)" @bind="C.CompteClient" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix='l => ChoisirClient(l)' />
         </div>
     </div>
-    <label class="champ">
+    <div class="champ">
         <span>Prospect</span>
-        <input type="number" class="num6" @bind="C.Prospect" />
-    </label>
+        <div class="ligne-champs">
+            <input type="number" class="num6" @bind="C.Prospect" />
+            <BoutonRecherche Liste="ListeChoix.Prospect" OnChoix='l => C.Prospect = Entier(l.Code)' />
+        </div>
+    </div>
     <label class="champ">
         <span>Désignation</span>
         <input class="recherche" placeholder="Un ou plusieurs mots" @bind="C.Designation" />
@@ -61,15 +83,21 @@
         <span>au</span>
         <input type="date" @bind="C.DateAu" @bind:format="yyyy-MM-dd" />
     </label>
-    <label class="champ">
+    <div class="champ">
         <span>Représentant</span>
-        <input type="number" class="num6" @bind="C.Representant" disabled="@(contexte?.RepresentantImpose is not null)"
-               title="@(contexte?.RepresentantImpose is not null ? "Vous ne voyez que vos devis" : null)" />
-    </label>
-    <label class="champ">
+        <div class="ligne-champs">
+            <input type="number" class="num6" @bind="C.Representant" disabled="@(contexte?.RepresentantImpose is not null)"
+                   title="@(contexte?.RepresentantImpose is not null ? "Vous ne voyez que vos devis" : null)" />
+            <BoutonRecherche Liste="ListeChoix.Representant" Disabled="@(contexte?.RepresentantImpose is not null)" OnChoix='l => C.Representant = Entier(l.Code)' />
+        </div>
+    </div>
+    <div class="champ">
         <span>Catégorie</span>
-        <input class="code" maxlength="2" @bind="C.Categorie" />
-    </label>
+        <div class="ligne-champs">
+            <input class="code" maxlength="2" @bind="C.Categorie" />
+            <BoutonRecherche Liste="ListeChoix.Categorie" OnChoix='l => C.Categorie = l.Code' />
+        </div>
+    </div>
     <label class="champ">
         <span>Devis</span>
         <select @bind="C.EtatDevis">
@@ -101,19 +129,19 @@
         <div class="groupe-criteres">
             <span class="titre-groupe">Commercial</span>
             <label class="champ"><span>Étude</span><input type="number" class="num6" @bind="C.Etude" /></label>
-            <label class="champ"><span>Profil</span><input class="code" maxlength="10" @bind="C.Profil" /></label>
-            <label class="champ"><span>Sous-catégorie</span><input class="code" maxlength="2" @bind="C.SousCategorie" /></label>
-            <label class="champ"><span>Fabricant</span><input class="code" maxlength="3" @bind="C.Fabricant" /></label>
-            <label class="champ"><span>Norme</span><input class="code" @bind="C.Norme" /></label>
+            <div class="champ"><span>Profil</span><div class="ligne-champs"><input class="code" maxlength="10" @bind="C.Profil" /><BoutonRecherche Liste="ListeChoix.Profil" OnChoix='l => C.Profil = l.Code' /></div></div>
+            <div class="champ"><span>Sous-catégorie</span><div class="ligne-champs"><input class="code" maxlength="2" @bind="C.SousCategorie" /><BoutonRecherche Liste="ListeChoix.SousCategorie" Parent="@C.Categorie" OnChoix='l => C.SousCategorie = l.Code' /></div></div>
+            <div class="champ"><span>Fabricant</span><div class="ligne-champs"><input class="code" maxlength="3" @bind="C.Fabricant" /><BoutonRecherche Liste="ListeChoix.Fabricant" OnChoix='l => C.Fabricant = l.Code' /></div></div>
+            <div class="champ"><span>Norme</span><div class="ligne-champs"><input class="code" @bind="C.Norme" /><BoutonRecherche Liste="ListeChoix.Norme" OnChoix='l => C.Norme = l.Code' /></div></div>
             <label class="champ"><span>Quantité de</span><input type="number" class="num7" @bind="C.QuantiteDe" /></label>
             <label class="champ"><span>à</span><input type="number" class="num7" @bind="C.QuantiteA" /></label>
             <label class="champ"><span>Nb éléments</span><input type="number" class="num3" @bind="C.NbElements" /></label>
             <label class="champ"><span>Nb élément/ex</span><input type="number" class="num3" @bind="C.NbElementsExemplaire" /></label>
             <label class="champ"><span>Modèle</span><input type="number" class="num6" @bind="C.Modele" /></label>
-            <label class="champ"><span>N° OF</span><input type="number" class="num6" @bind="C.Dossier" /></label>
-            <label class="champ"><span>N° OF préc.</span><input type="number" class="num6" @bind="C.DossierPrecedent" /></label>
+            <div class="champ"><span>N° OF</span><div class="ligne-champs"><input type="number" class="num6" @bind="C.Dossier" /><BoutonRecherche Liste="ListeChoix.Dossier" OnChoix='l => C.Dossier = Entier(l.Code)' /></div></div>
+            <div class="champ"><span>N° OF préc.</span><div class="ligne-champs"><input type="number" class="num6" @bind="C.DossierPrecedent" /><BoutonRecherche Liste="ListeChoix.Dossier" OnChoix='l => C.DossierPrecedent = Entier(l.Code)' /></div></div>
             <label class="champ"><span>Réf. imprimé</span><input class="court" @bind="C.ReferenceImprime" /></label>
-            <label class="champ"><span>Motif échec</span><input class="code" @bind="C.MotifEchec" /></label>
+            <div class="champ"><span>Motif échec</span><div class="ligne-champs"><input class="code" @bind="C.MotifEchec" /><BoutonRecherche Liste="ListeChoix.MotifEchec" OnChoix='l => C.MotifEchec = l.Code' /></div></div>
             <label class="champ"><span>Échec du</span><input type="date" @bind="C.EchecDu" @bind:format="yyyy-MM-dd" /></label>
             <label class="champ"><span>au</span><input type="date" @bind="C.EchecAu" @bind:format="yyyy-MM-dd" /></label>
         </div>
@@ -137,9 +165,9 @@
         </div>
         <div class="groupe-criteres">
             <span class="titre-groupe">Papier</span>
-            <label class="champ"><span>Papier</span><input type="number" class="num6" @bind="C.Papier" /></label>
-            <label class="champ"><span>Sorte</span><input class="code" @bind="C.Sorte" /></label>
-            <label class="champ"><span>Sous-sorte</span><input class="code" @bind="C.SousSorte" /></label>
+            <div class="champ"><span>Papier</span><div class="ligne-champs"><input type="number" class="num6" @bind="C.Papier" /><BoutonRecherche Liste="ListeChoix.Papier" OnChoix='l => C.Papier = Entier(l.Code)' /></div></div>
+            <div class="champ"><span>Sorte</span><div class="ligne-champs"><input class="code" @bind="C.Sorte" /><BoutonRecherche Liste="ListeChoix.Sorte" OnChoix='l => C.Sorte = l.Code' /></div></div>
+            <div class="champ"><span>Sous-sorte</span><div class="ligne-champs"><input class="code" @bind="C.SousSorte" /><BoutonRecherche Liste="ListeChoix.SousSorte" Parent="@C.Sorte" OnChoix='l => C.SousSorte = l.Code' /></div></div>
             <label class="champ"><span>Grammage</span><input type="number" class="num3" @bind="C.Grammage" /></label>
             <div class="champ">
                 <span>Format papier</span>
@@ -148,7 +176,7 @@
                     <input type="number" class="num6" @bind="C.HauteurPapier" />
                 </div>
             </div>
-            <label class="champ"><span>Coloris</span><input class="code" @bind="C.Coloris" /></label>
+            <div class="champ"><span>Coloris</span><div class="ligne-champs"><input class="code" @bind="C.Coloris" /><BoutonRecherche Liste="ListeChoix.Coloris" OnChoix='l => C.Coloris = l.Code' /></div></div>
             <div class="champ">
                 <span>Épaisseur</span>
                 <div class="ligne-champs">
@@ -164,7 +192,7 @@
         </div>
         <div class="groupe-criteres">
             <span class="titre-groupe">Fabrication</span>
-            <label class="champ"><span>Machine tirage</span><input class="code" @bind="C.MachineTirage" /></label>
+            <div class="champ"><span>Machine tirage</span><div class="ligne-champs"><input class="code" @bind="C.MachineTirage" /><BoutonRecherche Liste="ListeChoix.MachineTirage" OnChoix='l => C.MachineTirage = l.Code' /></div></div>
             <div class="champ">
                 <span>Format tirage</span>
                 <div class="ligne-champs">
@@ -174,11 +202,11 @@
             </div>
             <label class="champ"><span>Nb poses</span><input type="number" class="num3" @bind="C.NbPoses" /></label>
             <label class="champ"><span>Outil étiquette/forme</span><input type="number" class="num6" @bind="C.Outil" /></label>
-            <label class="champ"><span>Autre machine</span><input class="code" maxlength="3" @bind="C.Section" /></label>
-            <label class="champ"><span>Opération</span><input type="number" class="num3" @bind="C.Operation" /></label>
-            <label class="champ"><span>Matière</span><input type="number" class="num6" @bind="C.Matiere" /></label>
-            <label class="champ"><span>Fournisseur STR</span><input type="number" class="num3" @bind="C.FournisseurSousTraitance" /></label>
-            <label class="champ"><span>Opération STR</span><input type="number" class="num3" @bind="C.OperationSousTraitance" /></label>
+            <div class="champ"><span>Autre machine</span><div class="ligne-champs"><input class="code" maxlength="3" @bind="C.Section" /><BoutonRecherche Liste="ListeChoix.Section" OnChoix='l => C.Section = l.Code' /></div></div>
+            <div class="champ"><span>Opération</span><div class="ligne-champs"><input type="number" class="num3" @bind="C.Operation" /><BoutonRecherche Liste="ListeChoix.Operation" Parent="@C.Section" OnChoix='l => C.Operation = Entier(l.Code)' /></div></div>
+            <div class="champ"><span>Matière</span><div class="ligne-champs"><input type="number" class="num6" @bind="C.Matiere" /><BoutonRecherche Liste="ListeChoix.Matiere" OnChoix='l => C.Matiere = Entier(l.Code)' /></div></div>
+            <div class="champ"><span>Fournisseur STR</span><div class="ligne-champs"><input type="number" class="num3" @bind="C.FournisseurSousTraitance" /><BoutonRecherche Liste="ListeChoix.Fournisseur" OnChoix='l => C.FournisseurSousTraitance = Entier(l.Code)' /></div></div>
+            <div class="champ"><span>Opération STR</span><div class="ligne-champs"><input type="number" class="num3" @bind="C.OperationSousTraitance" /><BoutonRecherche Liste="ListeChoix.OperationSousTraitance" Parent="@(C.FournisseurSousTraitance?.ToString())" OnChoix='l => C.OperationSousTraitance = Entier(l.Code)' /></div></div>
         </div>
     }
 </form>
@@ -304,6 +332,12 @@
                                         }
                                     </td>
                                 }
+                                else if (c.Cle == "docs")
+                                {
+                                    @* Double-clic dans la colonne Docs : documents du devis (comme le WinDev) *@
+                                    <td class="@c.Classe col-docs" title="Double-clic : documents du devis"
+                                        @ondblclick='() => OuvrirComplement("documents", l.Cle)' @ondblclick:stopPropagation="true">@Texte(c.Cle, l)</td>
+                                }
                                 else
                                 {
                                     <td class="@c.Classe" title="@Bulle(c.Cle, l)">@Texte(c.Cle, l)</td>
@@ -340,16 +374,17 @@
         <li @onclick="OuvrirDepuisMenu">🔎 Détail du devis</li>
         <li class="separateur"></li>
         <li class="inactif" title="Prochaine étape">✏️ Modification</li>
-        <li class="inactif" title="Prochaine étape">💶 Tableau des prix</li>
-        <li class="inactif" title="Prochaine étape">🧮 Tableau des coefficients</li>
-        <li class="inactif" title="Prochaine étape">Σ Récapitulatif des sous-totaux</li>
-        <li class="inactif" title="Prochaine étape">📝 Texte libre</li>
-        <li class="inactif" title="Prochaine étape">🖨 Récapitulatif du devis (PDF)</li>
+        <li @onclick='() => ComplementDepuisMenu("prix")'>💶 Tableau des prix</li>
+        <li @onclick='() => ComplementDepuisMenu("coefficients")'>🧮 Tableau des coefficients</li>
+        <li @onclick='() => ComplementDepuisMenu("soustotaux")'>Σ Récapitulatif des sous-totaux</li>
+        <li @onclick='() => ComplementDepuisMenu("texte")'>📝 Texte libre</li>
+        <li class="li-lien"><a href="@AdresseRecapitulatif(menu.Ligne.Cle)" target="_blank" rel="noopener" @onclick="() => menu = null">🖨 Récapitulatif du devis (PDF)</a></li>
         <li class="separateur"></li>
         <li class="inactif" title="Prochaine étape">📄 Saisie de l'offre</li>
         <li class="inactif" title="Prochaine étape">👁 Aperçu de l'offre</li>
-        <li class="inactif" title="Prochaine étape">✖ Saisie de l'échec</li>
-        <li class="inactif" title="Prochaine étape">📎 Documents</li>
+        <li @onclick='() => ComplementDepuisMenu("echec")'>✖ Saisie de l'échec</li>
+        <li @onclick='() => ComplementDepuisMenu("documents")'>📎 Documents</li>
+        <li @onclick='() => ComplementDepuisMenu("tags")'>🏷 Tags</li>
         @if (menu.Ligne.Etude != 0)
         {
             <li class="inactif" title="Module Production">📐 Étude d'imposition n° @menu.Ligne.Etude</li>
@@ -359,6 +394,31 @@
             <li class="inactif" title="Module Production">📁 Historique du dossier @menu.Ligne.Dossier</li>
         }
     </ul>
+}
+
+@if (complement is { Type: "echec" })
+{
+    <FenetreEchec Cle="complement.Cle" OnFermer="FermerEchec" />
+}
+else if (complement is { Type: "documents" })
+{
+    <FenetreDocuments Cle="complement.Cle" OnFermer="FermerDocuments" />
+}
+else if (complement is { Type: "prix" })
+{
+    <FenetreTableauPrix Cle="complement.Cle" OnFermer="() => complement = null" />
+}
+else if (complement is { Type: "tags" })
+{
+    <FenetreTags Cle="complement.Cle" OnFermer="() => complement = null" />
+}
+else if (complement is not null)
+{
+    <FenetreComplement Type="@complement.Type" Cle="complement.Cle" OnFermer="() => complement = null" />
+}
+@if (valeursDefaut)
+{
+    <FenetreValeursDefaut OnFermer="FermerValeursDefaut" />
 }
 
 @code {
@@ -404,7 +464,7 @@
         new("datedemande", "Demandé le", 95, "", D, l => l.DateDemande),
     ];
 
-    private const string NomGrille = "ventes.consultation-devis";
+    private const string NomGrille = EtatConsultationDevis.NomGrille;
 
     private sealed record MenuLigne(int X, int Y, LigneListeDevis Ligne);
 
@@ -414,6 +474,11 @@
     private bool chargement;
     private MenuLigne? menu;
     private bool menuColonnes;
+
+    // Fenêtre de complément ouverte (texte libre, sous-totaux, coefficients) et fenêtre des valeurs par défaut
+    private sealed record Complement(string Type, CleDevis Cle);
+    private Complement? complement;
+    private bool valeursDefaut;
 
     // Affichage de la grille : colonnes visibles (dans l'ordre WinDev) et largeur totale, recalculées à chaque réglage
     private Colonne[] colonnesVisibles = Colonnes;
@@ -428,9 +493,10 @@
     protected override async Task OnInitializedAsync()
     {
         // Affichage mémorisé de la grille (lu une seule fois par session ; le tri mémorisé s'applique alors)
-        if (Etat.Preferences is null)
+        if (!Etat.PreferencesListeAppliquees)
         {
-            var p = await PreferencesGrilles.LireAsync(NomGrille);
+            Etat.PreferencesListeAppliquees = true;
+            var p = Etat.Preferences ?? await PreferencesGrilles.LireAsync(NomGrille);
             p.Masquees.RemoveAll(cle => !Colonnes.Any(c => c.Cle == cle && !c.Obligatoire));
             Etat.Preferences = p;
             if (Colonnes.Any(c => c.Cle == p.TriCle))
@@ -438,6 +504,10 @@
                 Etat.TriCle = p.TriCle;
                 Etat.TriDescendant = p.TriDescendant;
             }
+            // Valeurs par défaut de l'utilisateur (ex-ConsultationDevis.Ini) : filtres « Devis » et « Type devis »,
+            // présentation du détail
+            Etat.AppliquerFiltresParDefaut();
+            if (!Etat.VueDetailLue) Etat.AppliquerVueParDefaut();
         }
         CalculerColonnes();
 
@@ -508,6 +578,7 @@
     {
         var compteGeneral = C.CompteGeneral;
         Etat.Criteres = new CriteresDevis { CompteGeneral = compteGeneral, Representant = contexte?.RepresentantImpose };
+        Etat.AppliquerFiltresParDefaut();   // comme BTN_RAB : les filtres reprennent les valeurs par défaut
         Etat.Lignes = null;
         Etat.Selection = null;
         Actualiser();
@@ -531,6 +602,65 @@
         var cle = menu?.Ligne.Cle;
         menu = null;
         Ouvrir(cle);
+    }
+
+    // Récapitulatif PDF : produit à la demande par l'IBM i (DEV100NAV), ouvert dans un nouvel onglet
+    private static string AdresseRecapitulatif(CleDevis c) =>
+        $"api/ventes/devis/{c.Numero}/{c.Version}/{c.Hypothese}/{c.TypeCout}/recapitulatif";
+
+    // Choix dans une liste (bouton « … » / F4) : codes numériques des zones entières
+    private static int? Entier(string code) => int.TryParse(code, out var n) ? n : null;
+
+    // Client choisi : compte général + compte auxiliaire ; le prospect est alors effacé (client et prospect exclusifs)
+    private void ChoisirClient(LigneChoix l)
+    {
+        C.CompteGeneral = Entier(l.Codes[0]);
+        C.CompteClient = l.Codes.Count > 1 ? Entier(l.Codes[1]) : null;
+        C.Prospect = null;
+    }
+
+    private void OuvrirComplement(string type, CleDevis? cle)
+    {
+        if (cle is not null) complement = new Complement(type, cle);
+    }
+
+    private void ComplementDepuisMenu(string type)
+    {
+        var cle = menu?.Ligne.Cle;
+        menu = null;
+        OuvrirComplement(type, cle);
+    }
+
+    // Échec enregistré ou supprimé : toutes les lignes du même n° de devis changent (un échec par n° de devis)
+    private void FermerEchec(FenetreEchec.Resultat? r)
+    {
+        var numero = complement?.Cle.Numero;
+        complement = null;
+        if (r is null || numero is null) return;
+        MettreAJourLignes(numero.Value, l => l with { MotifEchec = r.Motif, DateEchec = r.Motif == "" ? null : r.Date });
+    }
+
+    // Documents : le compteur de la colonne Docs suit (documents rattachés au n° de devis)
+    private void FermerDocuments(int nombre)
+    {
+        var numero = complement?.Cle.Numero;
+        complement = null;
+        if (numero is not null) MettreAJourLignes(numero.Value, l => l with { NbDocuments = nombre });
+    }
+
+    private void MettreAJourLignes(int numero, Func<LigneListeDevis, LigneListeDevis> modifier)
+    {
+        if (Etat.Lignes is null) return;
+        for (var i = 0; i < Etat.Lignes.Count; i++)
+            if (Etat.Lignes[i].Cle.Numero == numero) Etat.Lignes[i] = modifier(Etat.Lignes[i]);
+        Actualiser();
+    }
+
+    // Après « Valider », les filtres de la recherche prennent les nouvelles valeurs (comme le WinDev)
+    private void FermerValeursDefaut(bool valide)
+    {
+        valeursDefaut = false;
+        if (valide) Etat.AppliquerFiltresParDefaut();
     }
 
     // Tri choisi avec le bouton de tri d'un titre de colonne ; Descendant null = ordre par défaut. Mémorisé.
