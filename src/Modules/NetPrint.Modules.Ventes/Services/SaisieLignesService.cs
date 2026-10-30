@@ -17,7 +17,7 @@ namespace NetPrint.Modules.Ventes.Services;
 //   - non repris pour l'instant : articles libres « 999… », articles avec nomenclature (lignes composants),
 //     contrôle de la norme (NOR010), reprise de devis, import Excel.
 // =====================================================================
-internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceCommandes commandes, IUtilisateurCourant utilisateur)
+internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISourceCommandes commandes, IUtilisateurCourant utilisateur)
     : ISaisieLignesCommande, IActionsCommande
 {
     private static DateOnly Aujourdhui => DateOnly.FromDateTime(DateTime.Today);
@@ -61,7 +61,9 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     {
         var (u, _) = await ContexteAsync(commande, false, ct);
         var l = await donnees.LigneAsync(u.Societe, commande, numeroLigne, ct);
-        if (l is not null) l.Empreinte = Empreinte(l);
+        if (l is null) return null;
+        l.Empreinte = Empreinte(l);
+        if (l.EstAppel && await donnees.LigneAsync(u.Societe, commande, l.LigneOrigine, ct) is { } o) l.ResteOrigine = o.Quantite ?? 0;
         return l;
     }
 
@@ -75,17 +77,19 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         if (l.Article == "") return l;
         var a = await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct);
         if (a is null) return l;
-        return await CompleterAsync(u.Societe, c, l, a, ct);
+        return await CompleterAsync(u.Societe, commande, c, l, a, ct);
     }
 
     // Complète la ligne puis calcule le montant avec le diviseur de l'unité finale (l'article ou le tarif peuvent la changer)
-    private async Task<LigneSaisie> CompleterAsync(int societe, ContexteLigne c, LigneSaisie l, ArticleLigne a, CancellationToken ct)
+    private async Task<LigneSaisie> CompleterAsync(int societe, CleCommande commande, ContexteLigne c, LigneSaisie l, ArticleLigne a,
+        CancellationToken ct)
     {
         var tarif = await donnees.DonneesTarifAsync(societe, l.Article, l.Indice, c.CompteGeneral, c.CompteClient, c.Representant,
             Aujourdhui, ct);
         var complete = Completer(c, l, a, tarif, null, Aujourdhui);
         if (await donnees.TnumAsync(societe, complete.Unite, ct) is { } tnum)
             complete.Montant = MoteurPrixCommande.Montant(complete.PrixNet, complete.Quantite ?? 0, tnum);
+        if (complete.EstAppel) await MaxiAppelAsync(societe, commande, c, complete, ct);
         return complete;
     }
 
@@ -154,7 +158,7 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     // l'utilisateur ne l'a pas saisi
     internal static void RecalculerMaxi(ContexteLigne c, LigneSaisie l)
     {
-        if (c.CalculMaxi && !c.SansMaxi && !l.MaxiSaisi && l.Quantite is > 0
+        if (c.CalculMaxi && !c.SansMaxi && !l.MaxiSaisi && l.Quantite is > 0 && !l.EstAppel
             && (l.NumeroLigne == 0 || l.Statut == StatutsLigne.ALaDemande))
             l.MaxiLivrable = MoteurPrixCommande.MaxiLivrable(l.Quantite.Value, c.MaxiClient, c.MaxiSociete);
     }
@@ -163,7 +167,8 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     // Contrôles de CTL520 (dans l'ordre) : erreurs bloquantes, puis avertissements à accepter
     // ------------------------------------------------------------------
     internal static (List<ErreurSaisie> Erreurs, List<ErreurSaisie> Avertissements) Controler(
-        ContexteLigne c, LigneSaisie l, ArticleLigne? a, VerificationsLigne v, LigneSaisie? ancienne, DateOnly aujourdhui)
+        ContexteLigne c, LigneSaisie l, ArticleLigne? a, VerificationsLigne v, LigneSaisie? ancienne, DateOnly aujourdhui,
+        int reserveOrigine = 0)
     {
         var erreurs = new List<ErreurSaisie>();
         var avertissements = new List<ErreurSaisie>();
@@ -204,8 +209,10 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
             // Stock disponible (forçable)
             if (v.Stock is { } s)
             {
-                // La quantité déjà réservée par la ligne ne compte que si l'article n'a pas changé
-                var dejaReserve = ancienne is not null && ancienne.Article == l.Article && ancienne.Indice == l.Indice ? ancienne.Quantite ?? 0 : 0;
+                // La quantité déjà réservée par la ligne ne compte que si l'article n'a pas changé ; pour un appel, le reste
+                // de la ligne d'origine est déjà réservé (CTL520 : + SVQTEC)
+                var dejaReserve = (ancienne is not null && ancienne.Article == l.Article && ancienne.Indice == l.Indice ? ancienne.Quantite ?? 0 : 0)
+                                  + reserveOrigine;
                 var dispo = s.Entree - s.Reserve - (l.Quantite ?? 0) + dejaReserve;
                 W(dispo < 0, A.StockInsuffisant, $"Disponible insuffisant ({s.Entree - s.Reserve + dejaReserve:N0}).");
             }
@@ -265,6 +272,8 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         E(l.Statut is not (StatutsLigne.Normal or StatutsLigne.ALaDemande), nameof(l.Statut), MessagesLigne.Statut);
         E(ancienne is { Statut: StatutsLigne.ALaDemande } && l.Statut == StatutsLigne.Normal && v.AppelsExistent,
             nameof(l.Statut), MessagesLigne.AppelsExistent);
+        E(ancienne is { Statut: StatutsLigne.ALaDemande } && v.AppelsExistent && (l.Article != ancienne.Article || l.Indice != ancienne.Indice),
+            nameof(l.Article), MessagesLigne.ArticleAvecAppels);
         E(l.Statut == StatutsLigne.Normal && l.NumeroAppel == "" && v.ClientEdi, nameof(l.NumeroAppel), MessagesLigne.NumeroAppelEdi);
 
         // Maxi livrable multiple du conditionnement (forçable)
@@ -279,16 +288,19 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     // ------------------------------------------------------------------
     public async Task<int> EnregistrerAsync(CleCommande commande, LigneSaisie ligne, CancellationToken ct = default)
     {
+        // Appel de livraison (nouveau, ou ligne enregistrée comme appel) : moteur des appels
+        if (ligne.NumeroLigne == 0 && ligne.EstAppel) return await EnregistrerAsync(commande, ligne, CanalAppel.Saisie, ct);
         var (u, c) = await ContexteAsync(commande, true, ct);
         var l = Normaliser(ligne);
-        var a = l.Article == "" ? null : await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct);
         var ancienne = l.NumeroLigne > 0 ? await donnees.LigneAsync(u.Societe, commande, l.NumeroLigne, ct) : null;
         if (l.NumeroLigne > 0 && ancienne is null) throw new RegleMetierException("Cette ligne n'existe plus.");
-        if (ancienne is { EstAppel: true }) throw new RegleMetierException(MessagesLigne.AppelNonRepris);
+        if (ancienne is { EstAppel: true }) return await EnregistrerAppelAsync(u, c, commande, ligne, ancienne, CanalAppel.Saisie, ct);
         if (ancienne is { Soldee: true }) throw new RegleMetierException("Cette ligne est soldée : réactivez-la avant de la modifier.");
+        l.LigneOrigine = 0;   // une ligne normale n'a pas d'origine ; une ligne « à la demande » est sa propre origine
+        var a = l.Article == "" ? null : await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct);
         if (a is not null)
         {
-            l = await CompleterAsync(u.Societe, c, l, a, ct);
+            l = await CompleterAsync(u.Societe, commande, c, l, a, ct);
         }
         var v = await donnees.VerifierAsync(u.Societe, commande, c, l, a, ct);
         var (erreurs, avertissements) = Controler(c, l, a, v, ancienne, Aujourdhui);
@@ -311,10 +323,17 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     {
         var (u, c) = await ContexteAsync(commande, true, ct);
         var l = await donnees.LigneAsync(u.Societe, commande, numeroLigne, ct) ?? throw new RegleMetierException("Cette ligne n'existe plus.");
-        if (l.EstAppel) throw new RegleMetierException(MessagesLigne.AppelNonRepris);
+        await SupprimerLigneAsync(u, c, commande, l, CanalAppel.Saisie, ct);
+    }
+
+    // Suppression physique ; un appel rend sa quantité à sa ligne d'origine (dans la même transaction)
+    private async Task SupprimerLigneAsync(UtilisateurConnecte u, ContexteLigne c, CleCommande commande, LigneSaisie l, CanalAppel canal,
+        CancellationToken ct)
+    {
+        if (l.EstAppel) await RefusEdiAsync(u.Societe, commande, l.NumeroLigne, canal, ct);
         var v = await donnees.VerifierAsync(u.Societe, commande, c, l, null, ct);
         if (RefusSuppression(l, v) is { } refus) throw new RegleMetierException(refus);
-        await donnees.SupprimerAsync(u.Societe, u.Profil, commande, c, numeroLigne, ct);
+        await donnees.SupprimerAsync(u.Societe, u.Profil, commande, c, l.NumeroLigne, ct, origine: l.EstAppel ? l.LigneOrigine : 0);
         var a = await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct);
         await RecalculerStocksAsync(u, c, a, l.Article, l.Indice, null, ct);
     }
@@ -331,7 +350,6 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     {
         var (u, c) = await ContexteAsync(commande, true, ct);
         var l = await donnees.LigneAsync(u.Societe, commande, numeroLigne, ct) ?? throw new RegleMetierException("Cette ligne n'existe plus.");
-        if (l.EstAppel) throw new RegleMetierException(MessagesLigne.AppelNonRepris);
         if (l.Soldee) throw new RegleMetierException("Cette ligne est déjà soldée.");
         await donnees.SolderAsync(u.Societe, u.Profil, commande, c, numeroLigne, true, ct);
         await RecalculerStocksAsync(u, c, await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct), l.Article, l.Indice, null, ct);
@@ -342,7 +360,6 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     {
         var (u, c) = await ContexteAsync(commande, true, ct, soldeeAdmise: true);
         var l = await donnees.LigneAsync(u.Societe, commande, numeroLigne, ct) ?? throw new RegleMetierException("Cette ligne n'existe plus.");
-        if (l.EstAppel) throw new RegleMetierException(MessagesLigne.AppelNonRepris);
         if (!l.Soldee) throw new RegleMetierException("Cette ligne n'est pas soldée.");
         var a = await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct);
         if (a?.Remplacement == "C") throw new RegleMetierException(MessagesLigne.ArticleCloture);
@@ -368,14 +385,12 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         await donnees.ReactiverCommandeAsync(u.Societe, u.Profil, commande, c, ct);
     }
 
-    async Task<string?> IActionsCommande.SupprimerAsync(CleCommande commande, CancellationToken ct)
+    async Task IActionsCommande.SupprimerAsync(CleCommande commande, CancellationToken ct)
     {
         var (u, c) = await ContexteActionAsync(commande, d => d.Supprimer, ct);
         var articles = await donnees.ArticlesAsync(u.Societe, commande, ct);
-        var echecs = await donnees.SupprimerCommandeAsync(u.Societe, u.Profil, commande, c, RefusSuppressionCommande, ct);
+        await donnees.SupprimerCommandeAsync(u.Societe, u.Profil, commande, c, RefusSuppressionCommande, ct);
         await RecalculerStocksCommandeAsync(u, c, articles, ct);
-        return echecs.Count == 0 ? null
-            : $"La commande est supprimée, mais ces données annexes n'ont pas pu être nettoyées : {string.Join(", ", echecs)}.";
     }
 
     // DOS500S R7 : une commande livrée ou facturée ne se supprime pas
@@ -504,6 +519,11 @@ internal static class MessagesLigne
     public const string MaxiMultiple = "Le maxi livrable doit être un multiple du conditionnement.";                          // NEG0041
     public const string ClientInexistant = "Ce compte client n'existe pas.";                                                  // CPT0001
     public const string EmplacementInexistant = "Cet emplacement de stock n'existe pas.";                                     // STO0076
-    public const string AppelNonRepris = "Les appels de livraison se modifient encore dans le 5250, le navigateur ou l'EDI : " +
-        "le report sur la ligne d'origine n'est pas encore repris ici.";
+    public const string AppelSurLigneNormale = "Appel de livraison impossible sur une ligne de type normal.";                // NEG0026
+    public const string DepassementOrigine = "Quantité saisie supérieure au reste à appeler de la ligne d'origine";            // NEG0029
+    public const string AppelEdi = "Cet appel a été créé par l'EDI : il se modifie ou se supprime dans le tableau de bord EDI.";
+    public const string PasUnAppel = "Cette ligne n'est pas un appel de livraison.";
+    public const string ArticleAvecAppels = "Changement d'article impossible, il existe des appels de livraison.";
+    public const string OrigineModifiee = "La ligne d'origine a été modifiée par un autre utilisateur depuis l'ouverture de l'appel : " +
+        "rechargez la commande.";
 }

@@ -119,6 +119,8 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .champ.en-erreur input, .champ.en-erreur select, .en-erreur > .ligne-champs input { border-color: var(--danger); background: var(--danger-clair); }
 .message-erreur { display: block; color: var(--danger); font-size: 12px; margin-top: 2px; }
 .erreur-saisie { margin: 0; color: var(--danger); font-weight: 600; }
+.bandeau-appel { margin: 0 0 8px; padding: 6px 10px; border-radius: 6px; background: #e0f2fe; color: #075985; }
+.fenetre-ligne .bouton-discret { align-self: flex-end; background: none; border: 1px dashed currentColor; color: #075985; }
 .avertissement-saisie { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--orange-clair); color: var(--orange); }
 
 /* ---------- Saisie d'une ligne ---------- */

@@ -25,6 +25,13 @@ Légende : 🔴 bloquant ou prioritaire · 🟠 important · ⚪ plus tard.
 | D7 | N° de dossier | Réservé à l'enregistrement seulement | N° provisoire affiché puis remplacé |
 | D8 | Clé de commande quand DOS005 POPT02 = 'O' et POPT05 ≠ 'O' | « 9 » (CDECLEF est un programme spécifique NP11PRI, sans source) | Appel de CDECLEF |
 | D9 | AB0016 (marge) | Lu et écrit par sa clé complète (n° + clé) | Lu par n° seulement, clé réécrite |
+| D10 | Appel au-delà du reste à appeler de la ligne d'origine | Avertissement à accepter, pour tous les canaux (EDI compris) | NEG520 : avertissement NEG0029 ; navigateur et EDI : aucun contrôle |
+| D11 | Report du prix de l'origine sur ses appels (NEG520B) | Proposé après un changement de prix ; appels **ni soldés ni facturés** seulement ; la remise de l'appel est réécrite aussi | Tous les appels, soldés et facturés compris ; remise de l'appel laissée |
+| D12 | Prix d'un appel | Toujours celui de l'origine à la création (l'appelant ne transmet pas de prix) | Navigateur et EDI transmettaient le prix ; NEG300NAV héritait remise et prix théorique de la **dernière ligne** du dossier |
+| D13 | Reste de l'origine | Recalculé depuis la quantité du contrat et la somme des appels relue en base ; origine soldée quand plus rien à appeler, **remise en cours** si un reste réapparaît ; un solde fait à la main (option SO) alors qu'il restait à appeler est conservé ; l'article d'une ligne à la demande qui a des appels est figé | Trois calculs différents (NEG520 DE ne « désolde » jamais) |
+| D14 | Solde d'un appel | Son reste non livré **n'est pas** rendu à l'origine (comme le RPG) | Idem |
+| D15 | Défauts d'un nouvel appel | N° et date d'appel, adresse, commentaires, textes repris de l'origine ; date de livraison à saisir | NEG520 : idem ; EDI : date d'appel = date de livraison |
+| D16 | Appel créé par l'EDI (EDI105) | Ne se modifie et ne se supprime que par l'EDI | Rien ne l'empêchait |
 
 Questions ouvertes :
 
@@ -38,7 +45,9 @@ Questions ouvertes :
 
 | Prio | Sujet | Source | Notes |
 |---|---|---|---|
-| 🔴 | **Appels de livraison** | NEG520 (option DE, SpOrigin, NEG520B), NEG300NAV, NavigateurLogistique, TableauBordEDI | Créés à parts égales depuis NEG520, le navigateur et l'EDI : **un seul moteur** (NEG300NAV, actions C/V/S/A) pour les trois. Un appel reprend le **prix de sa ligne à la demande** ; modifier ce prix doit pouvoir être **reporté sur tous les appels dépendants** (NEG520B). Créer / modifier / supprimer un appel reporte l'écart sur la ligne d'origine (DNQTEA, DNQTEC, solde). Maxi livrable restant (F23). En attendant : modification, solde et suppression d'un appel **bloqués** dans le nouvel écran |
+| ✅ | ~~Appels de livraison~~ | NEG520 (option DE, SpOrigin, NEG520B), NEG300NAV | Fait (30/10) : moteur `IAppelsLivraison` (création, modification, suppression, report de prix, solde du maxi) partagé avec la saisie des lignes ; écran : « Nouvel appel » sur une ligne à la demande. Décisions D10 à D16 ci-dessus |
+| 🟠 | Appels : contrôle du pré-BL non basculé (EXP510 / EXP509.HENBL) | NEG300NAV contrôle 21, NEG520 option S | Seul l'OPR non livré est contrôlé aujourd'hui |
+| ⚪ | Appels : import Excel en mode appels | NEG520 SpExcel | 4e point d'entrée, à brancher sur `IAppelsLivraison` (canal `ImportExcel`) |
 | 🟠 | Encours client à l'ajout d'une ligne | NEG520 F9 → DOS901 'C' | Contrôlé à la création de l'en-tête seulement pour l'instant |
 | 🟠 | Copie d'une commande | DOS500S option 3, DOS505 COPT 03 | |
 | 🟠 | Copie / transfert de reliquat d'une ligne vers une autre commande | NEG510 F14 | Déplace quantité et réservation : opération transactionnelle |
@@ -62,7 +71,8 @@ Questions ouvertes :
 
 | Prio | Sujet | Notes |
 |---|---|---|
-| 🔴 | Journalisation des tables restantes (David, prévu demain) | ABREPE, ABREPD, ABCOUTE, ABCOUTD, ABCOUTB, AFC020, AB0020, AB001T, ABDIRL, ABDIRP, DIR100, EVE200. Ensuite : les faire entrer dans la transaction de suppression, et l'audit EVE200 dans les transactions |
+| ✅ | ~~Journalisation des tables satellites~~ | Fait par David (30/10) ; la suppression d'une commande les vide dans sa transaction. Test `JournalisationDb2Tests` : vérifie que toutes les tables écrites sont journalisées |
+| 🟠 | Journaliser **EVE200** (audit des dossiers) | Seule table écrite encore non journalisée : l'audit est écrit juste après la validation. Une fois journalisée, l'écrire dans les transactions et l'ajouter au test |
 | 🟠 | Moteur de prix non validé sur de vrais tarifs | La base de test n'a presque pas de tarifs (SPF011 : 2 lignes) ; comparaison à refaire sur une copie de production |
 | 🟠 | STOCK03 appelé par QCMDEXC | Dépend de la liste de bibliothèques du travail ODBC (NP11F, NP11P) ; à recoder en C# ou à exposer proprement |
 | ⚪ | Nombre de connexions par action | Paramètres société relus à chaque appel : cache de session à prévoir |
@@ -92,7 +102,7 @@ Questions ouvertes :
 
 | Prio | Sujet | Notes |
 |---|---|---|
-| 🔴 | Appels de livraison depuis le navigateur logistique et le tableau de bord EDI | Même moteur que la saisie de commande (voir 1.2) |
+| 🔴 | Appels de livraison depuis le navigateur logistique et le tableau de bord EDI | Le moteur existe : `IAppelsLivraison` (Ventes.Contrats), canaux `Navigateur` / `Edi`. Remplace TNEG100N + NEG300NAV (C/V/S/A) : un seul appel, contrôles et avertissements explicites (plus de chaîne FRCCTR). L'EDI écrit EDI105 après la création ; une modification EDI devient `EnregistrerAsync` (plus de suppression / recréation) |
 | ⚪ | BL, ordres de préparation (OPR) | Lus dans la fiche commande ; une ligne d'un OPR non livré n'est plus modifiable |
 
 ## 5. Organisation

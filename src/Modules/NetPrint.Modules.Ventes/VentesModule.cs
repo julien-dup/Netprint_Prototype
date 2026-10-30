@@ -52,9 +52,11 @@ public static class VentesModule
         services.AddScoped<EtatListeCommandes>();
         services.AddScoped<ISaisieCommandes, SaisieCommandesService>();   // en-tête de commande (DOS505)
         services.AddScoped<ISourceSaisieCommandes, SaisieCommandesDb2>();
-        services.AddScoped<SaisieLignesService>();   // lignes (NEG520 / CTL520 / MAJ520) et actions sur la commande (DOS500S)
+        // Lignes (NEG520 / CTL520 / MAJ520), actions sur la commande (DOS500S), appels de livraison (option DE, NEG300NAV)
+        services.AddScoped<SaisieLignesService>();
         services.AddScoped<ISaisieLignesCommande>(s => s.GetRequiredService<SaisieLignesService>());
         services.AddScoped<IActionsCommande>(s => s.GetRequiredService<SaisieLignesService>());
+        services.AddScoped<IAppelsLivraison>(s => s.GetRequiredService<SaisieLignesService>());
         services.AddScoped<LignesCommandeDb2>();
         return services;
     }

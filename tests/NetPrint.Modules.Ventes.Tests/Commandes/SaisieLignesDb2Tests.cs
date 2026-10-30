@@ -112,6 +112,115 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
         }
     }
 
+    // Appels de livraison : ligne « à la demande » de 10 000, appels créés, modifiés, supprimés ; reste de l'origine, solde,
+    // report de prix
+    [FactDb2Ecriture]
+    public async Task Appels_de_livraison_de_bout_en_bout()
+    {
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var article = await ArticleDuClientAsync(cnx);
+        Assert.NotNull(article);
+        var client = await ValeursAsync(cnx, "SELECT CDDTPC, CDDTDC, CDDDOS, CDDCLE FROM NP11F.AA0003 WHERE RSOC = ? AND RGEN = ? AND RCLI = ?",
+            BaseDeTest.Societe, BaseDeTest.CompteGeneral, BaseDeTest.CompteClient);
+        var adtcde = await ValeursAsync(cnx, "SELECT ADTCDE FROM NP11F.SPF010 WHERE RSOC = ? AND AARTIC = ? AND AINDIC = ?",
+            BaseDeTest.Societe, article.Value.Article, article.Value.Indice);
+        HashSet<string> tous = [.. typeof(AvertissementsLigne).GetFields().Select(f => (string)f.GetValue(null)!)];
+        var date = NextWorkingDay(DateOnly.FromDateTime(DateTime.Today.AddDays(15)));
+        CleCommande? cle = null;
+        try
+        {
+            var entete = new SaisieCommandesService(new SaisieCommandesDb2(BaseDeTest.Configuration), Consultation, new Utilisateur());
+            var e = await entete.PreparerAsync(new DebutCommande
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, TypeCommande = "4", Enseigne = "1",
+            });
+            e.Designation1 = "TEST NETPRINT SAAS APPELS - A SUPPRIMER";
+            e.DateLivraison = DateOnly.FromDateTime(DateTime.Today.AddDays(20));
+            e.Interlocuteur = "TEST SAAS";
+            e.Fabricant = "LEN";
+            cle = await entete.CreerAsync(e);
+            sortie.WriteLine($"Commande {cle.Libelle}");
+
+            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur());
+            IAppelsLivraison appels = service;
+            async Task<(int Qteo, int Qtea, int Qtec, string Sold)> Origine()
+            {
+                var v = await ValeursAsync(cnx, "SELECT DNQTEO, DNQTEA, DNQTEC, DNSOLD FROM NP11F.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = 1",
+                    BaseDeTest.Societe, cle.Numero, cle.Cle);
+                return (Convert.ToInt32(v[0]), Convert.ToInt32(v[1]), Convert.ToInt32(v[2]), Convert.ToString(v[3])!.Trim());
+            }
+
+            // Ligne « à la demande » de 10 000
+            var o = await service.NouvelleAsync(cle);
+            (o.Article, o.Indice, o.Statut, o.Quantite, o.PrixBrut, o.PrixSaisi) = (article.Value.Article, article.Value.Indice, StatutsLigne.ALaDemande, 10000, 49, true);
+            o.DateLivraison = date;
+            o.AdresseSiege = true;
+            o = await service.CompleterAsync(cle, o);
+            o.AvertissementsAcceptes = tous;
+            Assert.Equal(1, await service.EnregistrerAsync(cle, o));
+            Assert.Equal((10000, 0, 10000, ""), await Origine());
+
+            // Appel de 3000 (canal navigateur)
+            var a = await appels.NouvelAsync(cle, 1);
+            Assert.Equal(10000, a.ResteOrigine);
+            (a.Quantite, a.DateLivraison, a.AvertissementsAcceptes) = (3000, date, tous);
+            Assert.Equal(2, await appels.EnregistrerAsync(cle, a, CanalAppel.Navigateur));
+            Assert.Equal((10000, 3000, 7000, ""), await Origine());
+            var appel = await ValeursAsync(cnx, "SELECT DNSTAT, DNLORI, DNPUS, DNQTEO, DNQTEC FROM NP11F.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = 2",
+                BaseDeTest.Societe, cle.Numero, cle.Cle);
+            Assert.Equal(("1", 1, 49m, 0, 3000), (Convert.ToString(appel[0])!.Trim(), Convert.ToInt32(appel[1]), Convert.ToDecimal(appel[2]),
+                Convert.ToInt32(appel[3]), Convert.ToInt32(appel[4])));
+
+            // Dépassement du reste : avertissement à accepter
+            var trop = await appels.NouvelAsync(cle, 1);
+            (trop.Quantite, trop.DateLivraison) = (8000, date);
+            trop.AvertissementsAcceptes = [.. tous.Where(x => x != AvertissementsLigne.DepassementOrigine)];
+            var ex = await Assert.ThrowsAsync<SaisieInvalideException>(() => appels.EnregistrerAsync(cle, trop, CanalAppel.Saisie));
+            Assert.True(ex.Forcable);
+            Assert.Contains(ex.Erreurs, x => x.Zone == AvertissementsLigne.DepassementOrigine);
+
+            // Modification de l'appel par la saisie des lignes (même moteur) : 3000 → 4000
+            var lue = (await service.LireAsync(cle, 2))!;
+            Assert.True(lue.EstAppel);
+            Assert.Equal(7000, lue.ResteOrigine);
+            (lue.Quantite, lue.AvertissementsAcceptes) = (4000, tous);
+            await service.EnregistrerAsync(cle, lue);
+            Assert.Equal((10000, 4000, 6000, ""), await Origine());
+
+            // Nouveau prix de l'origine reporté sur l'appel
+            var lo = (await service.LireAsync(cle, 1))!;
+            (lo.PrixBrut, lo.AvertissementsAcceptes) = (55, tous);
+            await service.EnregistrerAsync(cle, lo);
+            Assert.Equal([2], await appels.ReporterPrixAsync(cle, 1));
+            Assert.Equal(55m, Convert.ToDecimal((await ValeursAsync(cnx, "SELECT DNPUS FROM NP11F.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = 2",
+                BaseDeTest.Societe, cle.Numero, cle.Cle))[0]));
+            Assert.Empty(await appels.ReporterPrixAsync(cle, 1));
+            sortie.WriteLine($"Solde du maxi : {await appels.CalculerMaxiAsync(cle, 1)}");
+
+            // Appel du reste : origine soldée ; sa suppression la remet en cours
+            var fin = await appels.NouvelAsync(cle, 1);
+            (fin.Quantite, fin.DateLivraison, fin.AvertissementsAcceptes) = (6000, date, tous);
+            Assert.Equal(3, await appels.EnregistrerAsync(cle, fin, CanalAppel.Edi));
+            Assert.Equal((10000, 10000, 0, "O"), await Origine());
+            await service.SupprimerAsync(cle, 3);
+            Assert.Equal((10000, 4000, 6000, ""), await Origine());
+
+            // L'origine ne se supprime pas tant qu'elle a des appels ; l'appel, si
+            await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => service.SupprimerAsync(cle, 1));
+            await appels.SupprimerAsync(cle, 2, CanalAppel.Saisie);
+            Assert.Equal((10000, 0, 10000, ""), await Origine());
+
+            var journal = await ValeursAsync(cnx, "SELECT LISTAGG(DNNLIG || DETYMO, ' ') WITHIN GROUP (ORDER BY DEDTHE, DNNLIG) FROM NP11F.NEG100E WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ?",
+                BaseDeTest.Societe, cle.Numero, cle.Cle);
+            sortie.WriteLine($"Journal NEG100E : {journal[0]}");
+        }
+        finally
+        {
+            if (cle is not null) await NettoyerAsync(cnx, cle, client, article!.Value, adtcde);
+        }
+    }
+
     // Lecture seule : une commande livrée et facturée du client d'essai serait refusée à la suppression
     [FactDb2]
     public async Task Commande_livree_non_supprimable()

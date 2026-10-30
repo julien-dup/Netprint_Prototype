@@ -15,7 +15,7 @@ internal sealed record ContexteLigne(
     bool PrixCessionObligatoire, bool NouvelleApplication, bool LivraisonDeLEnTete, int Depot,
     IReadOnlyDictionary<string, string> TypesStock, string TypeCommission, string SeuilsCommission, string TauxCommissions,
     IReadOnlyList<(int Seuil, decimal Pourcentage)> MaxiClient, IReadOnlyList<(int Seuil, decimal Pourcentage)> MaxiSociete,
-    bool CalculMaxi, decimal PlafondFranco);
+    bool CalculMaxi, decimal PlafondFranco, string ModeMaxi = "");
 
 // Article (SPF010) tel que CTL520 le lit
 internal sealed record ArticleLigne(
@@ -71,7 +71,7 @@ internal sealed partial class LignesCommandeDb2
                 PrixCessionObligatoire: rd.Texte(20) == "O", NouvelleApplication: rd.Texte(21) == "O",
                 LivraisonDeLEnTete: rd.Texte(22) == "O", Depot: rd.Entier(23), TypesStock: types,
                 TypeCommission: rd.Texte(29), SeuilsCommission: rd.Texte(30), TauxCommissions: rd.Texte(31),
-                MaxiClient: [], MaxiSociete: [], CalculMaxi: rd.Texte(33) != "", PlafondFranco: rd.Nombre(32));
+                MaxiClient: [], MaxiSociete: [], CalculMaxi: rd.Texte(33) != "", PlafondFranco: rd.Nombre(32), ModeMaxi: rd.Texte(33));
         }
 
         // Tolérances de livraison : client (PRT059), société (DOS009)
@@ -300,6 +300,19 @@ internal sealed partial class LignesCommandeDb2
                 if (l.NumeroLigne > 999) throw new RegleMetierException("Une commande ne peut pas dépasser 999 lignes.");
             }
 
+            // Appel de livraison : l'origine doit toujours être une ligne « à la demande » du même article (verrouillée
+            // jusqu'à la fin de la transaction) ; un appel créé sur une commande soldée « D » la remet en cours (NEG300NAV)
+            var reactivee = false;
+            if (l.EstAppel)
+            {
+                var origine = await LigneDansTransactionAsync(cnx, tx, b, societe, cle, l.LigneOrigine, ct, verrou: true);
+                if (origine is null || origine.Statut != StatutsLigne.ALaDemande || origine.Article != l.Article || origine.Indice != l.Indice)
+                    throw new RegleMetierException($"La ligne d'origine {l.LigneOrigine} n'est plus une ligne « à la demande » de cet article.");
+                // Le dépassement a été contrôlé sur ce reste : un autre appel enregistré depuis l'a changé
+                if (origine.Quantite != l.ResteOrigine) throw new RegleMetierException(MessagesLigne.OrigineModifiee);
+                if (creation) reactivee = await ReactiverPourAppelAsync(cnx, tx, b, societe, cle, ct);
+            }
+
             // DNPUT (prix théorique) est figé à la création
             var colonnes = ColonnesLigne(c, l, tnum, ancienne).Where(x => creation || x.Colonne != "DNPUT").ToList();
             if (creation)
@@ -328,9 +341,11 @@ internal sealed partial class LignesCommandeDb2
                 await Executer(cnx, tx, $"UPDATE {b}.SPF010 SET ADTCDE = ? WHERE RSOC = ? AND AARTIC = ? AND AINDIC = ? AND ADTCDE < ?", ct,
                     BaseDb2.AAAAMMJJ(dd), societe, l.Article, l.Indice, BaseDb2.AAAAMMJJ(dd));
 
+            if (l.EstAppel) await RecalculerOrigineAsync(cnx, tx, b, societe, profil, cle, c, l.LigneOrigine, ct);
             await RecalculerEnTeteAsync(cnx, tx, b, societe, profil, cle, c, ct);
             await tx.CommitAsync(ct);
             validee = true;
+            if (reactivee) await AuditDossierAsync(cnx, b, societe, profil, cle, "RA");
             return l.NumeroLigne;
         }
         finally
@@ -351,8 +366,9 @@ internal sealed partial class LignesCommandeDb2
         var livree = ancienne?.QuantiteLivree ?? 0;
         var soldee = ancienne?.Soldee ?? false;
         var aLaDemande = l.Statut == StatutsLigne.ALaDemande;
-        // Statut 3 : origine = la ligne elle-même, quantité d'origine = quantité ; statut 1 : 0 (l'appel garde son origine)
-        var origine = aLaDemande ? l.NumeroLigne : ancienne is { Statut: StatutsLigne.Normal } ? ancienne.LigneOrigine : 0;
+        // Statut 3 : origine = la ligne elle-même, quantité d'origine = quantité ; appel : n° de sa ligne d'origine ;
+        // ligne normale : 0 (le service remet LigneOrigine à 0 pour une ligne qui n'est pas un appel)
+        var origine = aLaDemande ? l.NumeroLigne : l.LigneOrigine;
         var dateSaisie = l.DateLivraison is { } d ? BaseDb2.AAAAMMJJ(d) : 0;
         var dateConfirmee = l.DateConfirmee is { } dc ? BaseDb2.AAAAMMJJ(dc) : 0;
         var adresseLibre = !l.AdresseSiege && l.NumeroAdresse is not > 0;
@@ -480,7 +496,9 @@ internal sealed partial class LignesCommandeDb2
     // ------------------------------------------------------------------
     // Options de la liste : suppression (physique, MAJ520), solde, réactivation
     // ------------------------------------------------------------------
-    public async Task SupprimerAsync(int societe, string profil, CleCommande cle, ContexteLigne c, int ligne, CancellationToken ct)
+    // origine : n° de la ligne « à la demande » quand la ligne supprimée est un appel (son reste est recalculé)
+    public async Task SupprimerAsync(int societe, string profil, CleCommande cle, ContexteLigne c, int ligne, CancellationToken ct,
+        int origine = 0)
     {
         var b = Bib;
         await using var cnx = await OuvrirAsync(ct);
@@ -488,8 +506,20 @@ internal sealed partial class LignesCommandeDb2
         var validee = false;
         try
         {
+            // Verrou de la commande (totaux, reste à appeler de l'origine d'un appel)
+            await Executer(cnx, tx, $"UPDATE {b}.AB001 SET CCDES1 = CCDES1 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", ct,
+                societe, cle.Numero, cle.Cle);
             var avant = await LigneDansTransactionAsync(cnx, tx, b, societe, cle, ligne, ct)
                 ?? throw new RegleMetierException("Cette ligne n'existe plus.");
+            if (avant.Soldee || avant.QuantiteLivree != 0 || avant.QuantiteFacturee != 0)
+                throw new RegleMetierException("Suppression impossible : la ligne a été soldée, livrée ou facturée entre-temps.");
+            // Un appel a pu être créé sur cette ligne « à la demande » depuis le contrôle du service
+            if (avant.Statut == StatutsLigne.ALaDemande)
+                await using (var rd = await Lire(cnx, tx, $"""
+                    SELECT 1 FROM {b}.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNSTAT = '1' AND DNLORI = ? AND DNNLIG <> ?
+                    FETCH FIRST 1 ROW ONLY
+                    """, ct, societe, cle.Numero, cle.Cle, ligne, ligne))
+                    if (await rd.ReadAsync(ct)) throw new RegleMetierException("Suppression impossible : il existe des appels de livraison.");
             await Executer(cnx, tx, $"DELETE FROM {b}.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = ?", ct, societe, cle.Numero, cle.Cle, ligne);
             await Executer(cnx, tx, $"DELETE FROM {b}.NEG100T WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = ?", ct, societe, cle.Numero, cle.Cle, ligne);
             await Executer(cnx, tx, $"DELETE FROM {b}.NEG100S WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = ?", ct, societe, cle.Numero, cle.Cle, ligne);
@@ -499,6 +529,7 @@ internal sealed partial class LignesCommandeDb2
                 """, ct, societe, cle.Numero, cle.Cle, ligne);
             await Executer(cnx, tx, $"DELETE FROM {b}.EVE100 WHERE RSOC = ? AND EVCDC = ? AND EVCDCC = ? AND EVCDCL = ?", ct, societe, cle.Numero, cle.Cle, ligne);
             await JournalAsync(cnx, tx, b, societe, cle, ligne, "S", avant, null, 0, c, profil, ct);
+            if (origine > 0) await RecalculerOrigineAsync(cnx, tx, b, societe, profil, cle, c, origine, ct);
             await RecalculerEnTeteAsync(cnx, tx, b, societe, profil, cle, c, ct);
             await tx.CommitAsync(ct);
             validee = true;
@@ -543,12 +574,14 @@ internal sealed partial class LignesCommandeDb2
         await Executer(cnx, null, "CALL QSYS2.QCMDEXC(?)", ct, commande);
     }
 
+    // verrou : ligne verrouillée jusqu'à la fin de la transaction (ligne d'origine d'un appel)
     private static async Task<LigneSaisie?> LigneDansTransactionAsync(OdbcConnection cnx, OdbcTransaction tx, string b, int societe,
-        CleCommande cle, int ligne, CancellationToken ct)
+        CleCommande cle, int ligne, CancellationToken ct, bool verrou = false)
     {
         await using var rd = await Lire(cnx, tx, $"""
             SELECT DNART, DNIND, DNQTEC, DNPUS, DNUV, DNPXCE, DNSTAT, DNLORI, DNQTEL, DNQTEF, DNSOLD, DNCLIG, DNDESA, DNPUNR, DNTXRE, DNQTEO
             FROM {b}.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = ? FETCH FIRST 1 ROW ONLY
+            {(verrou ? "WITH RS USE AND KEEP EXCLUSIVE LOCKS" : "")}
             """, ct, societe, cle.Numero, cle.Cle, ligne);
         if (!await rd.ReadAsync(ct)) return null;
         return new LigneSaisie

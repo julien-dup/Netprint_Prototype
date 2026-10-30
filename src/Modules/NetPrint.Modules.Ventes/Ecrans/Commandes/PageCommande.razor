@@ -164,7 +164,7 @@
 
 @if (ligneOuverte is { } numeroLigne && fiche is not null)
 {
-    <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" CodesVente="codesVente" OnFermer="FermerLigneAsync" />
+    <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" CodesVente="codesVente" OnFermer="FermerLigneAsync" />
 }
 
 @code {
@@ -215,15 +215,13 @@
 
     private async Task SupprimerCommandeAsync()
     {
-        string? avertissement = null;
         if (await ActionCommandeAsync($"Supprimer définitivement la commande {CleCourante.Libelle} et ses lignes ?", "Supprimer la commande",
-                async () => avertissement = await Actions.SupprimerAsync(CleCourante), "supprimée", recharger: false))
+                () => Actions.SupprimerAsync(CleCourante), "supprimée", recharger: false))
         {
             // La commande disparaît de la liste conservée en session
             if (Etat.Resultat is { } r)
                 Etat.Resultat = r with { Commandes = r.Commandes.Where(c => c.Cle != CleCourante).ToList() };
             Etat.Selection = null;
-            if (avertissement is not null) Notifications.Erreur(avertissement);
             Retour();
         }
     }
@@ -251,10 +249,15 @@
 
     // ---------- Lignes (NEG520) ----------
     private int? ligneOuverte;
+    private int origineAppel;
     private IReadOnlyList<CodeLibelle> codesVente = [];
 
-    private async Task OuvrirLigneAsync(int numero)
+    // Nouvel appel de livraison sur une ligne « à la demande »
+    private Task OuvrirAppelAsync(int origine) => OuvrirLigneAsync(0, origine);
+
+    private async Task OuvrirLigneAsync(int numero, int origine = 0)
     {
+        origineAppel = origine;
         if (codesVente.Count == 0)
         {
             try { codesVente = (await Saisie.LireContexteAsync()).CodesVente; }
@@ -382,13 +385,14 @@
                                     @Info("Emplacement", lf.Emplacement)
                                     @Info("Commentaires (évts)", l.NbCommentaires == 0 ? "" : l.NbCommentaires.ToString())
                                 </div>
-                                @if (PeutModifier && l.EstAppel)
-                                {
-                                    <p class="aide">Appel de livraison de la ligne @lf.LigneOrigine : il se modifie encore dans le 5250, le navigateur ou l'EDI.</p>
-                                }
-                                else if (PeutModifier)
+                                @if (PeutModifier)
                                 {
                                     <div class="actions-ligne">
+                                        @if (l.ALaDemande)
+                                        {
+                                            <button type="button" title="Créer un appel de livraison sur cette ligne (option DE)"
+                                                    @onclick="() => OuvrirAppelAsync(l.NumeroLigne)" @onclick:stopPropagation="true">📦 Nouvel appel</button>
+                                        }
                                         @if (!l.Soldee)
                                         {
                                             <button type="button" @onclick="() => OuvrirLigneAsync(l.NumeroLigne)" @onclick:stopPropagation="true">✏️ Modifier</button>

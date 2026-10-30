@@ -22,7 +22,9 @@ public interface ISaisieLignesCommande
     // Renvoie le n° de la ligne.
     Task<int> EnregistrerAsync(CleCommande commande, LigneSaisie ligne, CancellationToken ct = default);
 
-    // Options de la liste (NEG520) : suppression (physique, comme MAJ520), solde, réactivation
+    // Options de la liste (NEG520) : suppression (physique, comme MAJ520), solde, réactivation.
+    // Un appel de livraison est enregistré et supprimé par le moteur des appels (IAppelsLivraison) ; son solde ne rend
+    // pas son reste à la ligne d'origine (comme le RPG)
     Task SupprimerAsync(CleCommande commande, int numeroLigne, CancellationToken ct = default);
     Task SolderAsync(CleCommande commande, int numeroLigne, CancellationToken ct = default);
     Task ReactiverAsync(CleCommande commande, int numeroLigne, CancellationToken ct = default);
@@ -37,9 +39,8 @@ public interface IActionsCommande
     // Commande remise en cours ; ses lignes soldées le restent
     Task ReactiverAsync(CleCommande commande, CancellationToken ct = default);
 
-    // Refusée s'il existe un BL ou une facture (droit « Suppression »). Renvoie un avertissement si des données annexes
-    // n'ont pas pu être nettoyées (la commande, elle, est supprimée), sinon null.
-    Task<string?> SupprimerAsync(CleCommande commande, CancellationToken ct = default);
+    // Refusée s'il existe un BL ou une facture (droit « Suppression ») ; données annexes supprimées dans la même transaction
+    Task SupprimerAsync(CleCommande commande, CancellationToken ct = default);
 }
 
 public static class StatutsLigne
@@ -115,6 +116,7 @@ public sealed class LigneSaisie
     public int LigneOrigine { get; set; }
     public int QuantiteOrigine { get; set; }           // DNQTEO : quantité initiale d'une ligne « à la demande »
     public bool EstAppel => Statut == StatutsLigne.Normal && LigneOrigine != 0;
+    public int ResteOrigine { get; set; }              // appel : reste à appeler sur la ligne d'origine (information)
     public string ArticleEnregistre { get; set; } = "";   // pour détecter un changement d'article
     public string IndiceEnregistre { get; set; } = "";
     public string ArticleComplete { get; set; } = "";     // article dont les valeurs ont été reprises (« article|indice »)
@@ -144,4 +146,5 @@ public static class AvertissementsLigne
     public const string JourNonTravaille = "jour-non-travaille";       // DAT0017
     public const string JourNonAutorise = "jour-client";               // BL00049
     public const string MaxiNonMultiple = "maxi-conditionnement";      // NEG0041
+    public const string DepassementOrigine = "depassement-origine";    // NEG0029 (appel de livraison)
 }

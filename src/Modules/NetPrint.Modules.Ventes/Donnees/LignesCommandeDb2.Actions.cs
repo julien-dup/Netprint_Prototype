@@ -7,8 +7,7 @@ namespace NetPrint.Modules.Ventes.Donnees;
 
 // =====================================================================
 // Actions sur une commande (options SO, RE et 4 de DOS500S) : solde, réactivation, suppression.
-// Les tables journalisées sont écrites en une transaction ; les tables satellites non journalisées
-// (répartitions, coûts, façonnage, liens commande → OF, directives) sont vidées juste après la validation.
+// Tout est écrit en une transaction, sauf l'audit EVE200 (table non journalisée), écrit juste après la validation.
 // Écarts volontaires (signalés « ÉCART ») :
 //   - solde : les événements du dossier (EVE100 / EVE105) sont conservés (DOS500S les supprimait) ;
 //   - suppression : textes de lignes (NEG100T), AB001FA et AB0016 supprimés aussi (le RPG les laissait orphelins).
@@ -116,9 +115,9 @@ internal sealed partial class LignesCommandeDb2
             maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second);
     }
 
-    // Suppression (option 4, SPSUP / SPneg100) d'une commande sans BL ni facture, contrôlés dans la transaction.
-    // Renvoie les tables satellites qui n'ont pas pu être vidées (verrou...), pour le signaler.
-    public async Task<IReadOnlyList<string>> SupprimerCommandeAsync(int societe, string profil, CleCommande cle, ContexteLigne c,
+    // Suppression (option 4, SPSUP / SPneg100) d'une commande sans BL ni facture, contrôlés dans la transaction ;
+    // tables satellites comprises (journalisées depuis le 30/10/2026)
+    public async Task SupprimerCommandeAsync(int societe, string profil, CleCommande cle, ContexteLigne c,
         Func<bool, bool, string?> refus, CancellationToken ct)
     {
         var b = Bib;
@@ -157,6 +156,12 @@ internal sealed partial class LignesCommandeDb2
                 // ÉCART : AB001FA et AB0016 supprimés (orphelins dans le RPG)
                 await Executer(cnx, tx, $"DELETE FROM {b}.AB001FA WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", ct, k);
                 await Executer(cnx, tx, $"DELETE FROM {b}.AB0016 WHERE RSOC = ? AND RDOSS = ? AND F16CLE = ?", ct, k);
+                // Tables satellites (répartitions, coûts, façonnage, directives, liens commande → OF) : normalement vides pour une
+                // commande de négoce ou de produit fini ; une table absente de l'installation est ignorée
+                var presentes = await TablesPresentesAsync(cnx, tx, b, ct);
+                foreach (var (table, dossier, cleCol) in Satellites)
+                    if (presentes.Contains(table))
+                        await Executer(cnx, tx, $"DELETE FROM {b}.{table} WHERE RSOC = ? AND {dossier} = ? AND {cleCol} = ?", ct, k);
                 if (await Executer(cnx, tx, $"DELETE FROM {b}.AB001 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ? AND CCTYPC IN ('3', '4')", ct, k) == 0)
                     throw new RegleMetierException("Cette commande n'existe plus.");
                 await TransfertAsync(cnx, tx, b, societe, cle, c, ct);
@@ -169,38 +174,31 @@ internal sealed partial class LignesCommandeDb2
             }
         }
 
-        // Tables satellites non journalisées (normalement vides pour une commande de négoce ou de produit fini)
-        var echecs = new List<string>();
-        foreach (var (table, dossier, cleCol) in new[]
-                 {
-                     ("ABREPE", "RDOSS", "LADCLE"), ("ABREPD", "RDOSS", "LADCLE"), ("ABCOUTE", "CODOSS", "CODCLE"),
-                     ("ABCOUTD", "CODOSS", "CODCLE"), ("ABCOUTB", "CODOSS", "CODCLE"), ("ABDIRL", "RDOSS", "CCDCLE"),
-                     ("ABDIRP", "RDOSS", "CCDCLE"), ("DIR100", "RDOSS", "CCDCLE"),
-                 })
-            await SupprimerSansTransactionAsync(cnx, table, $"DELETE FROM {b}.{table} WHERE RSOC = ? AND {dossier} = ? AND {cleCol} = ?", k, echecs);
-        await SupprimerSansTransactionAsync(cnx, "AFC020", $"DELETE FROM {b}.AFC020 WHERE RSOC = ? AND FCDOSS = ? AND FCDCLE = ?", k, echecs);
-        // Liens commande → OF (AB0020, commande d'origine LADOSC / LACLDC)
-        await SupprimerSansTransactionAsync(cnx, "AB0020", $"DELETE FROM {b}.AB0020 WHERE RSOC = ? AND LADOSC = ? AND LACLDC = ?", k, echecs);
         await AuditDossierAsync(cnx, b, societe, profil, cle, "SU");
-        return echecs;
     }
 
-    // Table ou colonne absente selon l'installation (SQLSTATE 42704 / 42703) : ignoré ; toute autre erreur (verrou...) est signalée
-    private static async Task SupprimerSansTransactionAsync(OdbcConnection cnx, string table, string sql, object?[] valeurs, List<string> echecs)
+    // Tables satellites vidées avec la commande : (table, colonne du n° de dossier, colonne de la clé)
+    private static readonly (string Table, string Dossier, string Cle)[] Satellites =
+    [
+        ("ABREPE", "RDOSS", "LADCLE"), ("ABREPD", "RDOSS", "LADCLE"), ("ABCOUTE", "CODOSS", "CODCLE"),
+        ("ABCOUTD", "CODOSS", "CODCLE"), ("ABCOUTB", "CODOSS", "CODCLE"), ("ABDIRL", "RDOSS", "CCDCLE"),
+        ("ABDIRP", "RDOSS", "CCDCLE"), ("DIR100", "RDOSS", "CCDCLE"), ("AFC020", "FCDOSS", "FCDCLE"),
+        ("AB0020", "LADOSC", "LACLDC"),   // liens commande → OF : commande d'origine
+    ];
+
+    // Tables satellites présentes dans cette installation avec les colonnes utilisées (sinon le DELETE échouerait et annulerait
+    // toute la suppression)
+    private static async Task<HashSet<string>> TablesPresentesAsync(OdbcConnection cnx, OdbcTransaction tx, string b, CancellationToken ct)
     {
-        try
-        {
-            await Executer(cnx, null, sql, CancellationToken.None, valeurs);
-        }
-        catch (OdbcException ex) when (ex.Errors.Count > 0 && ex.Errors[0].SQLState is "42704" or "42703")
-        {
-        }
-        catch (OdbcException)
-        {
-            echecs.Add(table);
-        }
+        var colonnes = new HashSet<(string, string)>();
+        var marqueurs = string.Join(", ", Satellites.Select(_ => "?"));
+        object?[] valeurs = [b, .. Satellites.Select(s => (object?)s.Table)];
+        await using (var rd = await Lire(cnx, tx,
+            $"SELECT TRIM(TABLE_NAME), TRIM(COLUMN_NAME) FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ({marqueurs})", ct, valeurs))
+            while (await rd.ReadAsync(ct)) colonnes.Add((rd.GetString(0).ToUpperInvariant(), rd.GetString(1).ToUpperInvariant()));
+        return Satellites.Where(s => colonnes.Contains((s.Table, "RSOC")) && colonnes.Contains((s.Table, s.Dossier)) && colonnes.Contains((s.Table, s.Cle)))
+            .Select(s => s.Table).ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
-
     // Historique du dossier (DOS040) pour un dossier antérieur au jour, initiales de l'utilisateur
     private static async Task HistoriqueDossierAsync(OdbcConnection cnx, OdbcTransaction tx, string b, int societe, string profil,
         CleCommande cle, ContexteLigne c, string type, CancellationToken ct)
