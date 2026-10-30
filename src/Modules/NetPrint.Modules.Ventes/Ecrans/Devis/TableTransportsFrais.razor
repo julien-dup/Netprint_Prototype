@@ -1,0 +1,74 @@
+@* Onglets Transport (D50001) et Frais annexes (D50005), communs aux deux vues *@
+@if (Transports is not null)
+{
+    <table class="grille grille-detail">
+        <thead>
+            <tr>
+                <th class="nombre">Quantité</th>
+                <th>Département</th>
+                <th class="nombre">Barème</th>
+                <th>Transporteur</th>
+                <th class="nombre">Poids</th>
+                <th class="nombre">Valeur</th>
+                <th class="nombre">Valeur mille +</th>
+                <th>Ville</th>
+                <th>Raison sociale</th>
+                <th>Observation</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var t in Transports)
+            {
+                <tr>
+                    <td class="nombre">@Affichage.Entier(t.Quantite)</td>
+                    <td>@t.Departement</td>
+                    <td class="nombre">@Affichage.Entier(t.Bareme)</td>
+                    <td>@t.Transporteur</td>
+                    <td class="nombre">@Affichage.Entier(t.Poids)</td>
+                    <td class="nombre">@Affichage.Montant(t.Valeur)</td>
+                    <td class="nombre">@Affichage.Montant(t.ValeurMillePlus)</td>
+                    <td>@t.Ville</td>
+                    <td>@t.RaisonSociale</td>
+                    <td>@t.Observation</td>
+                </tr>
+            }
+            @if (Transports.Count == 0)
+            {
+                <tr class="ligne-vide"><td colspan="10">Aucun transport.</td></tr>
+            }
+        </tbody>
+    </table>
+}
+@if (Frais is not null)
+{
+    <table class="grille grille-detail">
+        <thead>
+            <tr>
+                <th>Article</th>
+                <th class="col-libelle">Désignation</th>
+                <th class="nombre">Quantité</th>
+                <th class="nombre">Prix de revient</th>
+                <th class="nombre">Marge</th>
+                <th class="nombre">Prix de vente</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var f in Frais)
+            {
+                <tr>
+                    <td>@f.Article</td>
+                    <td class="col-libelle">@f.Designation</td>
+                    <td class="nombre">@Affichage.Entier(f.Quantite)</td>
+                    <td class="nombre">@Affichage.Montant(f.PrixRevient)</td>
+                    <td class="nombre">@Affichage.Montant(f.Marge)</td>
+                    <td class="nombre">@Affichage.Montant(f.PrixVente)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<LigneTransport>? Transports { get; set; }
+    [Parameter] public IReadOnlyList<LigneFraisAnnexes>? Frais { get; set; }
+}

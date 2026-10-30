@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <HeadOutlet @rendermode="ModeRendu" />
+</head>
+
+<body>
+    <Routes @rendermode="ModeRendu" />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+</body>
+
+</html>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    // Pages marquées [ExcludeFromInteractiveRouting] (connexion, erreur) : rendu statique ;
+    // tout le reste : interactif côté serveur (l'écran vit sur le serveur, rien n'est stocké dans le navigateur).
+    private IComponentRenderMode? ModeRendu =>
+        HttpContext.AcceptsInteractiveRouting() ? InteractiveServer : null;
+}

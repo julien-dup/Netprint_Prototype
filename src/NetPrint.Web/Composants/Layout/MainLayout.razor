@@ -1,0 +1,110 @@
+@* Mise en page de NetPrint (charte, § 3) : barre d'application bleu nuit, puis l'écran du module. *@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject IUtilisateurCourant UtilisateurCourant
+@inject IEnumerable<DescriptionModule> Modules
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+
+<div class="ecran">
+    <header class="barre-appli">
+        <div class="titre-appli">
+            <a href="" class="lien-appli"><span class="logo-appli">◆</span> NetPrint</a>
+            @if (moduleCourant is not null)
+            {
+                <span class="nom-module">@moduleCourant.Nom</span>
+            }
+            @if (utilisateur.EstConnecte)
+            {
+                <span class="societe-appli" title="Société">@utilisateur.Societe · @utilisateur.NomSociete</span>
+            }
+        </div>
+        <div class="actions-appli">
+            <button class="bouton-icone bouton-aide" title="Raccourcis clavier" @onclick="AfficherAide">?</button>
+            <div class="menu">
+                <button class="bouton-utilisateur @(menuOuvert ? "ouvert" : "")" @onclick="() => menuOuvert = !menuOuvert">
+                    <span class="avatar">@utilisateur.Initiales</span> @utilisateur.Profil ▾
+                </button>
+                @if (menuOuvert)
+                {
+                    <div class="fond-menu" @onclick="() => menuOuvert = false"></div>
+                    <ul class="menu-contextuel menu-deroulant a-droite">
+                        <li @onclick='() => Aller("")'>🏠 Accueil</li>
+                        @foreach (var m in Modules.OrderBy(m => m.Ordre))
+                        {
+                            <li @onclick="() => Aller(m.Url)">@m.Icone @m.Nom</li>
+                        }
+                        <li class="separateur"></li>
+                        <li @onclick="OuvrirParametres">⚙ Paramètres (société, comptes)</li>
+                        <li class="li-formulaire">
+                            <form method="post" action="compte/deconnexion">
+                                <AntiforgeryToken />
+                                <button type="submit" class="bouton-menu">🚪 Se déconnecter</button>
+                            </form>
+                        </li>
+                    </ul>
+                }
+            </div>
+        </div>
+    </header>
+
+    @Body
+</div>
+
+<ZoneDialogues />
+<ZoneNotifications />
+
+@code {
+    private const string Aide =
+        "Entrée : lancer la recherche (dans les critères)\n" +
+        "Double-clic sur une ligne : ouvrir le détail\n" +
+        "Clic droit sur une ligne : actions de la ligne\n" +
+        "Bouton ▲ / ▼ d'un titre de colonne : trier\n" +
+        "Clic sur un titre de colonne : filtrer la colonne";
+
+    private UtilisateurConnecte utilisateur = UtilisateurConnecte.Anonyme;
+    private DescriptionModule? moduleCourant;
+    private bool menuOuvert;
+
+    protected override async Task OnInitializedAsync()
+    {
+        utilisateur = await UtilisateurCourant.LireAsync();
+        Navigation.LocationChanged += Changement;
+        TrouverModule();
+    }
+
+    private void Changement(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        TrouverModule();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    // Module de l'adresse courante : premier segment de son URL (« /ventes/devis » → « /ventes »)
+    private void TrouverModule()
+    {
+        var chemin = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
+        moduleCourant = Modules.FirstOrDefault(m =>
+        {
+            var segment = "/" + m.Url.Trim('/').Split('/')[0];
+            return chemin.Equals(segment, StringComparison.OrdinalIgnoreCase)
+                || chemin.StartsWith(segment + "/", StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    private void Aller(string url)
+    {
+        menuOuvert = false;
+        Navigation.NavigateTo(url);
+    }
+
+    // La page Paramètres revient ensuite sur l'écran en cours (sauf changement de société)
+    private void OuvrirParametres()
+    {
+        var ici = "/" + Navigation.ToBaseRelativePath(Navigation.Uri);
+        Aller($"parametres?retour={Uri.EscapeDataString(ici)}");
+    }
+
+    private Task AfficherAide() => Dialogues.AlerterAsync(Aide, "Raccourcis clavier");
+
+    public void Dispose() => Navigation.LocationChanged -= Changement;
+}

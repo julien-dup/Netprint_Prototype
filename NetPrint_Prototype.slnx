@@ -1,0 +1,23 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NetPrint.Web/NetPrint.Web.csproj" />
+    <Project Path="src/NetPrint.Web.Commun/NetPrint.Web.Commun.csproj" />
+    <Project Path="src/NetPrint.Socle/NetPrint.Socle.csproj" />
+    <Project Path="src/NetPrint.Noyau/NetPrint.Noyau.csproj" />
+    <Project Path="src/NetPrint.AppHost/NetPrint.AppHost.csproj" />
+    <Project Path="src/NetPrint.Reprise/NetPrint.Reprise.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/">
+    <Project Path="src/Modules/NetPrint.Modules.Ventes/NetPrint.Modules.Ventes.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Ventes.Contrats/NetPrint.Modules.Ventes.Contrats.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NetPrint.Architecture.Tests/NetPrint.Architecture.Tests.csproj" />
+    <Project Path="tests/NetPrint.Socle.Tests/NetPrint.Socle.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="README.md" />
+    <File Path=".gitignore" />
+  </Folder>
+</Solution>

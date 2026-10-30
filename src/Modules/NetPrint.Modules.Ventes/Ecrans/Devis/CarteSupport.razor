@@ -1,0 +1,76 @@
+@* Panneau « Support » d'un élément (InitPapier) et outil de découpe (InitOutil) *@
+@if (Papier is { } p)
+{
+    <div class="carte">
+        <h3>Support</h3>
+        <div class="formulaire formulaire-lecture">
+            <span>Référence</span><b>@p.Reference</b>
+            <span>Nature</span><b>@p.Nature</b>
+            <span>Sorte</span><b>@p.Sorte</b>
+            <span>Sous-sorte</span><b>@p.SousSorte</b>
+            <span>Grammage</span><b>@p.GrammageEpaisseur</b>
+            <span>Coloris</span><b>@p.Coloris</b>
+            <span>Norme</span><b>@p.Norme</b>
+            <span>Provenance</span><b>@p.Provenance</b>
+        </div>
+    </div>
+    <div class="carte">
+        <h3>Quantités @(p.Bobine ? "(bobine)" : "(feuilles)")</h3>
+        <table class="grille grille-compacte">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th class="nombre">@(p.Bobine ? "Tours" : "Feuilles")</th>
+                    @if (p.Bobine)
+                    {
+                        <th class="nombre">ML</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>Gâche fixe</td><td class="nombre">@p.GacheFixe</td>@if (p.Bobine) {<td class="nombre">@p.GacheFixeMl</td>}</tr>
+                <tr><td>Gâche % @(p.TauxGache != "" ? $"({p.TauxGache})" : "")</td><td class="nombre">@p.GachePourcentage</td>@if (p.Bobine) {<td class="nombre">@p.GachePourcentageMl</td>}</tr>
+                <tr><td>Total gâche</td><td class="nombre">@p.TotalGache</td>@if (p.Bobine) {<td class="nombre">@p.TotalGacheMl</td>}</tr>
+                <tr><td>@(p.Bobine ? "Tours bons" : "Bonnes feuilles")</td><td class="nombre">@p.BonnesFeuilles</td>@if (p.Bobine) {<td class="nombre">@p.BonnesFeuillesMl</td>}</tr>
+                <tr class="ligne-sous-total"><td>Total</td><td class="nombre">@p.Total</td>@if (p.Bobine) {<td class="nombre">@p.TotalMl</td>}</tr>
+                <tr><td>Métrage</td><td class="nombre">@p.Metrage</td>@if (p.Bobine) {<td class="nombre">@p.MetrageMl</td>}</tr>
+            </tbody>
+        </table>
+        <div class="formulaire formulaire-lecture">
+            <span>Format tirage</span><b>@p.FormatTirage</b>
+            <span>Format appro</span><b>@p.FormatAppro</b>
+            <span>Poids</span><b>@p.Poids</b>
+            <span>Conditionnement</span><b>@p.Conditionnement</b>
+            <span>Prix</span><b>@p.Prix</b>
+            <span>Valeur</span><b>@p.Valeur</b>
+            @if (p.NbBobines != "")
+            {
+                <span>Bobines</span><b>@p.NbBobines</b>
+            }
+        </div>
+    </div>
+}
+@if (Outil is { } o)
+{
+    <div class="carte">
+        <h3>Outil n° @o.Numero @(o.Forme != "" ? $"· {o.Forme}" : "")</h3>
+        <div class="formulaire formulaire-lecture">
+            <span>Format (laize × avance)</span><b>@Affichage.Nombre(o.Laize) × @Affichage.Nombre(o.Avance)</b>
+            <span>Poses en laize</span><b>@o.PosesLaize</b>
+            <span>Poses en développement</span><b>@o.PosesDeveloppement</b>
+            <span>Pas</span><b>@Affichage.Nombre(o.Pas)</b>
+            <span>Cote d'avance</span><b>@Affichage.Nombre(o.CoteAvance)</b>
+            <span>Écart laize / avance</span><b>@Affichage.Nombre(o.EcartLaize) / @Affichage.Nombre(o.EcartAvance)</b>
+            <span>Laize / avance utile</span><b>@Affichage.Nombre(o.LaizeUtile) / @Affichage.Nombre(o.AvanceUtile)</b>
+            @if (o.Rayon != 0)
+            {
+                <span>Rayon</span><b>@Affichage.Nombre(o.Rayon)</b>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public PapierElement? Papier { get; set; }
+    [Parameter] public OutilElement? Outil { get; set; }
+}

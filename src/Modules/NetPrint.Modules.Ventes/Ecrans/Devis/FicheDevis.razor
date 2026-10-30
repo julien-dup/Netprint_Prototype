@@ -1,0 +1,228 @@
+@page "/ventes/devis/{Numero:int}/{Version:int}/{Hypothese:int}/{TypeCout}"
+@* =====================================================================
+   Détail d'un devis — reprise de FEN_DetailDevis (WinDev, branche DLLNew), en lecture seule.
+   Deux présentations (bouton « Par élément » / « Par atelier », défaut : par atelier) :
+     - par atelier : un onglet par atelier (sections et opérations, sous-totaux), Papier, Matières,
+       Sous-traitance, Transport, Frais annexes ;
+     - par élément : un onglet par élément (fabrication, rubriques et réponses, support, matières,
+       sous-traitance, outil), Transport, Frais annexes.
+   Une adresse par devis : /ventes/devis/n°/version/hypothèse/type de coût.
+   ===================================================================== *@
+@inject IConsultationDevis Consultation
+@inject EtatConsultationDevis Etat
+@inject NavigationManager Navigation
+@inject Notifications Notifications
+
+<PageTitle>Devis @Cle.Libelle · NetPrint</PageTitle>
+
+<fieldset class="barre-outils">
+    <button @onclick="Retour" title="Retour à la liste des devis">← Liste des devis</button>
+    <span class="separateur-vertical"></span>
+    <div class="bascule">
+        <button class="@(Etat.VueDetail == "A" ? "actif" : "")" @onclick='() => ChangerVue("A")'>Par atelier</button>
+        <button class="@(Etat.VueDetail == "E" ? "actif" : "")" @onclick='() => ChangerVue("E")'>Par élément</button>
+    </div>
+    <span class="separateur-vertical"></span>
+    <button disabled title="Prochaine étape">📝 Texte libre</button>
+    <button disabled title="Prochaine étape">Σ Sous-totaux</button>
+    <button disabled title="Prochaine étape">💶 Tableau des prix</button>
+    <button disabled title="Prochaine étape">⚖ Décomposition</button>
+    <button disabled title="Prochaine étape">✖ Échec</button>
+    <button disabled title="Prochaine étape">📎 Documents</button>
+    <button disabled title="Prochaine étape">📄 Offre</button>
+    <button disabled title="Prochaine étape (récapitulatif PDF généré par le serveur)">🖨 Récapitulatif</button>
+</fieldset>
+
+<div class="contenu contenu-detail">
+    @if (chargement)
+    {
+        <p class="compteur"><span class="chargement">Chargement du devis…</span></p>
+    }
+    else if (detail is null)
+    {
+        <div class="carte carte-message">
+            <p>Le devis @Cle.Libelle (@(Cle.TypeCout == "T" ? "devis type" : "devis client")) n'existe pas ou ne vous est pas accessible.</p>
+            <p><button @onclick="Retour">← Liste des devis</button></p>
+        </div>
+    }
+    else
+    {
+        var e = detail.Entete;
+        <section class="entete-devis">
+            <div class="titre-panneau">
+                <span class="sur-titre">Devis</span>
+                <span class="code-titre">@detail.Cle.Libelle</span>
+                @if (detail.Cle.TypeCout == "T")
+                {
+                    <span class="badge badge-offre">Devis type</span>
+                }
+            </div>
+            <div class="infos-devis">
+                <div><span class="libelle-info">@(e.EstClient ? "Client" : "Prospect")</span> <b>@e.CodeTiers</b> @e.NomTiers</div>
+                <div><span class="libelle-info">Désignation</span> <b>@e.Designation1</b> @e.Designation2</div>
+                <div>
+                    <span class="libelle-info">Quantité</span> <b>@Affichage.Entier(e.Quantite)</b>
+                    <span class="libelle-info">Nb d'éléments</span> <b>@e.NbElements</b>
+                    <span class="libelle-info">Format fini</span> <b>@e.FormatFini</b>
+                    @if (e.FormatOuvert != "")
+                    {
+                        <span class="libelle-info">Format ouvert</span> <b>@e.FormatOuvert</b>
+                    }
+                </div>
+            </div>
+        </section>
+
+        <nav class="onglets onglets-detail">
+            @foreach (var o in Onglets)
+            {
+                <button class="@(o.Cle == onglet ? "actif" : "")" title="@o.Bulle" @onclick="() => onglet = o.Cle">@o.Libelle</button>
+            }
+        </nav>
+
+        <div class="zone-detail">
+            @if (Etat.VueDetail == "A")
+            {
+                if (onglet.StartsWith("at") && int.TryParse(onglet[2..], out var i) && i < detail.Ateliers.Count)
+                {
+                    <TableOperations Lignes="detail.Ateliers[i].Lignes" />
+                }
+                else if (onglet == "papier")
+                {
+                    <TablePapiers Lignes="detail.Papiers" />
+                }
+                else if (onglet == "matieres")
+                {
+                    <TableMatieres Lignes="detail.Matieres" />
+                }
+                else if (onglet == "st")
+                {
+                    <TableSousTraitance Lignes="detail.SousTraitances" />
+                }
+            }
+            else if (onglet.StartsWith("el") && int.TryParse(onglet[2..], out var n) && detail.Elements.FirstOrDefault(x => x.Numero == n) is { } el)
+            {
+                if (el.Description != "")
+                {
+                    <p class="description-element">@el.Description</p>
+                }
+                <div class="element-colonnes">
+                    <div class="element-principal">
+                        <h3 class="titre-bloc">Fabrication</h3>
+                        <TableOperations Lignes="el.Fabrication" VueElement="true" />
+                        @if (el.Matieres.Count > 0)
+                        {
+                            <h3 class="titre-bloc">Matières</h3>
+                            <TableMatieres Lignes="el.Matieres" AvecCommentaire="true" />
+                        }
+                        @if (el.SousTraitances.Count > 0)
+                        {
+                            <h3 class="titre-bloc">Sous-traitance</h3>
+                            <TableSousTraitance Lignes="el.SousTraitances" AvecCommentaire="true" />
+                        }
+                    </div>
+                    <div class="element-cote">
+                        @if (el.Rubriques.Count > 0)
+                        {
+                            <div class="carte">
+                                <h3>Rubriques et réponses</h3>
+                                <table class="grille grille-compacte">
+                                    <thead><tr><th>Rubrique</th><th>Question</th><th class="nombre">Réponse</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var r in el.Rubriques)
+                                        {
+                                            <tr class="@(r.Rubrique != "" ? "debut-rubrique" : "")">
+                                                <td><b>@r.Rubrique</b></td>
+                                                <td>@r.Question</td>
+                                                <td class="nombre">@r.Reponse</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        <CarteSupport Papier="el.Papier" Outil="el.Outil" />
+                        @if (el.AvecTexteLibre)
+                        {
+                            <p class="aide">📝 Cet élément a un texte libre (affichage : prochaine étape).</p>
+                        }
+                    </div>
+                </div>
+            }
+            @if (onglet == "transport")
+            {
+                <TableTransportsFrais Transports="detail.Transports" />
+            }
+            else if (onglet == "frais")
+            {
+                <TableTransportsFrais Frais="detail.FraisAnnexes" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+    [Parameter] public int Version { get; set; }
+    [Parameter] public int Hypothese { get; set; }
+    [Parameter] public string TypeCout { get; set; } = "C";
+
+    private sealed record Onglet(string Cle, string Libelle, string? Bulle = null);
+
+    private CleDevis Cle => new(Numero, Version, Hypothese, TypeCout.ToUpperInvariant());
+    private DetailDevis? detail;
+    private bool chargement = true;
+    private string onglet = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        chargement = true;
+        try
+        {
+            detail = await Consultation.LireDetailAsync(Cle);
+            Etat.Selection = Cle;
+            onglet = Onglets.FirstOrDefault()?.Cle ?? "";
+        }
+        catch (Exception ex)
+        {
+            detail = null;
+            Notifications.Erreur($"Lecture du devis impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    // Onglets de la présentation choisie ; Sous-traitance et Frais annexes masqués s'ils sont vides (comme le WinDev)
+    private List<Onglet> Onglets
+    {
+        get
+        {
+            var liste = new List<Onglet>();
+            if (detail is null) return liste;
+            if (Etat.VueDetail == "A")
+            {
+                for (var i = 0; i < detail.Ateliers.Count; i++) liste.Add(new Onglet($"at{i}", detail.Ateliers[i].Libelle));
+                liste.Add(new Onglet("papier", "Papier"));
+                liste.Add(new Onglet("matieres", "Matières"));
+                if (detail.SousTraitances.Count > 0) liste.Add(new Onglet("st", "Sous-traitance"));
+            }
+            else
+            {
+                foreach (var el in detail.Elements) liste.Add(new Onglet($"el{el.Numero}", el.Titre, el.Description));
+            }
+            liste.Add(new Onglet("transport", "Transport"));
+            if (detail.FraisAnnexes.Count > 0) liste.Add(new Onglet("frais", "Frais annexes"));
+            return liste;
+        }
+    }
+
+    private void ChangerVue(string vue)
+    {
+        if (Etat.VueDetail == vue) return;
+        Etat.VueDetail = vue;
+        onglet = Onglets.FirstOrDefault()?.Cle ?? "";
+    }
+
+    private void Retour() => Navigation.NavigateTo("ventes/devis");
+}

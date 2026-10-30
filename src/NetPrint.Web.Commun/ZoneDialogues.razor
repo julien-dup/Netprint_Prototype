@@ -1,0 +1,26 @@
+@* Affiche la fenêtre demandée par le service Dialogues. Placée une fois dans la mise en page. *@
+@implements IDisposable
+@inject Dialogues Dialogues
+
+@if (Dialogues.Courante is { } d)
+{
+    <div class="voile voile-dialogue" @onclick="() => Dialogues.Repondre(false)">
+        <div class="fenetre dialogue" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="titre-fenetre">@d.Titre</div>
+            <div class="corps-fenetre"><p class="message-dialogue">@d.Message</p></div>
+            <div class="pied-fenetre">
+                @if (d.AvecAnnuler)
+                {
+                    <button @onclick="() => Dialogues.Repondre(false)">Annuler</button>
+                }
+                <button class="bouton-principal" @onclick="() => Dialogues.Repondre(true)">@d.BoutonOk</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    protected override void OnInitialized() => Dialogues.Change += Rafraichir;
+    private void Rafraichir() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Dialogues.Change -= Rafraichir;
+}

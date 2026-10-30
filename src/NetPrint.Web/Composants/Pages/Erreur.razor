@@ -1,0 +1,27 @@
+@page "/erreur"
+@layout LayoutConnexion
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@using System.Diagnostics
+
+<PageTitle>Erreur · NetPrint</PageTitle>
+
+<div class="fenetre dialogue">
+    <div class="titre-fenetre"><span class="logo-connexion">◆</span> NetPrint</div>
+    <div class="corps-fenetre">
+        <p class="erreur">Une erreur est survenue pendant le traitement de votre demande.</p>
+        @if (!string.IsNullOrEmpty(IdentifiantRequete))
+        {
+            <p class="aide">Référence à communiquer au support : <code>@IdentifiantRequete</code></p>
+        }
+    </div>
+    <div class="pied-fenetre">
+        <a href="/" class="bouton-principal bouton-lien-plein">Retour à l'accueil</a>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
+    private string? IdentifiantRequete => Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

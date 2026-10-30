@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- Module Devis et ventes (pilote) : devis, offres, commandes clients, ARC, proformas, EDI commandes.
+       Dossiers : Ecrans/ (pages Blazor), Services/ (règles métier), Donnees/ (SQL), Api/ (si besoin), Impressions/.
+       Dépendances autorisées : ses Contrats, le Noyau, le Socle, Web.Commun, et les Contrats des autres modules.
+       JAMAIS un autre module directement (vérifié par NetPrint.Architecture.Tests). -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetPrint.Modules.Ventes.Contrats\NetPrint.Modules.Ventes.Contrats.csproj" />
+    <ProjectReference Include="..\..\NetPrint.Noyau\NetPrint.Noyau.csproj" />
+    <ProjectReference Include="..\..\NetPrint.Web.Commun\NetPrint.Web.Commun.csproj" />
+  </ItemGroup>
+
+</Project>

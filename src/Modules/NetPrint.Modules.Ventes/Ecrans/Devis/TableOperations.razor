@@ -1,0 +1,67 @@
+@* Lignes de fabrication « opérations » (TABLE_Atelier* et TABLE_AtelierElt* du WinDev).
+   Vue par élément : la colonne Quantité est placée avant le diviseur. *@
+<table class="grille grille-detail">
+    <thead>
+        <tr>
+            <th class="col-libelle">Section / opération</th>
+            <th class="nombre">Base</th>
+            <th class="nombre">Nombre</th>
+            <th class="nombre">Temps unit.</th>
+            <th class="nombre">Cadence</th>
+            @if (VueElement)
+            {
+                <th class="nombre">Quantité</th>
+            }
+            <th class="nombre">Diviseur</th>
+            <th class="nombre">Résultat</th>
+            <th class="nombre">Taux horaire</th>
+            <th class="nombre">Valeur</th>
+            <th class="nombre">Valeur mille +</th>
+            <th>Commentaire</th>
+            @if (!VueElement)
+            {
+                <th class="nombre">Quantité</th>
+            }
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var l in Lignes)
+        {
+            if (l.Nature == NatureLigne.Titre)
+            {
+                <tr class="ligne-titre"><td colspan="12">@l.Libelle</td></tr>
+                continue;
+            }
+            <tr class="@Affichage.ClasseNature(l.Nature)">
+                <td class="col-libelle">@l.Libelle</td>
+                <td class="nombre">@Affichage.Nombre(l.Base)</td>
+                <td class="nombre">@Affichage.Entier(l.Nombre)</td>
+                <td class="nombre">@l.Temps</td>
+                <td class="nombre">@Affichage.Entier(l.Cadence)</td>
+                @if (VueElement)
+                {
+                    <td class="nombre">@Affichage.Entier(l.Quantite)</td>
+                }
+                <td class="nombre">@Affichage.Entier(l.Diviseur)</td>
+                <td class="nombre">@l.Resultat</td>
+                <td class="nombre">@Affichage.Montant(l.TauxHoraire)</td>
+                <td class="nombre">@Affichage.Montant(l.Valeur)</td>
+                <td class="nombre">@Affichage.Montant(l.ValeurMillePlus)</td>
+                <td>@l.Commentaire</td>
+                @if (!VueElement)
+                {
+                    <td class="nombre">@Affichage.Entier(l.Quantite)</td>
+                }
+            </tr>
+        }
+        @if (Lignes.Count == 0)
+        {
+            <tr class="ligne-vide"><td colspan="12">Aucune opération.</td></tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<LigneOperation> Lignes { get; set; } = [];
+    [Parameter] public bool VueElement { get; set; }
+}

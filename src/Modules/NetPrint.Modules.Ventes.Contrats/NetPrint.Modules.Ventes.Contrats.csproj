@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Contrats publics du module Ventes : la SEULE partie de Ventes que les autres modules ont le droit de référencer
+       (ex. Production lit un devis ou transforme une commande en dossier de fabrication via IConsultationDevis).
+       Ne contient que des interfaces et des objets échangés : aucune logique, aucun accès base. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\NetPrint.Socle\NetPrint.Socle.csproj" />
+  </ItemGroup>
+
+</Project>

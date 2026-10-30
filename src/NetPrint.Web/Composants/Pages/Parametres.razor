@@ -1,0 +1,65 @@
+@page "/parametres"
+@* Paramètres de la session (menu utilisateur) : changer de société, de compte général ou de compte client
+   sans se reconnecter. Le formulaire est posté à /compte/parametres, qui contrôle la saisie et rouvre la session
+   (le cookie ne peut être réécrit que par une vraie requête HTTP). *@
+@inject IUtilisateurCourant UtilisateurCourant
+
+<PageTitle>Paramètres · NetPrint</PageTitle>
+
+<div class="contenu contenu-parametres">
+    <form method="post" action="compte/parametres" class="fenetre parametres-session">
+        <AntiforgeryToken />
+        <input type="hidden" name="retour" value="@RetourValide" />
+        <div class="titre-fenetre">⚙ Paramètres de la session</div>
+        <div class="corps-fenetre">
+            @if (!string.IsNullOrEmpty(Erreur))
+            {
+                <p class="erreur" role="alert">⚠ @Erreur</p>
+            }
+            <div class="formulaire">
+                <span>Profil</span>
+                <strong>@utilisateur.Profil</strong>
+                <span>Société</span>
+                <input name="societe" class="num6" inputmode="numeric" maxlength="4" required autofocus
+                       value="@(Societe ?? utilisateur.Societe.ToString())" />
+                <span>Compte général</span>
+                <input name="compteGeneral" class="num6" inputmode="numeric" maxlength="6" placeholder="411000"
+                       value="@(CompteGeneral ?? Valeur(utilisateur.CompteGeneral))" />
+                <span>Compte client</span>
+                <input name="compteClient" class="num7" inputmode="numeric" maxlength="7"
+                       value="@(CompteClient ?? Valeur(utilisateur.CompteClient))" />
+            </div>
+            <p class="aide">
+                Société actuelle : @utilisateur.Societe · @utilisateur.NomSociete.
+                Changer de société rouvre la session sur la nouvelle société et ramène à l'accueil :
+                les recherches en cours sont abandonnées.
+                Le compte général et le compte client servent de valeurs par défaut dans les écrans (ex. consultation des devis).
+            </p>
+        </div>
+        <div class="pied-fenetre">
+            <a href="@RetourValide.TrimStart('/')" class="bouton-lien-plein">Annuler</a>
+            <button type="submit" class="bouton-principal">Enregistrer</button>
+        </div>
+    </form>
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public string? Retour { get; set; }
+    [SupplyParameterFromQuery] public string? Erreur { get; set; }
+    // Saisie renvoyée par /compte/parametres en cas d'erreur
+    [SupplyParameterFromQuery] public string? Societe { get; set; }
+    [SupplyParameterFromQuery] public string? CompteGeneral { get; set; }
+    [SupplyParameterFromQuery] public string? CompteClient { get; set; }
+
+    private UtilisateurConnecte utilisateur = UtilisateurConnecte.Anonyme;
+
+    // Uniquement une adresse de l'application, jamais la page Paramètres elle-même
+    private string RetourValide =>
+        !string.IsNullOrEmpty(Retour) && Retour.StartsWith('/') && !Retour.StartsWith("//") && !Retour.StartsWith("/\\")
+        && !Retour.StartsWith("/parametres", StringComparison.OrdinalIgnoreCase)
+            ? Retour : "/";
+
+    protected override async Task OnInitializedAsync() => utilisateur = await UtilisateurCourant.LireAsync();
+
+    private static string Valeur(int n) => n > 0 ? n.ToString() : "";
+}

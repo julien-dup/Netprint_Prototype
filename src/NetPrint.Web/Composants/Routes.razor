@@ -1,0 +1,20 @@
+@inject IEnumerable<DescriptionModule> Modules
+
+<Router AppAssembly="typeof(Program).Assembly" AdditionalAssemblies="assemblagesModules">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)">
+            <NotAuthorized>
+                <RedirectionConnexion />
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>
+
+@code {
+    // Les écrans des modules sont dans leurs propres projets : on les déclare au routeur
+    private Assembly[] assemblagesModules = [];
+
+    protected override void OnInitialized() =>
+        assemblagesModules = Modules.Select(m => m.Assemblage).Distinct().ToArray();
+}

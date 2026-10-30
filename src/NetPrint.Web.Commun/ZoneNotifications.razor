@@ -1,0 +1,16 @@
+@* Notifications temporaires en bas à droite. Placée une fois dans la mise en page. *@
+@implements IDisposable
+@inject Notifications Notifications
+
+<div class="notifications" aria-live="polite">
+    @foreach (var n in Notifications.Liste)
+    {
+        <div class="notification @n.Genre" @key="n.Id">@n.Message</div>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized() => Notifications.Change += Rafraichir;
+    private void Rafraichir() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Notifications.Change -= Rafraichir;
+}

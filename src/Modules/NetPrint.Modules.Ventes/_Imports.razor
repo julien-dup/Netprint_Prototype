@@ -1,0 +1,11 @@
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Web.Virtualization
+@using NetPrint.Socle
+@using NetPrint.Web.Commun
+@using NetPrint.Modules.Ventes.Contrats
+@* Tous les écrans du module exigent une session NetPrint *@
+@attribute [Authorize]
+@using Microsoft.JSInterop

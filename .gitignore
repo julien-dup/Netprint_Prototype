@@ -1,0 +1,28 @@
+# =====================================================================
+# Dépôt NetPrint_Prototype : seul le code source est versionné.
+# =====================================================================
+
+# --- .NET / Visual Studio : compilation et réglages personnels
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.tmp
+
+# --- Versions publiées (recréées par dotnet publish)
+publish/
+
+# --- Configuration de production : contient des mots de passe, reste sur le serveur
+appsettings.Production.json
+*.local
+
+# --- Journaux et résultats de tests
+logs/
+*.log
+TestResults/
+
+# Attention : wwwroot N'EST PAS ignoré (en Blazor, c'est du code source : app.css, favicon...)
+
+# --- Préférences d'affichage des grilles (prototype : fichiers par utilisateur, côté serveur)
+App_Data/

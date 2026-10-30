@@ -1,0 +1,76 @@
+@* Onglet Papier de la vue par atelier (TABLE_Papier) : un élément par ligne *@
+<table class="grille grille-detail grille-large">
+    <thead>
+        <tr>
+            <th class="nombre">Élt</th>
+            <th>Désignation</th>
+            <th>Sorte</th>
+            <th>Sous-sorte</th>
+            <th class="nombre">Grammage</th>
+            <th>Format papier</th>
+            <th>Coloris</th>
+            <th>Provenance</th>
+            <th>Format tirage</th>
+            <th class="nombre">Pages</th>
+            <th class="nombre">Recto</th>
+            <th class="nombre">Verso</th>
+            <th class="nombre">Basculées</th>
+            <th class="nombre">Gâche fixe</th>
+            <th class="nombre">% gâche</th>
+            <th class="nombre">Poids</th>
+            <th class="nombre">Métrage</th>
+            <th class="nombre">Prix</th>
+            <th>UA</th>
+            <th class="nombre">Valeur</th>
+            <th class="nombre">Poses</th>
+            <th class="nombre">Total gâche</th>
+            <th class="nombre">Hors gâche</th>
+            <th class="nombre">Total</th>
+            <th class="nombre">Condit.</th>
+            <th class="nombre">Épaisseur</th>
+            <th>Unité</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var p in Lignes)
+        {
+            <tr>
+                <td class="nombre">@p.Element</td>
+                <td>@p.Designation</td>
+                <td>@p.Sorte</td>
+                <td>@p.SousSorte</td>
+                <td class="nombre">@Affichage.Entier(p.Grammage)</td>
+                <td>@p.FormatPapier</td>
+                <td>@p.Coloris</td>
+                <td>@p.Provenance</td>
+                <td>@p.FormatTirage</td>
+                <td class="nombre">@Affichage.Entier(p.Pages)</td>
+                <td class="nombre">@Affichage.Entier(p.Recto)</td>
+                <td class="nombre">@Affichage.Entier(p.Verso)</td>
+                <td class="nombre">@Affichage.Entier(p.Basculees)</td>
+                <td class="nombre">@Affichage.Entier(p.GacheFixe)</td>
+                <td class="nombre">@Affichage.Entier(p.PourcentageGache)</td>
+                <td class="nombre">@Affichage.Entier(p.Poids)</td>
+                <td class="nombre">@Affichage.Entier(p.Metrage)</td>
+                <td class="nombre">@Affichage.Nombre(p.Prix)</td>
+                <td>@p.UniteAchat</td>
+                <td class="nombre">@Affichage.Montant(p.Valeur)</td>
+                <td class="nombre">@Affichage.Entier(p.NbPoses)</td>
+                <td class="nombre">@Affichage.Entier(p.TotalGache)</td>
+                <td class="nombre">@Affichage.Entier(p.HorsGache)</td>
+                <td class="nombre">@Affichage.Entier(p.Total)</td>
+                <td class="nombre">@Affichage.Entier(p.Conditionnement)</td>
+                <td class="nombre">@Affichage.Entier(p.Epaisseur)</td>
+                <td>@p.UniteEpaisseur</td>
+            </tr>
+        }
+        @if (Lignes.Count == 0)
+        {
+            <tr class="ligne-vide"><td colspan="27">Aucun élément.</td></tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<LignePapier> Lignes { get; set; } = [];
+}

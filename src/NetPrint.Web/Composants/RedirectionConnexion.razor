@@ -1,0 +1,10 @@
+@* Session absente ou expirée : retour à la page de connexion, puis retour ici après connexion *@
+@inject NavigationManager Navigation
+
+@code {
+    protected override void OnInitialized()
+    {
+        var retour = "/" + Navigation.ToBaseRelativePath(Navigation.Uri);
+        Navigation.NavigateTo($"{AuthentificationNetPrint.PageConnexion}?retour={Uri.EscapeDataString(retour)}", forceLoad: true);
+    }
+}

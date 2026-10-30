@@ -1,0 +1,681 @@
+@page "/ventes/devis"
+@* =====================================================================
+   Consultation des devis — reprise de FEN_ConsultationDevis (WinDev, branche DLLNew).
+   Critères (zones SAI_*), bouton Chargement, liste TABLE_Devis, menu contextuel, légende.
+   Fonctions pas encore reprises (grisées) : documents, échec, tags, tableau des prix, sous-totaux,
+   texte libre, offre, coefficients, récapitulatif PDF, modification, recherches F4.
+   ===================================================================== *@
+@inject IConsultationDevis Consultation
+@inject EtatConsultationDevis Etat
+@inject NetPrint.Socle.Session.IUtilisateurCourant UtilisateurCourant
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+@inject IPreferencesGrilles PreferencesGrilles
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Consultation des devis · NetPrint</PageTitle>
+
+<fieldset class="barre-outils">
+    <button class="bouton-principal" disabled="@(Selection is null)" @onclick="() => Ouvrir(Selection)"
+            title="Détail du devis sélectionné (double-clic)">🔎 Détail du devis</button>
+    <span class="separateur-vertical"></span>
+    <button disabled title="Prochaine étape">📎 Documents</button>
+    <button disabled title="Prochaine étape">✖ Échec</button>
+    <button disabled title="Prochaine étape">🏷 Tags</button>
+    <span class="separateur-vertical"></span>
+    <button disabled title="Prochaine étape">💶 Tableau des prix</button>
+    <button disabled title="Prochaine étape">Σ Sous-totaux</button>
+    <button disabled title="Prochaine étape">📝 Texte libre</button>
+    <button disabled title="Prochaine étape (récapitulatif PDF généré par le serveur)">🖨 Récapitulatif</button>
+    <span class="espace"></span>
+    <button disabled title="Prochaine étape (saisie du devis)">✏️ Modifier</button>
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="RechercherAsync">
+    <label class="champ">
+        <span>N° devis</span>
+        <input type="number" class="num6" @bind="C.Numero" />
+    </label>
+    <div class="champ">
+        <span>Client</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
+            <input type="number" class="num7" title="Compte client (auxiliaire)" @bind="C.CompteClient" />
+        </div>
+    </div>
+    <label class="champ">
+        <span>Prospect</span>
+        <input type="number" class="num6" @bind="C.Prospect" />
+    </label>
+    <label class="champ">
+        <span>Désignation</span>
+        <input class="recherche" placeholder="Un ou plusieurs mots" @bind="C.Designation" />
+    </label>
+    <label class="champ">
+        <span>Date du</span>
+        <input type="date" @bind="C.DateDu" @bind:format="yyyy-MM-dd" />
+    </label>
+    <label class="champ">
+        <span>au</span>
+        <input type="date" @bind="C.DateAu" @bind:format="yyyy-MM-dd" />
+    </label>
+    <label class="champ">
+        <span>Représentant</span>
+        <input type="number" class="num6" @bind="C.Representant" disabled="@(contexte?.RepresentantImpose is not null)"
+               title="@(contexte?.RepresentantImpose is not null ? "Vous ne voyez que vos devis" : null)" />
+    </label>
+    <label class="champ">
+        <span>Catégorie</span>
+        <input class="code" maxlength="2" @bind="C.Categorie" />
+    </label>
+    <label class="champ">
+        <span>Devis</span>
+        <select @bind="C.EtatDevis">
+            <option value="">Tous</option>
+            <option value="1">Uniquement en cours</option>
+            <option value="2">Uniquement en commande</option>
+        </select>
+    </label>
+    <label class="champ">
+        <span>Type devis</span>
+        <select @bind="C.TypeDevis">
+            <option value="">Tous</option>
+            <option value="T">Devis type</option>
+            <option value="C">Devis client</option>
+        </select>
+    </label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@chargement">🔍 Rechercher</button>
+        <button type="button" class="bouton-gomme" title="Réinitialiser tous les critères" @onclick="Effacer">
+            <img src="gomme.png" alt="" /> Effacer
+        </button>
+        <button type="button" class="bouton-lien" @onclick="() => Etat.PlusDeCriteres = !Etat.PlusDeCriteres">
+            @(Etat.PlusDeCriteres ? "▴ Moins de critères" : "▾ Plus de critères")
+        </button>
+    </div>
+
+    @if (Etat.PlusDeCriteres)
+    {
+        <div class="groupe-criteres">
+            <span class="titre-groupe">Commercial</span>
+            <label class="champ"><span>Étude</span><input type="number" class="num6" @bind="C.Etude" /></label>
+            <label class="champ"><span>Profil</span><input class="code" maxlength="10" @bind="C.Profil" /></label>
+            <label class="champ"><span>Sous-catégorie</span><input class="code" maxlength="2" @bind="C.SousCategorie" /></label>
+            <label class="champ"><span>Fabricant</span><input class="code" maxlength="3" @bind="C.Fabricant" /></label>
+            <label class="champ"><span>Norme</span><input class="code" @bind="C.Norme" /></label>
+            <label class="champ"><span>Quantité de</span><input type="number" class="num7" @bind="C.QuantiteDe" /></label>
+            <label class="champ"><span>à</span><input type="number" class="num7" @bind="C.QuantiteA" /></label>
+            <label class="champ"><span>Nb éléments</span><input type="number" class="num3" @bind="C.NbElements" /></label>
+            <label class="champ"><span>Nb élément/ex</span><input type="number" class="num3" @bind="C.NbElementsExemplaire" /></label>
+            <label class="champ"><span>Modèle</span><input type="number" class="num6" @bind="C.Modele" /></label>
+            <label class="champ"><span>N° OF</span><input type="number" class="num6" @bind="C.Dossier" /></label>
+            <label class="champ"><span>N° OF préc.</span><input type="number" class="num6" @bind="C.DossierPrecedent" /></label>
+            <label class="champ"><span>Réf. imprimé</span><input class="court" @bind="C.ReferenceImprime" /></label>
+            <label class="champ"><span>Motif échec</span><input class="code" @bind="C.MotifEchec" /></label>
+            <label class="champ"><span>Échec du</span><input type="date" @bind="C.EchecDu" @bind:format="yyyy-MM-dd" /></label>
+            <label class="champ"><span>au</span><input type="date" @bind="C.EchecAu" @bind:format="yyyy-MM-dd" /></label>
+        </div>
+        <div class="groupe-criteres">
+            <span class="titre-groupe">Formats</span>
+            <div class="champ">
+                <span>Format fini</span>
+                <div class="ligne-champs">
+                    <input type="number" step="0.01" class="num6" @bind="C.FiniLargeur" /> x
+                    <input type="number" step="0.01" class="num6" @bind="C.FiniHauteur" /> x
+                    <input type="number" step="0.01" class="num6" @bind="C.FiniTroisiemeCote" />
+                </div>
+            </div>
+            <div class="champ">
+                <span>Format ouvert</span>
+                <div class="ligne-champs">
+                    <input type="number" step="0.01" class="num6" @bind="C.OuvertLargeur" /> x
+                    <input type="number" step="0.01" class="num6" @bind="C.OuvertHauteur" />
+                </div>
+            </div>
+        </div>
+        <div class="groupe-criteres">
+            <span class="titre-groupe">Papier</span>
+            <label class="champ"><span>Papier</span><input type="number" class="num6" @bind="C.Papier" /></label>
+            <label class="champ"><span>Sorte</span><input class="code" @bind="C.Sorte" /></label>
+            <label class="champ"><span>Sous-sorte</span><input class="code" @bind="C.SousSorte" /></label>
+            <label class="champ"><span>Grammage</span><input type="number" class="num3" @bind="C.Grammage" /></label>
+            <div class="champ">
+                <span>Format papier</span>
+                <div class="ligne-champs">
+                    <input type="number" class="num6" @bind="C.LargeurPapier" /> x
+                    <input type="number" class="num6" @bind="C.HauteurPapier" />
+                </div>
+            </div>
+            <label class="champ"><span>Coloris</span><input class="code" @bind="C.Coloris" /></label>
+            <div class="champ">
+                <span>Épaisseur</span>
+                <div class="ligne-champs">
+                    <input type="number" class="num6" @bind="C.Epaisseur" />
+                    <select @bind="C.UniteEpaisseur">
+                        <option value=""></option>
+                        <option value="MM">MM</option>
+                        <option value="/10">/10</option>
+                        <option value="µ">µ</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="groupe-criteres">
+            <span class="titre-groupe">Fabrication</span>
+            <label class="champ"><span>Machine tirage</span><input class="code" @bind="C.MachineTirage" /></label>
+            <div class="champ">
+                <span>Format tirage</span>
+                <div class="ligne-champs">
+                    <input type="number" class="num6" @bind="C.TirageLargeur" /> x
+                    <input type="number" class="num6" @bind="C.TirageHauteur" />
+                </div>
+            </div>
+            <label class="champ"><span>Nb poses</span><input type="number" class="num3" @bind="C.NbPoses" /></label>
+            <label class="champ"><span>Outil étiquette/forme</span><input type="number" class="num6" @bind="C.Outil" /></label>
+            <label class="champ"><span>Autre machine</span><input class="code" maxlength="3" @bind="C.Section" /></label>
+            <label class="champ"><span>Opération</span><input type="number" class="num3" @bind="C.Operation" /></label>
+            <label class="champ"><span>Matière</span><input type="number" class="num6" @bind="C.Matiere" /></label>
+            <label class="champ"><span>Fournisseur STR</span><input type="number" class="num3" @bind="C.FournisseurSousTraitance" /></label>
+            <label class="champ"><span>Opération STR</span><input type="number" class="num3" @bind="C.OperationSousTraitance" /></label>
+        </div>
+    }
+</form>
+
+<div class="contenu">
+    <section class="zone-liste">
+        <div class="ligne-infos">
+            <p class="compteur">
+                @if (Etat.Lignes is null)
+                {
+                    <span>Saisissez au moins un critère principal puis cliquez sur Rechercher.</span>
+                }
+                else
+                {
+                    if (Etat.Filtres.Count > 0)
+                    {
+                        <strong>@lignesAffichees.Count.ToString("N0")</strong>
+                        <span> devis affichés sur @Etat.Lignes.Count.ToString("N0")</span>
+                    }
+                    else
+                    {
+                        <strong>@Etat.Lignes.Count.ToString("N0")</strong>
+                        <span> devis</span>
+                    }
+                    if (Etat.Tronque)
+                    {
+                        <span> (seuls les @LimitesRecherche.Maximum.ToString("N0") premiers sont affichés : affinez la recherche)</span>
+                    }
+                }
+                @if (chargement)
+                {
+                    <span class="chargement"> Chargement…</span>
+                }
+            </p>
+            <div class="menu">
+                <button type="button" class="@(menuColonnes ? "ouvert" : "")" title="Choisir les colonnes affichées"
+                        @onclick="() => menuColonnes = !menuColonnes">▦ Colonnes</button>
+                @if (menuColonnes)
+                {
+                    <div class="fond-menu" @onclick="() => menuColonnes = false"></div>
+                    <ul class="menu-contextuel menu-deroulant a-droite menu-colonnes">
+                        @foreach (var c in Colonnes)
+                        {
+                            <li class="@(c.Obligatoire ? "inactif" : "")">
+                                <label>
+                                    <input type="checkbox" disabled="@c.Obligatoire" checked="@(!Prefs.Masquees.Contains(c.Cle))"
+                                           @onchange="() => BasculerColonneAsync(c.Cle)" />
+                                    @c.Libelle
+                                </label>
+                            </li>
+                        }
+                        <li class="separateur"></li>
+                        <li @onclick="RetablirAffichageAsync">↺ Rétablir l'affichage d'origine</li>
+                    </ul>
+                }
+            </div>
+            <div class="legende">
+                <span class="titre-legende">Légende :</span>
+                <span class="badge badge-offre">Offre</span>
+                <span class="badge badge-commande">En commande</span>
+                <span class="badge badge-echec">Échec</span>
+            </div>
+        </div>
+
+        @if (Etat.Filtres.Count > 0)
+        {
+            <div class="filtres-actifs ligne-filtres">
+                <span class="titre-filtres">Filtres :</span>
+                @foreach (var f in Etat.Filtres)
+                {
+                    var colonne = Colonnes.First(c => c.Cle == f.Colonne);
+                    <span class="pastille-filtre">
+                        @FiltresColonnes.Decrire(f, colonne.Libelle, colonne.Type)
+                        <button type="button" title="Retirer ce filtre" @onclick="() => Filtrer(new ChangementFiltre(f.Colonne, null))">✕</button>
+                    </span>
+                }
+                <button type="button" class="bouton-lien" @onclick="EffacerFiltres">Effacer les filtres de colonnes</button>
+            </div>
+        }
+
+        <div class="zone-grille">
+            <table @ref="tableGrille" class="grille grille-principale" style="width:@(largeurTable)px">
+                <colgroup>
+                    @foreach (var c in colonnesVisibles)
+                    {
+                        <col data-cle="@c.Cle" style="width:@(Largeur(c))px" />
+                    }
+                </colgroup>
+                <thead>
+                    <tr>
+                        @foreach (var c in colonnesVisibles)
+                        {
+                            <EnteteColonne @key="c.Cle" Cle="@c.Cle" Libelle="@c.Libelle" Classe="@c.Classe" Type="c.Type"
+                                           TriCle="@Etat.TriCle" Descendant="@Etat.TriDescendant" OnTri="TrierAsync"
+                                           Filtre="@(Etat.Filtres.FirstOrDefault(f => f.Colonne == c.Cle))" OnFiltre="Filtrer"
+                                           Redimensionnable="true" />
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    <Virtualize Items="lignesAffichees" Context="l" ItemSize="36" OverscanCount="20" SpacerElement="tr">
+                        <tr class="@(Etat.Selection == l.Cle ? "selection" : "") @(l.EnEchec ? "devis-echec" : l.EnCommande ? "devis-commande" : l.AvecOffre ? "devis-offre" : "")"
+                            @onclick="() => Etat.Selection = l.Cle"
+                            @ondblclick="() => Ouvrir(l.Cle)"
+                            @oncontextmenu="e => OuvrirMenu(e, l)" @oncontextmenu:preventDefault="true">
+                            @foreach (var c in colonnesVisibles)
+                            {
+                                if (c.Cle == "devis")
+                                {
+                                    <td class="col-code">
+                                        <span class="code-devis">@l.Numero</span>
+                                        @if (l.EnEchec)
+                                        {
+                                            <span class="badge badge-echec" title="@l.MotifEchec">Échec</span>
+                                        }
+                                        else if (l.EnCommande)
+                                        {
+                                            <span class="badge badge-commande">Cde</span>
+                                        }
+                                        else if (l.AvecOffre)
+                                        {
+                                            <span class="badge badge-offre">Offre</span>
+                                        }
+                                    </td>
+                                }
+                                else
+                                {
+                                    <td class="@c.Classe" title="@Bulle(c.Cle, l)">@Texte(c.Cle, l)</td>
+                                }
+                            }
+                        </tr>
+                    </Virtualize>
+                    @if (!chargement && Etat.Lignes is { Count: 0 })
+                    {
+                        <tr class="ligne-vide"><td colspan="@colonnesVisibles.Length">Aucun devis ne correspond à ces critères.</td></tr>
+                    }
+                    else if (!chargement && Etat.Lignes is { Count: > 0 } && lignesAffichees.Count == 0)
+                    {
+                        <tr class="ligne-vide"><td colspan="@colonnesVisibles.Length">Aucun devis ne correspond aux filtres de colonnes.</td></tr>
+                    }
+                </tbody>
+            </table>
+            @if (Etat.Lignes is null)
+            {
+                <div class="grille-attente">
+                    <div class="icone-attente">🔍</div>
+                    <p>Critères principaux : n° devis, étude, client, prospect, profil, catégorie, sous-catégorie, dates,</p>
+                    <p>fabricant, représentant, quantités ou n° d'OF. Les autres critères affinent la recherche.</p>
+                </div>
+            }
+        </div>
+    </section>
+</div>
+
+@if (menu is not null)
+{
+    <div class="fond-menu" @onclick="() => menu = null" @oncontextmenu="() => menu = null" @oncontextmenu:preventDefault="true"></div>
+    <ul class="menu-contextuel" style="left:@(menu.X)px; top:@(menu.Y)px">
+        <li @onclick="OuvrirDepuisMenu">🔎 Détail du devis</li>
+        <li class="separateur"></li>
+        <li class="inactif" title="Prochaine étape">✏️ Modification</li>
+        <li class="inactif" title="Prochaine étape">💶 Tableau des prix</li>
+        <li class="inactif" title="Prochaine étape">🧮 Tableau des coefficients</li>
+        <li class="inactif" title="Prochaine étape">Σ Récapitulatif des sous-totaux</li>
+        <li class="inactif" title="Prochaine étape">📝 Texte libre</li>
+        <li class="inactif" title="Prochaine étape">🖨 Récapitulatif du devis (PDF)</li>
+        <li class="separateur"></li>
+        <li class="inactif" title="Prochaine étape">📄 Saisie de l'offre</li>
+        <li class="inactif" title="Prochaine étape">👁 Aperçu de l'offre</li>
+        <li class="inactif" title="Prochaine étape">✖ Saisie de l'échec</li>
+        <li class="inactif" title="Prochaine étape">📎 Documents</li>
+        @if (menu.Ligne.Etude != 0)
+        {
+            <li class="inactif" title="Module Production">📐 Étude d'imposition n° @menu.Ligne.Etude</li>
+        }
+        @if (menu.Ligne.Dossier != "")
+        {
+            <li class="inactif" title="Module Production">📁 Historique du dossier @menu.Ligne.Dossier</li>
+        }
+    </ul>
+}
+
+@code {
+    // Colonnes de TABLE_Devis, dans l'ordre du WinDev ; largeur par défaut en pixels ;
+    // Type = filtre proposé ; CleTri = valeur brute utilisée pour le tri (et pour les filtres nombre, date, oui/non)
+    // Obligatoire = colonne qu'on ne peut pas masquer
+    private sealed record Colonne(string Cle, string Libelle, int Largeur, string Classe, TypeColonne Type,
+        Func<LigneListeDevis, object?> CleTri, bool Obligatoire = false);
+
+    private const TypeColonne T = TypeColonne.Texte, N = TypeColonne.Nombre, D = TypeColonne.Date, ON = TypeColonne.OuiNon;
+
+    private static readonly Colonne[] Colonnes =
+    [
+        new("client", "Client/Prosp.", 115, "", T, l => l.CodeClientProspect),
+        new("nom", "Nom", 210, "", T, l => l.NomClientProspect),
+        new("date", "Date", 95, "", D, l => l.DateDevis),
+        new("qte", "Qté devisée", 105, "nombre", N, l => l.Quantite),
+        new("devis", "N° devis", 150, "col-code", T, l => (l.Cle.Numero, l.Cle.Version, l.Cle.Hypothese), Obligatoire: true),
+        new("designation", "Désignation", 260, "", T, l => l.Designation1),
+        new("fini", "Format fini", 140, "", T, l => l.FormatFini),
+        new("ouvert", "Format ouvert", 120, "", T, l => l.FormatOuvert),
+        new("nbelt", "Nb élt", 70, "nombre", N, l => l.NbElements),
+        new("norme", "Norme", 80, "", T, l => l.Norme),
+        new("representant", "Représentant", 170, "", T, l => l.Representant),
+        new("fabricant", "Fabricant", 150, "", T, l => l.Fabricant),
+        new("contact", "Contact", 140, "", T, l => l.Contact),
+        new("profil", "Profil", 95, "", T, l => l.Profil),
+        new("pvmini", "PV mini", 100, "nombre", N, l => l.PvMini),
+        new("pvconseille", "PV conseillé", 110, "nombre", N, l => l.PvConseille),
+        new("pvremis", "PV remis", 100, "nombre", N, l => l.PvRemis),
+        new("dateprix", "Date prix", 95, "", D, l => l.DatePrix),
+        new("categorie", "Catégorie", 150, "", T, l => l.Categorie),
+        new("souscategorie", "Sous-catégorie", 160, "", T, l => l.SousCategorie),
+        new("modele", "Modèle", 85, "nombre", N, l => l.Modele),
+        new("of", "OF", 95, "", T, l => l.Dossier),
+        new("ofprec", "OF préc.", 95, "", T, l => l.DossierPrecedent),
+        new("etude", "N° étude", 85, "nombre", N, l => l.Etude),
+        new("dateechec", "Date échec", 95, "", D, l => l.DateEchec),
+        new("echec", "Échec", 80, "", T, l => l.MotifEchec),
+        new("docs", "Docs", 65, "centre", ON, l => l.NbDocuments),
+        new("valeur", "Valeur devis", 115, "nombre", N, l => l.ValeurDevis),
+        new("refimp", "Réf. imprimé", 130, "", T, l => l.ReferenceImprime),
+        new("datedemande", "Demandé le", 95, "", D, l => l.DateDemande),
+    ];
+
+    private const string NomGrille = "ventes.consultation-devis";
+
+    private sealed record MenuLigne(int X, int Y, LigneListeDevis Ligne);
+
+    private CriteresDevis C => Etat.Criteres;
+    private ContexteConsultationDevis? contexte;
+    private List<LigneListeDevis> lignesAffichees = [];
+    private bool chargement;
+    private MenuLigne? menu;
+    private bool menuColonnes;
+
+    // Affichage de la grille : colonnes visibles (dans l'ordre WinDev) et largeur totale, recalculées à chaque réglage
+    private Colonne[] colonnesVisibles = Colonnes;
+    private int largeurTable;
+    private ElementReference tableGrille;
+    private GrilleJs? grille;
+
+    private PreferencesGrille Prefs => Etat.Preferences ??= new();
+
+    private CleDevis? Selection => Etat.Selection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Affichage mémorisé de la grille (lu une seule fois par session ; le tri mémorisé s'applique alors)
+        if (Etat.Preferences is null)
+        {
+            var p = await PreferencesGrilles.LireAsync(NomGrille);
+            p.Masquees.RemoveAll(cle => !Colonnes.Any(c => c.Cle == cle && !c.Obligatoire));
+            Etat.Preferences = p;
+            if (Colonnes.Any(c => c.Cle == p.TriCle))
+            {
+                Etat.TriCle = p.TriCle;
+                Etat.TriDescendant = p.TriDescendant;
+            }
+        }
+        CalculerColonnes();
+
+        try
+        {
+            contexte = await Consultation.LireContexteAsync();
+            if (contexte.RepresentantImpose is { } rep) C.Representant = rep;
+            if (C.CompteGeneral is null)
+            {
+                var u = await UtilisateurCourant.LireAsync();
+                C.CompteGeneral = u.CompteGeneral;
+                if (u.CompteClient > 0) C.CompteClient = u.CompteClient;
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture des paramètres impossible : {ex.Message}");
+        }
+        Actualiser();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool premierAffichage)
+    {
+        if (!premierAffichage) return;
+        grille = new GrilleJs(JS) { LargeurChangee = ChangerLargeurAsync };
+        try
+        {
+            await grille.ActiverAsync(tableGrille);
+        }
+        catch (JSException ex)
+        {
+            Notifications.Erreur($"Réglage de la largeur des colonnes indisponible : {ex.Message}");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (grille is not null) await grille.DisposeAsync();
+    }
+
+    private async Task RechercherAsync()
+    {
+        chargement = true;
+        try
+        {
+            var resultat = await Consultation.RechercherAsync(C);
+            Etat.Lignes = resultat.Lignes.ToList();
+            Etat.Tronque = resultat.Tronque;
+            Etat.Selection = null;
+            Actualiser();
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Recherche impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    // Bouton gomme (BTN_RAB) : tous les critères à blanc, le compte général et le représentant imposé sont conservés
+    private void Effacer()
+    {
+        var compteGeneral = C.CompteGeneral;
+        Etat.Criteres = new CriteresDevis { CompteGeneral = compteGeneral, Representant = contexte?.RepresentantImpose };
+        Etat.Lignes = null;
+        Etat.Selection = null;
+        Actualiser();
+    }
+
+    private void Ouvrir(CleDevis? cle)
+    {
+        if (cle is null) return;
+        Etat.Selection = cle;
+        Navigation.NavigateTo($"ventes/devis/{cle.Numero}/{cle.Version}/{cle.Hypothese}/{cle.TypeCout}");
+    }
+
+    private void OuvrirMenu(MouseEventArgs e, LigneListeDevis l)
+    {
+        Etat.Selection = l.Cle;
+        menu = new MenuLigne((int)e.ClientX, (int)e.ClientY, l);
+    }
+
+    private void OuvrirDepuisMenu()
+    {
+        var cle = menu?.Ligne.Cle;
+        menu = null;
+        Ouvrir(cle);
+    }
+
+    // Tri choisi avec le bouton de tri d'un titre de colonne ; Descendant null = ordre par défaut. Mémorisé.
+    private async Task TrierAsync(ChangementTri tri)
+    {
+        Etat.TriCle = tri.Descendant is null ? null : tri.Colonne;
+        Etat.TriDescendant = tri.Descendant ?? false;
+        Actualiser();
+        Prefs.TriCle = Etat.TriCle;
+        Prefs.TriDescendant = Etat.TriDescendant;
+        await PreferencesGrilles.EcrireAsync(NomGrille, Prefs);
+    }
+
+    // Colonne masquée / réaffichée (menu « Colonnes »). Mémorisé.
+    private async Task BasculerColonneAsync(string cle)
+    {
+        if (Colonnes.Any(c => c.Cle == cle && c.Obligatoire)) return;
+        if (!Prefs.Masquees.Remove(cle)) Prefs.Masquees.Add(cle);
+        CalculerColonnes();
+        await PreferencesGrilles.EcrireAsync(NomGrille, Prefs);
+    }
+
+    // Largeur réglée à la souris (0 = largeur d'origine). Appelé depuis grille.js. Mémorisé.
+    private async Task ChangerLargeurAsync(string cle, int largeur)
+    {
+        if (largeur > 0) Prefs.Largeurs[cle] = largeur;
+        else Prefs.Largeurs.Remove(cle);
+        CalculerColonnes();
+        await InvokeAsync(StateHasChanged);
+        await PreferencesGrilles.EcrireAsync(NomGrille, Prefs);
+    }
+
+    // Toutes les colonnes, largeurs d'origine ; le tri n'est pas touché
+    private async Task RetablirAffichageAsync()
+    {
+        menuColonnes = false;
+        Prefs.Masquees.Clear();
+        Prefs.Largeurs.Clear();
+        CalculerColonnes();
+        await PreferencesGrilles.EcrireAsync(NomGrille, Prefs);
+    }
+
+    private void CalculerColonnes()
+    {
+        colonnesVisibles = Colonnes.Where(c => !Prefs.Masquees.Contains(c.Cle)).ToArray();
+        largeurTable = colonnesVisibles.Sum(c => Largeur(c));
+    }
+
+    private int Largeur(Colonne c) => Prefs.Largeurs.TryGetValue(c.Cle, out var px) && px > 0 ? px : c.Largeur;
+
+    // Un filtre par colonne : un nouveau filtre remplace celui de la colonne, null le retire.
+    // Les filtres restent en place pour les recherches suivantes (ils sont rappelés au-dessus de la grille).
+    private void Filtrer(ChangementFiltre changement)
+    {
+        var position = Etat.Filtres.FindIndex(f => f.Colonne == changement.Colonne);
+        if (changement.Filtre is null)
+        {
+            if (position >= 0) Etat.Filtres.RemoveAt(position);
+        }
+        else if (position >= 0) Etat.Filtres[position] = changement.Filtre;
+        else Etat.Filtres.Add(changement.Filtre);
+        Actualiser();
+    }
+
+    private void EffacerFiltres()
+    {
+        Etat.Filtres.Clear();
+        Actualiser();
+    }
+
+    // Lignes affichées = lignes chargées, filtrées par colonne (en mémoire), puis triées.
+    // Sans tri choisi : ordre de la base (n° devis, version, hypothèse décroissants, comme le WinDev)
+    private void Actualiser()
+    {
+        IEnumerable<LigneListeDevis> lignes = Etat.Lignes ?? [];
+        foreach (var f in Etat.Filtres)
+        {
+            var colonne = Colonnes.FirstOrDefault(c => c.Cle == f.Colonne);
+            if (colonne is null) continue;
+            lignes = lignes.Where(l => FiltresColonnes.Accepte(f, colonne.Type, ValeurFiltre(colonne, l)));
+        }
+
+        var tri = Colonnes.FirstOrDefault(c => c.Cle == Etat.TriCle);
+        if (tri is not null)
+        {
+            lignes = Etat.TriDescendant
+                ? lignes.OrderByDescending(tri.CleTri, Comparer<object?>.Default)
+                : lignes.OrderBy(tri.CleTri, Comparer<object?>.Default);
+        }
+        lignesAffichees = lignes.ToList();
+    }
+
+    // Valeur comparée par le filtre : le texte affiché pour les colonnes texte
+    // (n° devis « 12345/1/0 », désignation sur ses deux lignes), la valeur brute sinon
+    private static object? ValeurFiltre(Colonne c, LigneListeDevis l) => c.Type switch
+    {
+        TypeColonne.Texte => c.Cle switch
+        {
+            "devis" => l.Numero,
+            "designation" => l.Designation2 != "" ? $"{l.Designation1} {l.Designation2}" : l.Designation1,
+            _ => Texte(c.Cle, l),
+        },
+        _ => c.CleTri(l),
+    };
+
+    private static string Texte(string cle, LigneListeDevis l) => cle switch
+    {
+        "client" => l.CodeClientProspect,
+        "nom" => l.NomClientProspect,
+        "date" => Affichage.Date(l.DateDevis),
+        "qte" => Affichage.Entier(l.Quantite),
+        "designation" => l.Designation1,
+        "fini" => l.FormatFini,
+        "ouvert" => l.FormatOuvert,
+        "nbelt" => Affichage.Entier(l.NbElements),
+        "norme" => l.Norme,
+        "representant" => l.Representant,
+        "fabricant" => l.Fabricant,
+        "contact" => l.Contact,
+        "profil" => l.Profil,
+        "pvmini" => Affichage.Montant(l.PvMini),
+        "pvconseille" => Affichage.Montant(l.PvConseille),
+        "pvremis" => Affichage.Montant(l.PvRemis),
+        "dateprix" => Affichage.Date(l.DatePrix),
+        "categorie" => l.Categorie,
+        "souscategorie" => l.SousCategorie,
+        "modele" => l.Modele == 0 ? "" : l.Modele.ToString(),
+        "of" => l.Dossier,
+        "ofprec" => l.DossierPrecedent,
+        "etude" => l.Etude == 0 ? "" : l.Etude.ToString(),
+        "dateechec" => Affichage.Date(l.DateEchec),
+        "echec" => l.MotifEchec,
+        "docs" => l.NbDocuments > 0 ? $"📎 {l.NbDocuments}" : "",
+        "valeur" => Affichage.Montant(l.ValeurDevis),
+        "refimp" => l.ReferenceImprime,
+        "datedemande" => Affichage.Date(l.DateDemande),
+        _ => "",
+    };
+
+    // Bulles : désignation complète (DEDES1 + DEDES2), observations de prix (DEOBSP) sur les colonnes de prix
+    private static string? Bulle(string cle, LigneListeDevis l) => cle switch
+    {
+        "designation" => l.Designation2 != "" ? $"{l.Designation1}\n{l.Designation2}" : l.Designation1,
+        "pvmini" or "pvconseille" or "pvremis" => l.Observations != "" ? l.Observations : null,
+        "nom" or "representant" or "categorie" or "souscategorie" or "fabricant" => Texte(cle, l),
+        _ => null,
+    };
+}

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Noyau partagé, conçu avant les modules : sociétés, tiers (clients, prospects, fournisseurs),
+       utilisateurs, représentants, listes de codes. Tous les modules s'appuient dessus.
+       Dépendances autorisées : Socle uniquement. -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetPrint.Socle\NetPrint.Socle.csproj" />
+  </ItemGroup>
+
+</Project>

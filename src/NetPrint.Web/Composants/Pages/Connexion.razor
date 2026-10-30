@@ -1,0 +1,42 @@
+@page "/connexion"
+@* Page de connexion (ex-FEN_Connexion WinDev). Rendu statique : le formulaire est posté à /compte/connexion,
+   qui vérifie le profil et ouvre la session. *@
+@layout LayoutConnexion
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+
+<PageTitle>Connexion · NetPrint</PageTitle>
+
+<form method="post" action="compte/connexion" class="fenetre connexion">
+    <AntiforgeryToken />
+    <input type="hidden" name="retour" value="@Retour" />
+    <div class="titre-fenetre"><span class="logo-connexion">◆</span> NetPrint — Connexion</div>
+    <div class="corps-fenetre">
+        @if (!string.IsNullOrEmpty(Erreur))
+        {
+            <p class="erreur" role="alert">⚠ @Erreur</p>
+        }
+        <div class="formulaire">
+            <span>Profil</span>
+            <input name="profil" maxlength="10" autocomplete="username" required autofocus value="@Profil" />
+            <span>Mot de passe</span>
+            <input name="motDePasse" type="password" autocomplete="current-password" required />
+            <span>Société</span>
+            <input name="societe" class="num6" inputmode="numeric" maxlength="4" required value="@Societe" />
+            <span>Compte général</span>
+            <input name="compteGeneral" class="num6" inputmode="numeric" maxlength="6" placeholder="411000" value="@Compte" />
+        </div>
+        <label class="interrupteur"><input type="checkbox" name="resterConnecte" value="true" /> Rester connecté</label>
+    </div>
+    <div class="pied-fenetre">
+        <button type="submit" class="bouton-principal">Se connecter</button>
+    </div>
+</form>
+
+@code {
+    [SupplyParameterFromQuery] public string? Retour { get; set; }
+    [SupplyParameterFromQuery] public string? Erreur { get; set; }
+    [SupplyParameterFromQuery] public string? Profil { get; set; }
+    [SupplyParameterFromQuery] public string? Societe { get; set; }
+    [SupplyParameterFromQuery] public string? Compte { get; set; }
+}

@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- Réglages communs à tous les projets de la solution NetPrint -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- Le dossier de publication (dotnet publish -o publish) ne fait jamais partie du projet -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+</Project>

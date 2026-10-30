@@ -1,0 +1,15 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.0">
+
+  <!-- Lanceur de développement (Aspire 13) : F5 ici démarre NetPrint.Web et ouvre le tableau de bord Aspire
+       (état, journaux, erreurs). Sert uniquement en développement. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsAspireHost>true</IsAspireHost>
+    <UserSecretsId>14eb3815-24c0-43d6-84b1-626326d8a4b7</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetPrint.Web\NetPrint.Web.csproj" />
+  </ItemGroup>
+
+</Project>

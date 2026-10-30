@@ -1,0 +1,188 @@
+@* =====================================================================
+   Titre de colonne d'une grille (repris de GestionOutils, EnteteColonne.tsx) :
+   - bouton de tri toujours visible à droite du titre : ▲ gris (pas de tri), ▲ bleu croissant, ▼ bleu décroissant ;
+     un clic sur ce bouton trie directement (▲, puis ▼, puis ordre par défaut) ;
+   - clic sur le titre = bulle de filtre (contient, commence par…, selon le type de la colonne) ;
+   - ⏷ bleu à côté du titre quand un filtre est posé sur la colonne ;
+   - poignée sur le bord droit : tirer pour élargir, double-clic = largeur d'origine (wwwroot/grille.js).
+   La bulle se ferme sur un choix, Échap ou un clic à côté.
+   ===================================================================== *@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<th @ref="th" class="entete-colonne @Classe @(TriActif ? "triee" : "") @(ouvert ? "filtre-ouvert" : "")"
+    @onclick="OuvrirAsync">
+    <span class="entete-contenu" title="Filtrer « @Libelle »">
+        <span class="entete-libelle">@Libelle</span>
+        @if (Filtre is not null)
+        {
+            <span class="indicateur-filtre" title="Filtre actif sur cette colonne">⏷</span>
+        }
+        <button type="button" class="fleche-tri @(TriActif ? "active" : "")" title="@TitreFleche"
+                @onclick="TrierDirectement" @onclick:stopPropagation="true">@Fleche</button>
+    </span>
+    @if (Redimensionnable)
+    {
+        <span class="poignee-colonne" data-cle="@Cle" title="Tirer pour élargir (double-clic : largeur d'origine)"></span>
+    }
+
+    @if (ouvert)
+    {
+        <div class="fond-bulle" @onclick="Fermer" @onclick:stopPropagation="true"></div>
+        <div class="bulle-filtre" style="left:@(gauche)px; top:@(haut)px; width:@(LargeurBulle)px"
+             @onclick:stopPropagation="true" @onkeydown="Clavier">
+            <form @onsubmit="AppliquerAsync">
+                <div class="bulle-titre">Filtrer « @Libelle »</div>
+                <select value="@operateur" @onchange="ChangerOperateur">
+                    @foreach (var o in FiltresColonnes.Operateurs(Type))
+                    {
+                        <option value="@o.Code">@o.Libelle</option>
+                    }
+                </select>
+                @if (NbValeurs >= 1)
+                {
+                    <input @ref="saisie" type="@(Type == TypeColonne.Date ? "date" : "text")"
+                           inputmode="@(Type == TypeColonne.Nombre ? "decimal" : null)"
+                           value="@valeur" @oninput="e => Saisir(e, false)" />
+                }
+                @if (NbValeurs == 2)
+                {
+                    <span class="bulle-et">et</span>
+                    @* Pas de @bind sur un champ date : Razor lierait un DateTime ; la valeur reste au format AAAA-MM-JJ *@
+                    <input type="date" value="@valeur2" @oninput="e => Saisir(e, true)" />
+                }
+                @if (erreur is not null)
+                {
+                    <p class="erreur">@erreur</p>
+                }
+                <div class="bulle-boutons">
+                    @if (Filtre is not null)
+                    {
+                        <button type="button" @onclick="RetirerAsync">Retirer le filtre</button>
+                    }
+                    <button type="submit">Appliquer</button>
+                </div>
+
+            </form>
+        </div>
+    }
+</th>
+
+@code {
+    private const int LargeurBulle = 270;
+
+    [Parameter, EditorRequired] public string Cle { get; set; } = "";
+    [Parameter, EditorRequired] public string Libelle { get; set; } = "";
+    [Parameter] public TypeColonne Type { get; set; } = TypeColonne.Texte;
+    [Parameter] public string? Classe { get; set; }
+    [Parameter] public string? TriCle { get; set; }
+    [Parameter] public bool Descendant { get; set; }
+    [Parameter] public FiltreColonne? Filtre { get; set; }
+    [Parameter] public bool Redimensionnable { get; set; }
+    [Parameter] public EventCallback<ChangementTri> OnTri { get; set; }
+    [Parameter] public EventCallback<ChangementFiltre> OnFiltre { get; set; }
+
+    private ElementReference th;
+    private ElementReference saisie;
+    private GrilleJs? grille;
+    private bool ouvert;
+    private bool donnerFocus;
+    private int gauche, haut;
+    private string operateur = "";
+    private string? valeur, valeur2, erreur;
+
+    private bool TriActif => TriCle == Cle;
+    private int NbValeurs => FiltresColonnes.NbValeurs(Type, operateur);
+    private string Fleche => TriActif && Descendant ? "▼" : "▲";
+    private string TitreFleche => !TriActif ? "Trier (croissant)"
+        : Descendant ? "Tri décroissant : revenir à l'ordre par défaut" : "Tri croissant : passer en décroissant";
+
+    // Bouton : pas de tri → croissant → décroissant → ordre par défaut
+    private Task TrierDirectement() =>
+        OnTri.InvokeAsync(new ChangementTri(Cle, !TriActif ? false : !Descendant ? true : null));
+
+    // La bulle s'ouvre sous le titre, en position fixe (la zone de la grille défile horizontalement) ;
+    // on repart du filtre en place
+    private async Task OuvrirAsync(MouseEventArgs e)
+    {
+        if (ouvert)
+        {
+            Fermer();
+            return;
+        }
+        operateur = Filtre?.Operateur ?? FiltresColonnes.Operateurs(Type)[0].Code;
+        valeur = Filtre?.Valeur;
+        valeur2 = Filtre?.Valeur2;
+        erreur = null;
+        try
+        {
+            grille ??= new GrilleJs(JS);
+            var r = await grille.RectangleAsync(th);
+            gauche = (int)Math.Max(8, Math.Min(r.Gauche, r.LargeurFenetre - LargeurBulle - 16));
+            haut = (int)r.Bas + 2;
+        }
+        catch (JSException)
+        {
+            gauche = Math.Max(8, (int)e.ClientX - 16);
+            haut = (int)e.ClientY + 14;
+        }
+        ouvert = true;
+        donnerFocus = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool premierAffichage)
+    {
+        if (!donnerFocus || !ouvert) return;
+        donnerFocus = false;
+        if (NbValeurs >= 1)
+        {
+            try { await saisie.FocusAsync(); }
+            catch (InvalidOperationException) { }
+            catch (JSException) { }
+        }
+    }
+
+    private void ChangerOperateur(ChangeEventArgs e)
+    {
+        operateur = e.Value?.ToString() ?? "";
+        erreur = null;
+        donnerFocus = true;
+    }
+
+    private void Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") Fermer();
+    }
+
+    private void Fermer() => ouvert = false;
+
+    private void Saisir(ChangeEventArgs e, bool seconde)
+    {
+        if (seconde) valeur2 = e.Value?.ToString();
+        else valeur = e.Value?.ToString();
+        erreur = null;
+    }
+
+    private async Task AppliquerAsync()
+    {
+        erreur = FiltresColonnes.Controler(Type, operateur, valeur, valeur2);
+        if (erreur is not null) return;
+        var nb = NbValeurs;
+        var filtre = new FiltreColonne(Cle, operateur,
+            nb >= 1 ? valeur!.Trim() : null,
+            nb == 2 ? valeur2!.Trim() : null);
+        ouvert = false;
+        await OnFiltre.InvokeAsync(new ChangementFiltre(Cle, filtre));
+    }
+
+    private async Task RetirerAsync()
+    {
+        ouvert = false;
+        await OnFiltre.InvokeAsync(new ChangementFiltre(Cle, null));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (grille is not null) await grille.DisposeAsync();
+    }
+}

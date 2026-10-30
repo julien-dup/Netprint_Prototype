@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- LA seule application web NetPrint (Blazor Web App, rendu Interactive Server) :
+       accueil, connexion, menu, et les écrans de tous les modules branchés ci-dessous. -->
+  <PropertyGroup>
+    <!-- Mêmes secrets que les essais GestionOutils : la chaîne ConnectionStrings:Db2 est déjà disponible -->
+    <UserSecretsId>7f179701-3678-4b3f-b705-60054599b14e</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetPrint.Socle\NetPrint.Socle.csproj" />
+    <ProjectReference Include="..\NetPrint.Noyau\NetPrint.Noyau.csproj" />
+    <ProjectReference Include="..\NetPrint.Web.Commun\NetPrint.Web.Commun.csproj" />
+  </ItemGroup>
+
+  <!-- Une ligne par module -->
+  <ItemGroup>
+    <ProjectReference Include="..\Modules\NetPrint.Modules.Ventes\NetPrint.Modules.Ventes.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,50 @@
+@* Sous-traitance (TABLE_SSTrait, TABLE_SSTraitElt) *@
+<table class="grille grille-detail">
+    <thead>
+        <tr>
+            <th class="col-libelle">Désignation</th>
+            <th class="nombre">Quantité</th>
+            <th class="nombre">Prix fixe</th>
+            <th class="nombre">Prix prop.</th>
+            <th class="nombre">Qté prop.</th>
+            <th class="nombre">Valeur</th>
+            <th class="nombre">Mille +</th>
+            @if (AvecCommentaire)
+            {
+                <th>Commentaire</th>
+            }
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var l in Lignes)
+        {
+            if (l.Nature == NatureLigne.Titre)
+            {
+                <tr class="ligne-titre"><td colspan="8">@l.Designation</td></tr>
+                continue;
+            }
+            <tr>
+                <td class="col-libelle">@l.Designation</td>
+                <td class="nombre">@Affichage.Nombre(l.Quantite)</td>
+                <td class="nombre">@Affichage.Montant(l.PrixFixe)</td>
+                <td class="nombre">@Affichage.Montant(l.PrixProportionnel)</td>
+                <td class="nombre">@Affichage.Entier(l.QuantiteProportionnelle)</td>
+                <td class="nombre">@Affichage.Montant(l.Valeur)</td>
+                <td class="nombre">@Affichage.Montant(l.MillePlus)</td>
+                @if (AvecCommentaire)
+                {
+                    <td>@l.Commentaire</td>
+                }
+            </tr>
+        }
+        @if (Lignes.Count == 0)
+        {
+            <tr class="ligne-vide"><td colspan="8">Aucune sous-traitance.</td></tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<LigneSousTraitance> Lignes { get; set; } = [];
+    [Parameter] public bool AvecCommentaire { get; set; }
+}

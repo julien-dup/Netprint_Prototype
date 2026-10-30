@@ -1,0 +1,32 @@
+@page "/"
+@* Accueil : une tuile par module branché. Plus tard : page « ma journée » par rôle (cadrage, refonte UX). *@
+@inject IUtilisateurCourant UtilisateurCourant
+@inject IEnumerable<DescriptionModule> Modules
+
+<PageTitle>Accueil · NetPrint</PageTitle>
+
+<div class="contenu contenu-accueil">
+    <div class="accueil">
+        <h1 class="titre-accueil">Bonjour @utilisateur.Profil</h1>
+        <p class="aide">Société @utilisateur.Societe · @utilisateur.NomSociete</p>
+        <div class="tuiles">
+            @foreach (var m in Modules.OrderBy(m => m.Ordre))
+            {
+                <a href="@m.Url" class="tuile">
+                    <span class="tuile-icone">@m.Icone</span>
+                    <span>
+                        <span class="tuile-titre">@m.Nom</span>
+                        <span class="tuile-texte">@m.Description</span>
+                    </span>
+                </a>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private UtilisateurConnecte utilisateur = UtilisateurConnecte.Anonyme;
+
+    protected override async Task OnInitializedAsync() =>
+        utilisateur = await UtilisateurCourant.LireAsync();
+}
