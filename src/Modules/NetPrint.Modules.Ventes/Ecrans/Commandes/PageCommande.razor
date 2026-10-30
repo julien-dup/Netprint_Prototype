@@ -40,6 +40,8 @@
     }
     <button class="bouton-danger" disabled="@(fiche is null || !fiche.Droits.Supprimer || fiche.Entete.NonModifiable)"
             title="Supprimer la commande (impossible si elle a un BL ou une facture)" @onclick="SupprimerCommandeAsync">🗑 Supprimer</button>
+    <button disabled="@(fiche is null)" title="Lancement en fabrication : OF, stock, affectations (NEG515)"
+            @onclick='() => Navigation.NavigateTo(Adresse(CleCourante) + "/lancement")'>🏭 Lancement</button>
     <span class="espace"></span>
     <button class="@(apercuArc ? "actif" : "")" disabled="@(fiche is null)" title="Aperçu de l'accusé de réception, mis à jour à chaque modification"
             @onclick="() => apercuArc = !apercuArc">👁 Aperçu ARC</button>

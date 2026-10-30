@@ -6,6 +6,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\NetPrint.Socle\NetPrint.Socle.csproj" />
+    <!-- N° d'OF échangés avec la production -->
+    <ProjectReference Include="..\NetPrint.Modules.Production.Contrats\NetPrint.Modules.Production.Contrats.csproj" />
   </ItemGroup>
 
 </Project>

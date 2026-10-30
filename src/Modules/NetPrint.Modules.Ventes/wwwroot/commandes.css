@@ -156,3 +156,8 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 
 /* Texte complémentaire : chasse fixe, largeur de 40 caractères */
 .texte-fixe { font-family: 'Courier New', monospace; width: 42ch; resize: vertical; }
+
+/* ---------- Lancement en fabrication ---------- */
+.grille-lancement .ligne-article td { background: #f6f8fb; border-top: 2px solid #d5dbe3; }
+.grille-lancement td.decale { padding-left: 28px; }
+.grille-lancement .source-possible td { color: #6b7280; }

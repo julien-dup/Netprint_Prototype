@@ -59,6 +59,8 @@ public static class VentesModule
         services.AddScoped<IActionsCommande>(s => s.GetRequiredService<SaisieLignesService>());
         services.AddScoped<IAppelsLivraison>(s => s.GetRequiredService<SaisieLignesService>());
         services.AddScoped<ArcCommandeDb2>();
+        services.AddScoped<LancementCommandeDb2>();
+        services.AddScoped<ILancementCommande, LancementCommandeService>();   // lancement en fabrication (NEG515)
         services.AddScoped<IEditionArc, EditionArcService>();   // ARC des commandes (ARC105P), PDF produit par l'application
         services.AddScoped<LignesCommandeDb2>();
         return services;

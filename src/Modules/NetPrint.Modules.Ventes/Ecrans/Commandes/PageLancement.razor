@@ -1,0 +1,145 @@
+@page "/ventes/commandes/{Numero:int}/{Cle}/lancement"
+@* =====================================================================
+   Lancement en fabrication d'une commande (reprise de NEG515) : pour chaque article, ce qui sert déjà la commande
+   (OF en cours ou à ouvrir, affectations de stock) et ce qui pourrait la servir (stock des lots), avec le reste à
+   affecter. Le suivi du BAG est affiché (il est validé dans le portail de BAG).
+   Prochaine étape : lancer un OF, affecter du stock, rattacher à un OF à ouvrir, F10.
+   ===================================================================== *@
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@inject ILancementCommande Lancement
+@inject NavigationManager Navigation
+
+
+<PageTitle>Lancement @CleCourante.Libelle · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo(Adresse(CleCourante))' title="Retour à la commande">← Commande @CleCourante.Libelle</button>
+    <span class="espace"></span>
+    <button @onclick="ChargerAsync" title="Relire les OF, le stock et les affectations">↻ Actualiser</button>
+</fieldset>
+
+<div class="contenu contenu-detail">
+    @if (lancement is null)
+    {
+        <p class="compteur"><span class="chargement">@(chargement ? "Calcul du lancement…" : erreur ?? "Cette commande n'existe pas ou ne vous est pas accessible.")</span></p>
+    }
+    else
+    {
+        <div class="titre-panneau">
+            <span class="sur-titre">Lancement en fabrication</span>
+            <span class="code-titre">@lancement.Commande.Libelle</span>
+            <span class="titre-designation">@lancement.NomClient</span>
+            @if (!lancement.PeutModifier)
+            {
+                <span class="badge badge-alerte" title="@lancement.RaisonNonModifiable">Consultation</span>
+            }
+        </div>
+
+        <table class="grille grille-fiche grille-lancement">
+            <thead>
+                <tr>
+                    <th>Article / OF</th><th>Nature</th><th class="nombre">Commandé</th><th class="nombre">Affecté</th>
+                    <th class="nombre">À fabriquer</th><th class="nombre">Stock</th><th class="nombre">Surplus</th>
+                    <th class="nombre">Disponible</th><th class="nombre">Livré</th><th>BAG</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var a in lancement.Articles)
+                {
+                    <tr class="ligne-article">
+                        <td colspan="2"><b>@a.Article@(a.Indice != "" ? $" {a.Indice}" : "")</b> @a.Designation
+                            @if (a.ReferenceImprime != "") {<span class="discret"> · @a.ReferenceImprime</span>}
+                            @if (!a.Stocke) {<span class="badge badge-appel" title="Article non géré en stock">non stocké</span>}
+                        </td>
+                        <td class="nombre"><b>@Entier(a.Commande)</b></td>
+                        <td class="nombre"><b>@Entier(a.Affecte)</b></td>
+                        <td colspan="6">
+                            @if (a.ResteAAffecter > 0)
+                            {
+                                <span class="badge badge-etat etat-partielle">Reste à affecter : @Entier(a.ResteAAffecter)</span>
+                            }
+                            else if (a.ResteAAffecter < 0)
+                            {
+                                <span class="badge badge-alerte">Affecté au-delà du commandé : @Entier(-a.ResteAAffecter)</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-etat etat-livree">Tout est affecté</span>
+                            }
+                        </td>
+                    </tr>
+                    @foreach (var s in a.Sources)
+                    {
+                        <tr class="@(s.AffecteCommande > 0 ? "source-commande" : "source-possible")">
+                            <td class="decale">@s.Of.Libelle @if (s.LotBloque) {<span title="Lot bloqué (qualité)">🔒</span>}</td>
+                            <td>@Nature(s)</td>
+                            <td></td>
+                            <td class="nombre">@Entier(s.AffecteCommande)</td>
+                            <td class="nombre">@Entier(s.AFabriquer)</td>
+                            <td class="nombre">@Entier(s.Stock)</td>
+                            <td class="nombre">@Entier(s.Surplus)</td>
+                            <td class="nombre" title="Affecté toutes commandes : @s.AffecteTotal.ToString("N0")">@Entier(s.Disponible)</td>
+                            <td class="nombre" title="Pour cette commande : @s.LivreCommande.ToString("N0")">@Entier(s.Livre)</td>
+                            <td>
+                                @if (s.Bag is { } bag)
+                                {
+                                    <span class="badge @(bag.Action == "O" ? "badge-etat etat-livree" : bag.Action == "M" ? "badge-alerte" : "badge-appel")"
+                                          title="Cycle @bag.Cycle · envoyé @Date(bag.Envoye) · retour @Date(bag.Retour)">@bag.Libelle</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    @if (a.Sources.Count == 0)
+                    {
+                        <tr class="ligne-vide"><td class="decale" colspan="10">Aucun OF ni stock pour cet article.</td></tr>
+                    }
+                }
+                @if (lancement.Articles.Count == 0)
+                {
+                    <tr class="ligne-vide"><td colspan="10">Cette commande n'a pas de ligne article.</td></tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+    [Parameter] public string Cle { get; set; } = "";
+
+    private CleCommande CleCourante => new(Numero, Cle.Trim().ToUpperInvariant());
+    private LancementCommande? lancement;
+    private bool chargement = true;
+    private string? erreur;
+    private int lecture;   // seule la dernière lecture demandée est affichée (passage d'une commande à l'autre)
+
+    protected override Task OnParametersSetAsync() => ChargerAsync();
+
+    private async Task ChargerAsync()
+    {
+        var numero = ++lecture;
+        chargement = true;
+        erreur = null;
+        lancement = null;   // jamais les données d'une autre commande sous ce titre
+        LancementCommande? lu = null;
+        try
+        {
+            lu = await Lancement.LireAsync(CleCourante);
+        }
+        catch (Exception ex)
+        {
+            if (numero == lecture) erreur = $"Lecture du lancement impossible : {ex.Message}";
+        }
+        if (numero != lecture) return;
+        lancement = lu;
+        chargement = false;
+    }
+
+    private static string Nature(SourceArticle s) => s.Nature switch
+    {
+        NatureSource.OfAOuvrir => "OF à ouvrir",
+        NatureSource.OfOuvert => s.AffectationStock ? "Stock affecté" : "OF",
+        _ => "Stock libre",
+    };
+}
