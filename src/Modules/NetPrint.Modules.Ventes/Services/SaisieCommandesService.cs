@@ -345,13 +345,9 @@ internal sealed class SaisieCommandesService(
 internal static class NumerotationCommande
 {
     // Retour de GETDOSSIER : n° sur 5 positions, blanc, lettre-clé ; « -1 » cadré à droite en cas d'erreur
-    public static (int Numero, string Cle) Decouper(string retour)
-    {
-        var r = retour.PadRight(7);
-        if (r.Trim() == "-1" || !int.TryParse(r[..5], out var numero) || numero <= 0)
-            throw new RegleMetierException($"Attribution du n° de dossier impossible (GETDOSSIER a répondu « {retour.Trim()} »).");
-        return (numero, r[6..7].Trim());
-    }
+    public static (int Numero, string Cle) Decouper(string retour) =>
+        Noyau.Compteurs.NumerosDossier.Decouper(retour)
+        ?? throw new RegleMetierException($"Attribution du n° de dossier impossible (GETDOSSIER a répondu « {retour.Trim()} »).");
 
     // POPT05 « Forcer la clef de cde à 9 » ; POPT02 = 'N' : clé de GETDOSSIER ; sinon CDECLEF (programme spécifique, absent
     // des sources) dont le RPG retient '9' en cas d'échec : on retient '9'.
@@ -359,11 +355,7 @@ internal static class NumerotationCommande
         forcerCle9 || garderNumero || cleGetDossier == "" ? "9" : cleGetDossier;
 
     // Clé déjà prise pour ce n° : on essaie 1 à 9 puis 0 (comme le RPG) ; null si les dix sont prises
-    public static string? CleLibre(string cle, IReadOnlySet<string> prises)
-    {
-        if (!prises.Contains(cle)) return cle;
-        return "1234567890".Select(c => c.ToString()).FirstOrDefault(c => !prises.Contains(c));
-    }
+    public static string? CleLibre(string cle, IReadOnlySet<string> prises) => Noyau.Compteurs.NumerosDossier.PremiereCleLibre(prises, cle);
 
     // Facturation automatique du client (CDOPT2 de 1 à 8)
     public static bool FacturationAutomatique(string cdopt2) => cdopt2 is "1" or "2" or "3" or "4" or "5" or "6" or "7" or "8";

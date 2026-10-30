@@ -115,6 +115,92 @@ public class SaisieCommandesDb2Tests(ITestOutputHelper sortie)
         }
     }
 
+    // Demande d'OF (module Production) pour une commande d'essai : n° de la commande + clé libre, en-tête AB001T, lien
+    // AB0020, modèle attribué ; modification, lecture, suppression. Le compteur des modèles (NK) consomme un n°.
+    [FactDb2Ecriture]
+    public async Task Demande_d_OF_pour_une_commande()
+    {
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var client = await LireDatesClientAsync(cnx);
+        CleCommande? cle = null;
+        var production = new NetPrint.Modules.Production.Services.InitialisationProductionService(
+            new NetPrint.Modules.Production.Donnees.DemandesOfDb2(BaseDeTest.Configuration),
+            new NetPrint.Modules.Production.Donnees.ReferencesProductionDb2(BaseDeTest.Configuration), new Utilisateur(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<NetPrint.Modules.Production.Services.InitialisationProductionService>.Instance);
+        var crees = new List<NetPrint.Modules.Production.Contrats.NumeroOf>();
+        try
+        {
+            var e = await Service().PreparerAsync(new DebutCommande
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, TypeCommande = "4", Enseigne = "1",
+            });
+            (e.Designation1, e.DateLivraison, e.Interlocuteur, e.Fabricant) = ("TEST NETPRINT SAAS OF - A SUPPRIMER",
+                DateOnly.FromDateTime(DateTime.Today.AddDays(30)), "TEST SAAS", "LEN");
+            cle = await Service().CreerAsync(e);
+            var origine = new NetPrint.Modules.Production.Contrats.CommandeOrigine(cle.Numero, cle.Cle);
+            var demande = Production.InitialisationProductionTests.Demande() with
+            {
+                Commande = origine, Categorie = "01", SousCategorie = "55", Designation1 = "TEST NETPRINT SAAS OF",
+                DateDossier = DateOnly.FromDateTime(DateTime.Today), Devis = null,
+            };
+
+            var of = await production.DemanderOfAsync(demande);
+            crees.Add(of);
+            sortie.WriteLine($"Commande {cle.Libelle} → OF {of.Libelle}");
+            Assert.Equal(cle.Numero, of.Numero);   // n° de la commande, clé chiffre libre
+            Assert.Contains(of.Cle, "1234567890");
+            Assert.Equal(NetPrint.Modules.Production.Contrats.EtatOf.AOuvrir, await production.EtatAsync(of));
+
+            var lue = (await production.LireDemandeOfAsync(of, origine))!;
+            Assert.Equal(("TEST NETPRINT SAAS OF", "01", "1"), (lue.Demande.Designation1, lue.Demande.Categorie, lue.Demande.Enseigne));
+            Assert.True(lue.Demande.Modele > 0);
+            var lien = Assert.Single(lue.Demande.Articles);
+            Assert.Equal(("393228", 10000, 10000), (lien.Article, lien.AFabriquer, lien.AAffecter));
+
+            await production.ModifierDemandeOfAsync(of, lue.Demande with
+            {
+                Designation2 = "MODIFIEE", Articles = [lien with { AFabriquer = 12000, AAffecter = 8000 }],
+            });
+            var relue = (await production.LireDemandeOfAsync(of, origine))!;
+            Assert.Equal(("MODIFIEE", 12000, 8000), (relue.Demande.Designation2, relue.Demande.Articles[0].AFabriquer, relue.Demande.Articles[0].AAffecter));
+
+            // Une 2e demande pour la même commande prend la clé suivante
+            var autre = await production.DemanderOfAsync(demande);
+            crees.Add(autre);
+            Assert.Equal(cle.Numero, autre.Numero);
+            Assert.NotEqual(of.Cle, autre.Cle);
+
+            await production.SupprimerDemandeOfAsync(of, origine);
+            await production.SupprimerDemandeOfAsync(autre, origine);
+            Assert.Equal(NetPrint.Modules.Production.Contrats.EtatOf.Inconnu, await production.EtatAsync(of));
+            Assert.Null(await production.LireDemandeOfAsync(of, origine));
+        }
+        finally
+        {
+            if (cle is not null)
+            {
+                await using (var cmd = new OdbcCommand("DELETE FROM NP11F.AB0020 WHERE RSOC = ? AND LADOSC = ? AND LACLDC = ?", cnx))
+                {
+                    cmd.Parameters.AddWithValue("s", BaseDeTest.Societe);
+                    cmd.Parameters.AddWithValue("n", cle.Numero);
+                    cmd.Parameters.AddWithValue("c", cle.Cle);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                // Les OF créés, quel que soit leur n° (n° de la commande ou compteur)
+                foreach (var of in crees)
+                    await using (var cmd = new OdbcCommand("DELETE FROM NP11F.AB001T WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", cnx))
+                    {
+                        cmd.Parameters.AddWithValue("s", BaseDeTest.Societe);
+                        cmd.Parameters.AddWithValue("n", of.Numero);
+                        cmd.Parameters.AddWithValue("c", of.Cle);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+                await NettoyerAsync(cnx, cle, client);
+            }
+        }
+    }
+
     private static async Task<object[]> LireDatesClientAsync(OdbcConnection cnx)
     {
         await using var cmd = cnx.CreateCommand();

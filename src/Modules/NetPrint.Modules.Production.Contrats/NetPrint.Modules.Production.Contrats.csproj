@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Contrats publics du module Production : la SEULE partie de Production que les autres modules ont le droit de
+       référencer (ex. Ventes demande un OF à partir d'une commande via IInitialisationProduction).
+       Ne contient que des interfaces et des objets échangés : aucune logique, aucun accès base. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\NetPrint.Socle\NetPrint.Socle.csproj" />
+  </ItemGroup>
+
+</Project>

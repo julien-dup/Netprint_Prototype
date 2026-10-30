@@ -218,7 +218,11 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
 
             // Clé déjà prise pour ce n° (DOS505 R11) : chiffres 1 à 9 puis 0
             var prises = new HashSet<string>();
-            await using (var rd = await Lire(cnx, tx, $"SELECT CCDCLE FROM {b}.AB001 WHERE RSOC = ? AND RDOSS = ?", ct, societe, numero))
+            // Dossiers ouverts et OF à ouvrir (AB001T) : un OF demandé garde sa clé jusqu'à son ouverture
+            await using (var rd = await Lire(cnx, tx, $"""
+                SELECT CCDCLE FROM {b}.AB001 WHERE RSOC = ? AND RDOSS = ?
+                UNION SELECT CCDCLE FROM {b}.AB001T WHERE RSOC = ? AND RDOSS = ?
+                """, ct, societe, numero, societe, numero))
                 while (await rd.ReadAsync(ct)) prises.Add(rd.Texte(0));
             cle = NumerotationCommande.CleLibre(cle, prises)
                 ?? throw new Socle.RegleMetierException($"Toutes les clés du dossier n° {numero} sont déjà utilisées.");

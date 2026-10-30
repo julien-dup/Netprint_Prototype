@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- Module Production : dossiers de fabrication (OF). Pour l'instant, seulement l'initialisation de la production à
+       partir d'une commande (demande d'OF : AB001T + liens AB0020, reprise de NEG515 / NEG510 F10). L'ouverture de l'OF
+       (DOS500S / DOS500, DOS510) reste dans le 5250 pendant le pilote.
+       Dépendances autorisées : ses Contrats, le Noyau, le Socle, Web.Commun, et les Contrats des autres modules.
+       JAMAIS un autre module directement (vérifié par NetPrint.Architecture.Tests). -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NetPrint.Modules.Ventes.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetPrint.Modules.Production.Contrats\NetPrint.Modules.Production.Contrats.csproj" />
+    <ProjectReference Include="..\..\NetPrint.Noyau\NetPrint.Noyau.csproj" />
+    <ProjectReference Include="..\..\NetPrint.Web.Commun\NetPrint.Web.Commun.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -10,6 +10,8 @@
   <Folder Name="/src/Modules/">
     <Project Path="src/Modules/NetPrint.Modules.Ventes/NetPrint.Modules.Ventes.csproj" />
     <Project Path="src/Modules/NetPrint.Modules.Ventes.Contrats/NetPrint.Modules.Ventes.Contrats.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Production/NetPrint.Modules.Production.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Production.Contrats/NetPrint.Modules.Production.Contrats.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetPrint.Architecture.Tests/NetPrint.Architecture.Tests.csproj" />
