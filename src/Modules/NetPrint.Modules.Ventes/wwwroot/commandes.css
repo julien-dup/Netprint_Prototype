@@ -120,3 +120,17 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .message-erreur { display: block; color: var(--danger); font-size: 12px; margin-top: 2px; }
 .erreur-saisie { margin: 0; color: var(--danger); font-weight: 600; }
 .avertissement-saisie { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--orange-clair); color: var(--orange); }
+
+/* ---------- Saisie d'une ligne ---------- */
+.fenetre.fenetre-ligne { width: min(1100px, 96vw); max-height: 92vh; display: flex; flex-direction: column; }
+.fenetre-ligne .corps-fenetre { overflow: auto; }
+.grille-ligne { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 14px 22px; }
+.grille-ligne section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.grille-ligne .ligne-champs { flex-wrap: wrap; align-items: flex-end; }
+.grille-ligne h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-3, #8a94a6); }
+.grille-ligne .champ.large { flex: 1; }
+.grille-ligne .champ.large input, .grille-ligne .champ.large textarea { width: 100%; }
+.grille-ligne .champ.large input + input { margin-top: 4px; }
+.grille-ligne .ou { align-self: flex-end; padding-bottom: 8px; color: var(--texte-3, #8a94a6); }
+.resume-prix { margin: 0; padding: 6px 10px; border-radius: 6px; background: #f6f8fc; font-variant-numeric: tabular-nums; }
+.actions-ligne { display: flex; gap: 8px; padding: 4px 0 2px; }

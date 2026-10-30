@@ -12,6 +12,9 @@
 @inject EtatListeCommandes Etat
 @inject NavigationManager Navigation
 @inject Notifications Notifications
+@inject ISaisieLignesCommande Lignes
+@inject ISaisieCommandes Saisie
+@inject Dialogues Dialogues
 
 <PageTitle>Commande @CleCourante.Libelle · NetPrint</PageTitle>
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
@@ -21,7 +24,8 @@
     <span class="separateur-vertical"></span>
     <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Modifier l'en-tête de la commande" : RaisonNonModifiable)"
             @onclick='() => Navigation.NavigateTo(Adresse(CleCourante) + "/entete")'>✏️ Modifier l'en-tête</button>
-    <button disabled title="Prochaine étape (NEG520)">＋ Ajouter une ligne</button>
+    <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Ajouter une ligne à la commande" : RaisonNonModifiable)"
+            @onclick="() => OuvrirLigneAsync(0)">＋ Ajouter une ligne</button>
     <button disabled title="Prochaine étape">✔ Solder</button>
     <span class="espace"></span>
     <button disabled title="Prochaine étape (ARC105P)">🖨 ARC</button>
@@ -146,6 +150,11 @@
     }
 </div>
 
+@if (ligneOuverte is { } numeroLigne && fiche is not null)
+{
+    <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" CodesVente="codesVente" OnFermer="FermerLigneAsync" />
+}
+
 @code {
     [Parameter] public int Numero { get; set; }
     [Parameter] public string? Cle { get; set; }
@@ -160,7 +169,9 @@
     // Passage d'une commande à une autre : seule la dernière lecture demandée est affichée
     private int lecture;
 
-    protected override async Task OnParametersSetAsync()
+    protected override Task OnParametersSetAsync() => ChargerAsync();
+
+    private async Task ChargerAsync()
     {
         var cle = CleCourante;
         var numeroLecture = ++lecture;
@@ -182,6 +193,54 @@
     }
 
     private void Retour() => Navigation.NavigateTo("ventes/commandes");
+
+    // ---------- Lignes (NEG520) ----------
+    private int? ligneOuverte;
+    private IReadOnlyList<CodeLibelle> codesVente = [];
+
+    private async Task OuvrirLigneAsync(int numero)
+    {
+        if (codesVente.Count == 0)
+        {
+            try { codesVente = (await Saisie.LireContexteAsync()).CodesVente; }
+            catch (Exception ex) { Notifications.Erreur($"Lecture des codes vente impossible : {ex.Message}"); return; }
+        }
+        ligneOuverte = numero;
+    }
+
+    private async Task FermerLigneAsync(int? numero)
+    {
+        ligneOuverte = null;
+        if (numero is { } n)
+        {
+            await ChargerAsync();
+            lignesOuvertes.Add(n);
+        }
+    }
+
+    private Task SolderLigneAsync(LigneCommandeListe l) => OptionLigneAsync(l, "Solder la ligne", () => Lignes.SolderAsync(CleCourante, l.NumeroLigne), "soldée");
+    private Task ReactiverLigneAsync(LigneCommandeListe l) => OptionLigneAsync(l, "Réactiver la ligne", () => Lignes.ReactiverAsync(CleCourante, l.NumeroLigne), "réactivée");
+    private Task SupprimerLigneAsync(LigneCommandeListe l) => OptionLigneAsync(l, "Supprimer la ligne", () => Lignes.SupprimerAsync(CleCourante, l.NumeroLigne), "supprimée");
+
+    // Options de la liste (NEG52004 / 05 / 06) : confirmation, action, rechargement de la fiche
+    private async Task OptionLigneAsync(LigneCommandeListe l, string titre, Func<Task> action, string participe)
+    {
+        if (!await Dialogues.ConfirmerAsync($"{titre} {l.NumeroLigne} ({ArticleIndice(l)}, {l.Designation}) ?", titre, "Confirmer")) return;
+        try
+        {
+            await action();
+            Notifications.Succes($"Ligne {l.NumeroLigne} {participe}.");
+            await ChargerAsync();
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"{titre} impossible : {ex.Message}");
+        }
+    }
 
     // Modification de l'en-tête : droit DOS500C, commande ni soldée ni sous-traitée (NEG510 R3)
     private bool PeutModifier => fiche is { Entete.Soldee: false, Entete.NonModifiable: false, Droits.Modifier: true };
@@ -268,6 +327,23 @@
                                     @Info("Emplacement", lf.Emplacement)
                                     @Info("Commentaires (évts)", l.NbCommentaires == 0 ? "" : l.NbCommentaires.ToString())
                                 </div>
+                                @if (PeutModifier)
+                                {
+                                    <div class="actions-ligne">
+                                        @if (!l.Soldee)
+                                        {
+                                            <button type="button" @onclick="() => OuvrirLigneAsync(l.NumeroLigne)" @onclick:stopPropagation="true">✏️ Modifier</button>
+                                            <button type="button" @onclick="() => SolderLigneAsync(l)" @onclick:stopPropagation="true">✔ Solder</button>
+                                        }
+                                        <button type="button" class="bouton-danger" @onclick="() => SupprimerLigneAsync(l)" @onclick:stopPropagation="true">🗑 Supprimer</button>
+                                    </div>
+                                }
+                                @if (l.Soldee && fiche.Droits.Modifier && !fiche.Entete.NonModifiable)
+                                {
+                                    <div class="actions-ligne">
+                                        <button type="button" @onclick="() => ReactiverLigneAsync(l)" @onclick:stopPropagation="true">↺ Réactiver</button>
+                                    </div>
+                                }
                             </td>
                         </tr>
                     }
