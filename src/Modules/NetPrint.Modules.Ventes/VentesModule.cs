@@ -123,6 +123,12 @@ public static class VentesModule
                 }
             });
 
+        // PDF d'un ARC tel qu'il a été envoyé (journal des envois) : GET /api/ventes/commandes/24/1/envois/12/pdf
+        api.MapGet("/commandes/{numero:int}/{cle}/envois/{id:long}/pdf",
+            async (int numero, string cle, long id, HttpContext http, IEditionArc arc, CancellationToken ct) =>
+                await arc.LirePdfEnvoyeAsync(new CleCommande(numero, cle.Trim().ToUpperInvariant()), id, ct) is { } pdf
+                    ? DocumentsPdf.Reponse(http, pdf) : Results.NotFound());
+
         // Brouillon de message Outlook (.eml) avec les ARC en pièces jointes, sans serveur SMTP :
         // GET /api/ventes/commandes/arc/message?c=24-1&c=25-1&a=client@exemple.fr&cc=autre@exemple.fr&soldees=O
         api.MapGet("/commandes/arc/message",

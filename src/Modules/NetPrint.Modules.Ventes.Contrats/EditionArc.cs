@@ -32,6 +32,10 @@ public interface IEditionArc
     Task<IReadOnlyList<EnvoiArcClient>> EnvoyerParClientAsync(IReadOnlyList<EnvoiArcClient> plan, bool? avecLignesSoldees = null,
         CancellationToken ct = default);
 
+    // Journal des envois de l'ARC d'une commande (le plus récent d'abord) et PDF tel qu'il a été envoyé
+    Task<IReadOnlyList<EnvoiArcTrace>> LireEnvoisAsync(CleCommande commande, CancellationToken ct = default);
+    Task<DocumentGenere?> LirePdfEnvoyeAsync(CleCommande commande, long id, CancellationToken ct = default);
+
     // PDF de l'ARC. avecLignesSoldees null = paramètre société. Droit « Édition » (PRT000P1 AOPT07) requis, sauf aperçu.
     Task<DocumentGenere> EditerAsync(CleCommande commande, bool? avecLignesSoldees = null, bool apercu = false,
         CancellationToken ct = default);
@@ -41,6 +45,10 @@ public interface IEditionArc
 // qui reçoit tous les messages
 public sealed record OptionsArc(bool AvecLignesSoldees, IReadOnlyList<ContactArc> Contacts, bool PeutEditer, bool EnvoiDirect = false,
     string RaisonEnvoiDirect = "", string Expediteur = "", string? Redirection = null);
+
+// Une ligne du journal des envois. Canal : « Envoi direct » ou « Outlook » ; Statut : Envoyé, Test, Échec, Préparé
+public sealed record EnvoiArcTrace(long Id, DateTime Date, string Profil, string Canal, string Statut, string Expediteur, string Destinataires,
+    string Copies, string Redirection, string Objet, string Erreur, bool AvecPdf);
 
 // Un message de l'envoi groupé : client, commandes, destinataires ; Erreur si rien ne peut partir ou si l'envoi a échoué
 public sealed record EnvoiArcClient(string Client, string NomClient, IReadOnlyList<CleCommande> Commandes, IReadOnlyList<string> Destinataires,

@@ -28,6 +28,11 @@ accusé de lecture. Garde-fou `Messagerie:Mode` (`Desactive` par défaut, `Redir
 `Reel`) : la base de test contient les vrais serveurs et contacts. Voir le README. Dans les tests, une messagerie
 factice garde les messages sans les envoyer.
 
+**Expéditeur et trace.** L'expéditeur est l'utilisateur (`IUtilisateurs.EmailAsync` : AI00F.ACMELE ; plus tard le compte
+Entra ID), à défaut la société (PEXPEN). Chaque envoi, et chaque brouillon préparé pour Outlook, est tracé par
+`IJournalEnvois` (table ENV100, script `db/db2/20261030-2230_ENV100_journal_envois.sql`) : une ligne par document, avec
+le PDF envoyé. Types de document : `TypesEnvoi` (ARC, à compléter : offres…).
+
 **Envoi par e-mail (Outlook).** Comme EnvoiARC et VisuArc (Outlook sur le poste), l'application prépare le message et
 l'utilisateur l'envoie : `MessageBrouillon.VersEml(nom)`, téléchargé par l'écran (`JS.TelechargerAsync`, Web.Commun) après avoir traité les erreurs. Outlook classique
 l'ouvre en brouillon, pièces jointes comprises. Évolution possible pour le SaaS : créer le brouillon directement dans

@@ -19,31 +19,31 @@ namespace NetPrint.Noyau.Messagerie;
 // =====================================================================
 public interface IMessagerie
 {
-    Task<EtatMessagerie> EtatAsync(int societe, CancellationToken ct = default);
+    // expediteur : adresse de l'utilisateur ; à défaut, celle de la société (FAC010.PEXPEN)
+    Task<EtatMessagerie> EtatAsync(int societe, string? expediteur = null, CancellationToken ct = default);
 
     // Envoie le message (destinataires, copies, pièces jointes) ; RegleMetierException si l'envoi est impossible
-    Task EnvoyerAsync(int societe, MessageBrouillon message, CancellationToken ct = default);
+    Task EnvoyerAsync(int societe, MessageBrouillon message, string? expediteur = null, CancellationToken ct = default);
 }
 
 // Disponible : un message peut partir ; sinon Raison dit pourquoi. Redirection : adresse qui reçoit tout (test).
 public sealed record EtatMessagerie(bool Disponible, string Raison, string Expediteur, string? Redirection);
 
-public sealed record ParametresSmtp(string Serveur, int Port, string Utilisateur, string MotDePasse, bool Tls, string Expediteur);
+// RepondreA : adresse de l'utilisateur quand elle ne peut pas être l'expéditeur (autre domaine que celui de la société)
+public sealed record ParametresSmtp(string Serveur, int Port, string Utilisateur, string MotDePasse, bool Tls, string Expediteur,
+    string RepondreA = "");
 
 internal sealed class MessagerieSmtp(IConfiguration config) : IMessagerie
 {
     private string Mode => config["Messagerie:Mode"] ?? "Desactive";
     private string? Redirection => config["Messagerie:Redirection"] is { Length: > 0 } r ? r.Trim() : null;
 
-    public async Task<EtatMessagerie> EtatAsync(int societe, CancellationToken ct = default)
-    {
-        var p = await ParametresAsync(societe, ct);
-        return ReglesMessagerie.Etat(p, Mode, Redirection);
-    }
+    public async Task<EtatMessagerie> EtatAsync(int societe, string? expediteur = null, CancellationToken ct = default) =>
+        ReglesMessagerie.Etat(ReglesMessagerie.AvecExpediteur(await ParametresAsync(societe, ct), expediteur), Mode, Redirection);
 
-    public async Task EnvoyerAsync(int societe, MessageBrouillon message, CancellationToken ct = default)
+    public async Task EnvoyerAsync(int societe, MessageBrouillon message, string? expediteur = null, CancellationToken ct = default)
     {
-        var p = await ParametresAsync(societe, ct);
+        var p = ReglesMessagerie.AvecExpediteur(await ParametresAsync(societe, ct), expediteur);
         var etat = ReglesMessagerie.Etat(p, Mode, Redirection);
         if (!etat.Disponible) throw new RegleMetierException(etat.Raison);
         using var mail = ReglesMessagerie.Preparer(p!, message, etat.Redirection);
@@ -82,6 +82,16 @@ internal sealed class MessagerieSmtp(IConfiguration config) : IMessagerie
 // Règles de l'envoi, sans réseau ni base (testées)
 public static class ReglesMessagerie
 {
+    // L'expéditeur est l'utilisateur quand son adresse est connue (AI00F.ACMELE, puis Entra ID) et du domaine de la société
+    // (le serveur de la société refuserait un autre domaine) ; sinon la société (PEXPEN), l'utilisateur en « Répondre à ».
+    public static ParametresSmtp? AvecExpediteur(ParametresSmtp? p, string? expediteur)
+    {
+        if (p is null || expediteur is not { Length: > 0 } || !expediteur.Contains('@')) return p;
+        var e = expediteur.Trim();
+        static string Domaine(string a) => a[(a.LastIndexOf('@') + 1)..].ToLowerInvariant();
+        return p.Expediteur == "" || Domaine(p.Expediteur) == Domaine(e) ? p with { Expediteur = e } : p with { RepondreA = e };
+    }
+
     public static EtatMessagerie Etat(ParametresSmtp? p, string mode, string? redirection)
     {
         var expediteur = p?.Expediteur ?? "";
@@ -115,6 +125,7 @@ public static class ReglesMessagerie
             foreach (var a in m.Destinataires) mail.To.Add(a);
             foreach (var a in m.Copies) mail.CC.Add(a);
         }
+        if (p.RepondreA != "") mail.ReplyToList.Add(p.RepondreA);
         // Accusé de lecture demandé (EnvoideFactures : AccuséRéception)
         mail.Headers.Add("Disposition-Notification-To", p.Expediteur);
         foreach (var pj in m.PiecesJointes)

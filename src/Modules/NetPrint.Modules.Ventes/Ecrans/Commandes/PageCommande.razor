@@ -16,6 +16,7 @@
 @inject ISaisieCommandes Saisie
 @inject Dialogues Dialogues
 @inject IActionsCommande Actions
+@inject IEditionArc Arc
 
 <PageTitle>Commande @CleCourante.Libelle · NetPrint</PageTitle>
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
@@ -158,6 +159,9 @@
                 case "journal":
                     @TableJournal
                     break;
+                case "envois":
+                    @TableEnvois
+                    break;
                 default:
                     @TableHistorique
                     break;
@@ -182,7 +186,7 @@
 
 @if (editionArc && fiche is not null)
 {
-    <FenetreArc Commandes="[new(CleCourante, fiche.Entete.Designation1)]" Client="@fiche.Entete.NomClient" OnFermer="() => editionArc = false" />
+    <FenetreArc Commandes="[new(CleCourante, fiche.Entete.Designation1)]" Client="@fiche.Entete.NomClient" OnFermer="FermerEditionArcAsync" />
 }
 
 @if (ligneOuverte is { } numeroLigne && fiche is not null)
@@ -225,6 +229,8 @@
         fiche = lue;
         if (fiche is not null) Etat.Selection = cle;
         versionArc++;
+        envois = null;
+        if (fiche is not null) await ChargerEnvoisAsync();
         chargement = false;
     }
 
@@ -241,6 +247,66 @@
         (apercu ? $"&apercu=1&v={versionArc}" : "");
 
     private void OuvrirEditionArc() => editionArc = true;
+
+    private async Task FermerEditionArcAsync()
+    {
+        editionArc = false;
+        await ChargerEnvoisAsync();   // un envoi vient peut-être d'être tracé
+    }
+
+    // ---------- Journal des envois de l'ARC (ENV100), lu avec la fiche ----------
+    private IReadOnlyList<EnvoiArcTrace>? envois;
+    private string? erreurEnvois;
+
+    private async Task ChargerEnvoisAsync()
+    {
+        erreurEnvois = null;
+        try { envois = await Arc.LireEnvoisAsync(CleCourante); }
+        catch (Exception ex)
+        {
+            envois = [];
+            erreurEnvois = $"Lecture des envois impossible : {ex.Message}";
+        }
+    }
+
+    private RenderFragment TableEnvois => __builder =>
+    {
+        if (envois is null)
+        {
+            <p class="chargement">Chargement…</p>
+            return;
+        }
+        if (erreurEnvois is not null)
+        {
+            <p class="erreur-saisie">@erreurEnvois <button type="button" class="bouton-lien" @onclick="ChargerEnvoisAsync">Réessayer</button></p>
+            return;
+        }
+        <table class="grille grille-fiche">
+            <thead><tr><th>Date</th><th>Canal</th><th>État</th><th>Par</th><th>À</th><th>Copie</th><th>Objet</th><th>PDF</th></tr></thead>
+            <tbody>
+                @foreach (var e in envois)
+                {
+                    <tr>
+                        <td>@e.Date.ToString("dd/MM/yyyy HH:mm")</td>
+                        <td>@e.Canal</td>
+                        <td>
+                            <span class="badge badge-etat @(e.Statut switch { "Envoyé" => "etat-livree", "Échec" => "etat-annulee", _ => "etat-partielle" })"
+                                  title="@(e.Erreur != "" ? e.Erreur : e.Redirection != "" ? $"Redirigé vers {e.Redirection}" : "")">@e.Statut</span>
+                        </td>
+                        <td>@e.Profil <span class="discret">@e.Expediteur</span></td>
+                        <td>@e.Destinataires</td>
+                        <td>@e.Copies</td>
+                        <td>@e.Objet</td>
+                        <td>@if (e.AvecPdf) {<a href="@($"api/ventes/commandes/{CleCourante.Numero}/{CleCourante.Cle}/envois/{e.Id}/pdf")" target="_blank" rel="noopener">📄</a>}</td>
+                    </tr>
+                }
+                @if (envois.Count == 0)
+                {
+                    <tr class="ligne-vide"><td colspan="8">Aucun envoi d'ARC tracé pour cette commande.</td></tr>
+                }
+            </tbody>
+        </table>
+    };
 
     // ---------- Actions sur la commande (DOS500S) ----------
     private Task SolderCommandeAsync() => ActionCommandeAsync(
@@ -352,6 +418,7 @@
         ("livraisons", "Livraisons", fiche.Livraisons.Count),
         ("factures", "Factures", fiche.Factures.Count),
         ("journal", "Journal des lignes", fiche.Journal.Count),
+        ("envois", "Envois ARC", erreurEnvois is null ? envois?.Count ?? 0 : 0),
         ("historique", "Historique", fiche.Historique.Count),
     ];
 

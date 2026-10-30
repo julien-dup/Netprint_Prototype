@@ -37,7 +37,10 @@ dotnet user-secrets set "Messagerie:Redirection" "prenom.nom@axilog.net"
 ```
 
 `Messagerie:Mode` = `Desactive` (défaut), `Redirection` (test) ou `Reel` (production seulement). Sans envoi direct, le
-bouton « Préparer (Outlook) » reste disponible.
+bouton « Préparer (Outlook) » reste disponible. L'expéditeur est l'utilisateur (e-mail externe de son profil, AI00F).
+
+**Scripts DB2** : `db/db2/`, nom préfixé par la date et l'heure, appliqués une fois par leur auteur après la fusion
+(ex. `20261030-2230_ENV100_journal_envois.sql` : journal des envois de documents).
 
 ## Organisation
 

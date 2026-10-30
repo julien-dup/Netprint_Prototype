@@ -37,19 +37,40 @@ public class EditionArcDb2Tests(ITestOutputHelper sortie)
     // Messagerie factice : les messages sont gardés, jamais envoyés (la base de test a les vrais serveurs et contacts)
     private sealed class Messagerie : IMessagerie
     {
-        public List<MessageBrouillon> Envoyes { get; } = [];
-        public Task<EtatMessagerie> EtatAsync(int societe, CancellationToken ct = default) =>
-            Task.FromResult(new EtatMessagerie(true, "", "expediteur@exemple.fr", null));
-        public Task EnvoyerAsync(int societe, MessageBrouillon message, CancellationToken ct = default)
+        public List<(MessageBrouillon Message, string? Expediteur)> Envoyes { get; } = [];
+        public Task<EtatMessagerie> EtatAsync(int societe, string? expediteur = null, CancellationToken ct = default) =>
+            Task.FromResult(new EtatMessagerie(true, "", expediteur ?? "societe@exemple.fr", null));
+        public Task EnvoyerAsync(int societe, MessageBrouillon message, string? expediteur = null, CancellationToken ct = default)
         {
-            Envoyes.Add(message);
+            Envoyes.Add((message, expediteur));
             return Task.CompletedTask;
         }
     }
 
-    private static EditionArcService Service(Messagerie? messagerie = null) =>
+    // Journal factice : les lignes sont gardées (la table ENV100 n'existe peut-être pas encore dans NP11F)
+    private sealed class Journal : IJournalEnvois
+    {
+        public List<EnvoiDocument> Lignes { get; } = [];
+        public Task EcrireAsync(IReadOnlyList<EnvoiDocument> envois, CancellationToken ct = default)
+        {
+            Lignes.AddRange(envois);
+            return Task.CompletedTask;
+        }
+        public Task<IReadOnlyList<EnvoiJournalise>> LireAsync(int societe, string type, int dossier, string cle, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<EnvoiJournalise>>([]);
+        public Task<(string Nom, byte[] Contenu)?> LirePdfAsync(int societe, long id, string type, int dossier, string cle,
+            CancellationToken ct = default) => Task.FromResult<(string, byte[])?>(null);
+    }
+
+    private sealed class Utilisateurs : NetPrint.Noyau.Utilisateurs.IUtilisateurs
+    {
+        public Task<string> EmailAsync(string profil, CancellationToken ct = default) => Task.FromResult("commercial@exemple.fr");
+    }
+
+    private static EditionArcService Service(Messagerie? messagerie = null, Journal? journal = null) =>
         new(new ArcCommandeDb2(BaseDeTest.Configuration), new ConsultationCommandesDb2(BaseDeTest.Configuration), new Societes(), new Contacts(),
-            messagerie ?? new Messagerie(), new Utilisateur());
+            messagerie ?? new Messagerie(), journal ?? new Journal(), new Utilisateurs(), new Utilisateur(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<EditionArcService>.Instance);
 
     [FactDb2]
     public async Task Arc_d_une_commande_livree_du_client_d_essai()
@@ -90,12 +111,19 @@ public class EditionArcDb2Tests(ITestOutputHelper sortie)
     public async Task Envoi_direct_et_envoi_groupe()
     {
         var messagerie = new Messagerie();
-        var service = Service(messagerie);
+        var journal = new Journal();
+        var service = Service(messagerie, journal);
         var cle = new CleCommande(68537, "9");
         await service.EnvoyerMessageAsync([cle], ["achats@exemple.fr"], []);
-        var m = Assert.Single(messagerie.Envoyes);
+        var (m, expediteur) = Assert.Single(messagerie.Envoyes);
+        Assert.Equal("commercial@exemple.fr", expediteur);   // l'utilisateur, pas la société
         Assert.Equal(["achats@exemple.fr"], m.Destinataires);
         Assert.Equal("ARC 68537-9.pdf", Assert.Single(m.PiecesJointes).Nom);
+        // Trace : une ligne par commande, avec le PDF envoyé
+        var trace = Assert.Single(journal.Lignes);
+        Assert.Equal((TypesEnvoi.Arc, 68537, "9", CanauxEnvoi.Smtp, StatutsEnvoi.Envoye, "commercial@exemple.fr"),
+            (trace.Type, trace.Dossier, trace.Cle, trace.Canal, trace.Statut, trace.Expediteur));
+        Assert.Equal(m.PiecesJointes[0].Contenu, trace.Pdf);
 
         var plan = Assert.Single(await service.PlanifierEnvoiAsync([cle]));
         Assert.Equal(("LABORATOIRES CLARINS", "411100 376"), (plan.NomClient, plan.Client));
@@ -103,5 +131,10 @@ public class EditionArcDb2Tests(ITestOutputHelper sortie)
         var resultat = Assert.Single(await service.EnvoyerParClientAsync([plan]));
         Assert.True(resultat.Envoye);
         Assert.Equal(2, messagerie.Envoyes.Count);
+
+        // Brouillon Outlook : tracé comme « préparé »
+        await service.PreparerMessageAsync([cle], ["achats@exemple.fr"], []);
+        Assert.Equal(StatutsEnvoi.Prepare, journal.Lignes[^1].Statut);
+        Assert.Equal(CanauxEnvoi.Outlook, journal.Lignes[^1].Canal);
     }
 }

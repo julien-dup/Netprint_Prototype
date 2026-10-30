@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NetPrint.Modules.Ventes.Contrats;
 using NetPrint.Modules.Ventes.Donnees;
 using NetPrint.Modules.Ventes.Impressions;
@@ -10,9 +11,12 @@ using NetPrint.Socle.Session;
 
 namespace NetPrint.Modules.Ventes.Services;
 
-// ARC d'une commande (ARC105P) : droits, données, modèle, PDF, message. Rien n'est écrit en base (comme le RPG).
+// ARC d'une commande (ARC105P) : droits, données, modèle, PDF, message. L'édition n'écrit rien (comme le RPG) ; chaque
+// envoi, ou brouillon préparé pour Outlook, est tracé dans le journal des envois avec le PDF (ENV100).
+// Expéditeur : l'utilisateur (AI00F.ACMELE), à défaut la société (FAC010.PEXPEN).
 internal sealed class EditionArcService(ArcCommandeDb2 donnees, ISourceCommandes commandes, ISocietes societes, IContactsTiers contacts,
-    IMessagerie messagerie, IUtilisateurCourant utilisateur) : IEditionArc
+    IMessagerie messagerie, IJournalEnvois journal, NetPrint.Noyau.Utilisateurs.IUtilisateurs utilisateurs, IUtilisateurCourant utilisateur,
+    Microsoft.Extensions.Logging.ILogger<EditionArcService> journalTechnique) : IEditionArc
 {
     // Garde-fous : un message raisonnable pour la messagerie (pièces jointes), un envoi groupé raisonnable
     internal const int MaximumParMessage = 50;
@@ -28,7 +32,7 @@ internal sealed class EditionArcService(ArcCommandeDb2 donnees, ISourceCommandes
         var liste = await contacts.LireAsync(u.Societe, o.CompteGeneral, o.CompteClient, DocumentEnvoye.Arc, ct);
         var (a, cc) = DestinatairesParDefaut(liste);
         var proposes = a.Concat(cc).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var etat = await messagerie.EtatAsync(u.Societe, ct);
+        var etat = await messagerie.EtatAsync(u.Societe, await utilisateurs.EmailAsync(u.Profil, ct), ct);
         return new OptionsArc(o.AvecSoldees, liste.Select(c => new ContactArc(c.Nom, c.Email, c.ParDefaut, proposes.Contains(c.Email))).ToList(),
             droits.Editer, etat.Disponible, etat.Raison, etat.Expediteur, etat.Redirection);
     }
@@ -42,6 +46,7 @@ internal sealed class EditionArcService(ArcCommandeDb2 donnees, ISourceCommandes
         var (u, impose, _) = await ContexteEditionAsync(ct);
         var (message, lues) = await MessageAsync(u, impose, cles, destinataires, copies, avecLignesSoldees, ct);
         var nom = lues.Count == 1 ? $"ARC {cles[0].Numero:00000}-{cles[0].Cle}.eml" : $"ARC {lues[0].Entete.CompteClient} ({lues.Count}).eml";
+        await TracerAsync(u, message, lues, CanauxEnvoi.Outlook, StatutsEnvoi.Prepare, "", "", "", ct, avecPdf: false);
         return message.VersEml(nom);
     }
 
@@ -50,8 +55,69 @@ internal sealed class EditionArcService(ArcCommandeDb2 donnees, ISourceCommandes
     {
         var (u, impose, _) = await ContexteEditionAsync(ct);
         if (Adresses(destinataires).Count == 0) throw new RegleMetierException("Choisissez au moins un destinataire.");
-        var (message, _) = await MessageAsync(u, impose, cles, destinataires, copies, avecLignesSoldees, ct);
-        await messagerie.EnvoyerAsync(u.Societe, message, ct);
+        var expediteur = await utilisateurs.EmailAsync(u.Profil, ct);
+        var etat = await messagerie.EtatAsync(u.Societe, expediteur, ct);
+        if (!etat.Disponible) throw new RegleMetierException(etat.Raison);   // rien n'est tenté, rien n'est tracé
+        var (message, lues) = await MessageAsync(u, impose, cles, destinataires, copies, avecLignesSoldees, ct);
+        await EnvoyerEtTracerAsync(u, message, lues, expediteur, etat, ct);
+    }
+
+    // Envoi par le serveur de la société, au nom de l'utilisateur, puis trace (envoyé, test ou échec) ; l'échec est relancé.
+    // expediteur et etat sont lus une fois par l'appelant (une fois pour tout un envoi groupé).
+    private async Task EnvoyerEtTracerAsync(UtilisateurConnecte u, MessageBrouillon message, List<DonneesArc> lues, string expediteur,
+        EtatMessagerie etat, CancellationToken ct)
+    {
+        try
+        {
+            await messagerie.EnvoyerAsync(u.Societe, message, expediteur, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await TracerAsync(u, message, lues, CanauxEnvoi.Smtp, StatutsEnvoi.Echec, etat.Expediteur, etat.Redirection ?? "", ex.Message, ct);
+            throw;
+        }
+        await TracerAsync(u, message, lues, CanauxEnvoi.Smtp, etat.Redirection is null ? StatutsEnvoi.Envoye : StatutsEnvoi.Test,
+            etat.Expediteur, etat.Redirection ?? "", "", ct);
+    }
+
+    // Une ligne de journal par commande du message, avec son PDF. Le journal ne fait jamais échouer un envoi déjà parti.
+    private async Task TracerAsync(UtilisateurConnecte u, MessageBrouillon message, List<DonneesArc> lues, string canal, string statut,
+        string expediteur, string redirection, string erreur, CancellationToken ct, bool avecPdf = true)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        var lignes = lues.Select((d, i) => new EnvoiDocument(u.Societe, id, u.Profil, TypesEnvoi.Arc, d.Entete.Cle.Numero, d.Entete.Cle.Cle,
+            d.Entete.CompteGeneral, d.Entete.CompteClient, canal, statut, expediteur, message.Destinataires, message.Copies, redirection,
+            message.Objet, erreur, message.PiecesJointes[i].Nom, avecPdf ? message.PiecesJointes[i].Contenu : null)).ToList();
+        try
+        {
+            await journal.EcrireAsync(lignes, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Trace impossible (verrou, table non journalisée...) : l'envoi reste fait, l'incident est signalé dans les journaux
+            journalTechnique.LogWarning(ex, "Journal des envois (ENV100) non écrit pour {Commandes}",
+                string.Join(", ", lues.Select(d => d.Entete.Cle.Libelle)));
+        }
+    }
+
+    public async Task<IReadOnlyList<EnvoiArcTrace>> LireEnvoisAsync(CleCommande commande, CancellationToken ct = default)
+    {
+        var (u, impose, _) = await ContexteAsync(ct);
+        if (await donnees.OptionsAsync(u.Societe, commande, impose, ct) is null) return [];
+        return (await journal.LireAsync(u.Societe, TypesEnvoi.Arc, commande.Numero, commande.Cle, ct))
+            .Select(e => new EnvoiArcTrace(e.Id, e.Date, e.Profil, e.Canal == CanauxEnvoi.Smtp ? "Envoi direct" : "Outlook",
+                e.Statut switch
+                {
+                    StatutsEnvoi.Envoye => "Envoyé", StatutsEnvoi.Test => "Test", StatutsEnvoi.Echec => "Échec", _ => "Préparé",
+                }, e.Expediteur, e.Destinataires, e.Copies, e.Redirection, e.Objet, e.Erreur, e.AvecPdf)).ToList();
+    }
+
+    public async Task<DocumentGenere?> LirePdfEnvoyeAsync(CleCommande commande, long id, CancellationToken ct = default)
+    {
+        var (u, impose, _) = await ContexteEditionAsync(ct);   // PDF final, sans filigrane : droit « Édition »
+        if (await donnees.OptionsAsync(u.Societe, commande, impose, ct) is null) return null;
+        return await journal.LirePdfAsync(u.Societe, id, TypesEnvoi.Arc, commande.Numero, commande.Cle, ct) is { } pdf
+            ? new DocumentGenere(pdf.Nom, pdf.Contenu) : null;
     }
 
     private async Task<(MessageBrouillon Message, List<DonneesArc> Lues)> MessageAsync(UtilisateurConnecte u, int? impose,
@@ -98,7 +164,9 @@ internal sealed class EditionArcService(ArcCommandeDb2 donnees, ISourceCommandes
         var (u, impose, _) = await ContexteEditionAsync(ct);
         if (plan.Sum(e => e.Commandes.Count) > MaximumEnvoiGroupe)
             throw new RegleMetierException($"Pas plus de {MaximumEnvoiGroupe} commandes par envoi groupé.");
-        if (await messagerie.EtatAsync(u.Societe, ct) is { Disponible: false } etat) throw new RegleMetierException(etat.Raison);
+        var expediteur = await utilisateurs.EmailAsync(u.Profil, ct);
+        var etat = await messagerie.EtatAsync(u.Societe, expediteur, ct);
+        if (!etat.Disponible) throw new RegleMetierException(etat.Raison);
         var resultats = new List<EnvoiArcClient>();
         foreach (var envoi in plan)
         {
@@ -109,8 +177,8 @@ internal sealed class EditionArcService(ArcCommandeDb2 donnees, ISourceCommandes
             }
             try
             {
-                var (message, _) = await MessageAsync(u, impose, envoi.Commandes, envoi.Destinataires, envoi.Copies, avecLignesSoldees, ct);
-                await messagerie.EnvoyerAsync(u.Societe, message, ct);
+                var (message, lues) = await MessageAsync(u, impose, envoi.Commandes, envoi.Destinataires, envoi.Copies, avecLignesSoldees, ct);
+                await EnvoyerEtTracerAsync(u, message, lues, expediteur, etat, ct);
                 resultats.Add(envoi with { Envoye = true });
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

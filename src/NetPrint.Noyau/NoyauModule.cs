@@ -14,6 +14,8 @@ public static class NoyauModule
         services.AddScoped<ISocietes, SocietesDb2>();
         services.AddScoped<IContactsTiers, ContactsTiersDb2>();   // destinataires des documents envoyés (PRT051F)
         services.AddScoped<IMessagerie, MessagerieSmtp>();        // envoi SMTP (FAC010), garde-fou Messagerie:Mode
+        services.AddScoped<IJournalEnvois, JournalEnvoisDb2>();   // journal des envois (ENV100)
+        services.AddScoped<NetPrint.Noyau.Utilisateurs.IUtilisateurs, NetPrint.Noyau.Utilisateurs.UtilisateursDb2>();   // profils (AI00F)
         services.AddScoped<IListesDeChoix, ListesDeChoixDb2>();   // recherches F4 / bouton « … »
         return services;
     }

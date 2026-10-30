@@ -20,6 +20,21 @@ public class MessagerieTests
         Assert.Equal(disponible, ReglesMessagerie.Etat(Smtp, mode, redirection).Disponible);
 
     [Fact]
+    public void L_utilisateur_est_l_expediteur_sinon_la_societe()
+    {
+        Assert.Equal("david@exemple.fr", ReglesMessagerie.AvecExpediteur(Smtp, "david@exemple.fr")!.Expediteur);   // même domaine
+        // Autre domaine : la société reste l'expéditeur (le serveur refuserait), l'utilisateur en « Répondre à »
+        var autre = ReglesMessagerie.AvecExpediteur(Smtp, "david@axilog.net")!;
+        Assert.Equal(("adv@exemple.fr", "david@axilog.net"), (autre.Expediteur, autre.RepondreA));
+        using var mail = ReglesMessagerie.Preparer(autre, new MessageBrouillon(["c@x.fr"], [], "o", "t", []), null);
+        Assert.Equal("david@axilog.net", Assert.Single(mail.ReplyToList).Address);
+        Assert.Equal("adv@exemple.fr", ReglesMessagerie.AvecExpediteur(Smtp, "")!.Expediteur);
+        Assert.Equal("adv@exemple.fr", ReglesMessagerie.AvecExpediteur(Smtp, "pas une adresse")!.Expediteur);
+        // Société sans adresse d'expédition : l'adresse de l'utilisateur suffit
+        Assert.True(ReglesMessagerie.Etat(ReglesMessagerie.AvecExpediteur(Smtp with { Expediteur = "" }, "david@axilog.net"), "Reel", null).Disponible);
+    }
+
+    [Fact]
     public void Serveur_et_expediteur_obligatoires()
     {
         Assert.False(ReglesMessagerie.Etat(null, "Reel", null).Disponible);
