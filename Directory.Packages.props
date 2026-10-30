@@ -12,6 +12,11 @@
     <PackageVersion Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 
+  <ItemGroup Label="Éditions PDF (Socle.Documents)">
+    <!-- Licence Community : gratuite sous 1 M$ de chiffre d'affaires annuel ; au-delà, licence Professional -->
+    <PackageVersion Include="QuestPDF" Version="2026.9.1" />
+  </ItemGroup>
+
   <ItemGroup Label="Configuration (NetPrint.Reprise)">
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.13" />

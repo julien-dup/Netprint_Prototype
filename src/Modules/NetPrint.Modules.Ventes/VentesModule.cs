@@ -1,3 +1,4 @@
+using NetPrint.Socle.Documents;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -57,6 +58,8 @@ public static class VentesModule
         services.AddScoped<ISaisieLignesCommande>(s => s.GetRequiredService<SaisieLignesService>());
         services.AddScoped<IActionsCommande>(s => s.GetRequiredService<SaisieLignesService>());
         services.AddScoped<IAppelsLivraison>(s => s.GetRequiredService<SaisieLignesService>());
+        services.AddScoped<ArcCommandeDb2>();
+        services.AddScoped<IEditionArc, EditionArcService>();   // ARC des commandes (ARC105P), PDF produit par l'application
         services.AddScoped<LignesCommandeDb2>();
         return services;
     }
@@ -92,6 +95,30 @@ public static class VentesModule
                 catch (System.Data.Odbc.OdbcException ex)
                 {
                     return Results.Text($"Édition du récapitulatif impossible : {ex.Message}", "text/plain; charset=utf-8",
+                        statusCode: StatusCodes.Status502BadGateway);
+                }
+            });
+
+        // ARC d'une commande en PDF : GET /api/ventes/commandes/24/1/arc?soldees=O&apercu=1
+        // soldees : O / N (absent = paramètre société) ; apercu = 1 : filigrane, sans le droit « Édition »
+        api.MapGet("/commandes/{numero:int}/{cle}/arc",
+            async (int numero, string cle, string? soldees, int? apercu, HttpContext http, IEditionArc arc, CancellationToken ct) =>
+            {
+                try
+                {
+                    var doc = await arc.EditerAsync(new CleCommande(numero, cle.Trim().ToUpperInvariant()),
+                        soldees switch { "O" or "o" => true, "N" or "n" => false, _ => null }, apercu == 1, ct);
+                    return DocumentsPdf.Reponse(http, doc);
+                }
+                catch (RegleMetierException ex)
+                {
+                    // Commande inexistante ou hors du périmètre du représentant : 404 ; droit « Édition » manquant : 403
+                    var statut = ex.Message.Contains("autorisé") ? StatusCodes.Status403Forbidden : StatusCodes.Status404NotFound;
+                    return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: statut);
+                }
+                catch (System.Data.Odbc.OdbcException ex)
+                {
+                    return Results.Text($"Édition de l'ARC impossible : {ex.Message}", "text/plain; charset=utf-8",
                         statusCode: StatusCodes.Status502BadGateway);
                 }
             });

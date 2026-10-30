@@ -136,3 +136,14 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .grille-ligne .ou { align-self: flex-end; padding-bottom: 8px; color: var(--texte-3, #8a94a6); }
 .resume-prix { margin: 0; padding: 6px 10px; border-radius: 6px; background: #f6f8fc; font-variant-numeric: tabular-nums; }
 .actions-ligne { display: flex; gap: 8px; padding: 4px 0 2px; }
+
+/* ---------- ARC : aperçu à côté de la fiche, fenêtre d'édition ---------- */
+.fiche-avec-apercu { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 42%); gap: 12px; align-items: start; }
+.panneau-apercu { position: sticky; top: 8px; display: flex; flex-direction: column; height: calc(100vh - 140px);
+    border: 1px solid #d5dbe3; border-radius: 8px; background: #fff; overflow: hidden; }
+.panneau-apercu .titre-apercu { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-bottom: 1px solid #e6eaf0; background: #f6f8fb; }
+.panneau-apercu .titre-apercu b { flex: 1; }
+.panneau-apercu iframe { flex: 1; width: 100%; border: 0; }
+.barre-outils button.actif { background: #e0f2fe; border-color: #7dd3fc; }
+.fenetre.fenetre-arc { width: min(560px, 94vw); }
+.fenetre-arc .corps-fenetre { display: flex; flex-direction: column; gap: 10px; }

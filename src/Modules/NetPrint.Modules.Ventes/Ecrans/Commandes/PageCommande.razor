@@ -16,6 +16,7 @@
 @inject ISaisieCommandes Saisie
 @inject Dialogues Dialogues
 @inject IActionsCommande Actions
+@inject IEditionArc Arc
 
 <PageTitle>Commande @CleCourante.Libelle · NetPrint</PageTitle>
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
@@ -40,9 +41,13 @@
     <button class="bouton-danger" disabled="@(fiche is null || !fiche.Droits.Supprimer || fiche.Entete.NonModifiable)"
             title="Supprimer la commande (impossible si elle a un BL ou une facture)" @onclick="SupprimerCommandeAsync">🗑 Supprimer</button>
     <span class="espace"></span>
-    <button disabled title="Prochaine étape (ARC105P)">🖨 ARC</button>
+    <button class="@(apercuArc ? "actif" : "")" disabled="@(fiche is null)" title="Aperçu de l'accusé de réception, mis à jour à chaque modification"
+            @onclick="() => apercuArc = !apercuArc">👁 Aperçu ARC</button>
+    <button disabled="@(fiche is null || !fiche.Droits.Editer)" title="@(fiche is { Droits.Editer: false } ? "Vous n'êtes pas autorisé à éditer les commandes" : "Éditer l'accusé de réception de commande (PDF)")"
+            @onclick="OuvrirEditionArcAsync">🖨 ARC</button>
 </fieldset>
 
+<div class="@(apercuArc && fiche is not null ? "fiche-avec-apercu" : "")">
 <div class="contenu contenu-detail fiche-commande">
     @if (chargement)
     {
@@ -162,6 +167,42 @@
     }
 </div>
 
+@if (apercuArc && fiche is not null)
+{
+    <aside class="panneau-apercu">
+        <div class="titre-apercu">
+            <b>Aperçu de l'ARC</b>
+            <label class="champ-case"><input type="checkbox" @bind="apercuSoldees" /> <span>Lignes soldées</span></label>
+            <a href="@AdresseArc(apercuSoldees, apercu: true)" target="_blank" rel="noopener" title="Ouvrir l'aperçu dans un onglet">↗</a>
+            <button type="button" class="bouton-icone" title="Fermer l'aperçu" @onclick="() => apercuArc = false">✕</button>
+        </div>
+        <iframe src="@AdresseArc(apercuSoldees, apercu: true)" title="Aperçu de l'ARC"></iframe>
+    </aside>
+}
+</div>
+
+@if (editionArc is { } options)
+{
+    <div class="voile" @onclick="() => editionArc = null">
+        <div class="fenetre fenetre-arc" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="titre-fenetre">🖨 Accusé de réception de la commande @CleCourante.Libelle</div>
+            <div class="corps-fenetre">
+                <label class="champ-case"><input type="checkbox" @bind="arcSoldees" /> <span>Avec les lignes soldées (quantité commandée ; sinon reste à livrer)</span></label>
+                @if (options.EmailClient != "")
+                {
+                    <p class="aide">E-mail du client : @options.EmailClient — l'envoi par e-mail depuis l'application viendra avec le service documents.</p>
+                }
+            </div>
+            <div class="pied-fenetre">
+                <span class="espace"></span>
+                <button type="button" @onclick="() => editionArc = null">Fermer</button>
+                <a class="bouton-ancre bouton-principal" href="@AdresseArc(arcSoldees, apercu: false)" target="_blank" rel="noopener"
+                   @onclick="() => editionArc = null">Ouvrir le PDF</a>
+            </div>
+        </div>
+    </div>
+}
+
 @if (ligneOuverte is { } numeroLigne && fiche is not null)
 {
     <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" CodesVente="codesVente" OnFermer="FermerLigneAsync" />
@@ -201,10 +242,39 @@
         if (numeroLecture != lecture) return;
         fiche = lue;
         if (fiche is not null) Etat.Selection = cle;
+        versionArc++;
         chargement = false;
     }
 
     private void Retour() => Navigation.NavigateTo("ventes/commandes");
+
+    // ---------- ARC (ARC105P) : édition en PDF, aperçu à côté de la fiche ----------
+    private bool apercuArc;
+    private bool apercuSoldees = true;
+    private OptionsArc? editionArc;
+    private bool arcSoldees = true;
+    private int versionArc;   // change à chaque rechargement de la fiche : l'aperçu est recalculé
+
+    private string AdresseArc(bool soldees, bool apercu) =>
+        $"api/ventes/commandes/{CleCourante.Numero}/{CleCourante.Cle}/arc?soldees={(soldees ? "O" : "N")}" +
+        (apercu ? $"&apercu=1&v={versionArc}" : "");
+
+    private async Task OuvrirEditionArcAsync()
+    {
+        try
+        {
+            editionArc = await Arc.LireOptionsAsync(CleCourante);
+            arcSoldees = editionArc.AvecLignesSoldees;
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Édition de l'ARC impossible : {ex.Message}");
+        }
+    }
 
     // ---------- Actions sur la commande (DOS500S) ----------
     private Task SolderCommandeAsync() => ActionCommandeAsync(

@@ -32,6 +32,11 @@ Légende : 🔴 bloquant ou prioritaire · 🟠 important · ⚪ plus tard.
 | D14 | Solde d'un appel | Son reste non livré **n'est pas** rendu à l'origine (comme le RPG) | Idem |
 | D15 | Défauts d'un nouvel appel | N° et date d'appel, adresse, commentaires, textes repris de l'origine ; date de livraison à saisir | NEG520 : idem ; EDI : date d'appel = date de livraison |
 | D16 | Appel créé par l'EDI (EDI105) | Ne se modifie et ne se supprime que par l'EDI | Rien ne l'empêchait |
+| D17 | ARC : canevas absent dans la langue du client | Canevas français | ARC sans en-tête ni pied |
+| D18 | ARC : variables `$CRSF…` sans client facturé | Adresse du client | Vides (condition inversée) |
+| D19 | ARC : ordre des lignes | N° de ligne, regroupées par livraison (adresse, date, à la demande) | Clé adresse / date / statut / article |
+| D20 | ARC : canevas qui place l'adresse du client (`$CRS`) | Il remplace les blocs « références » et « destinataire » du nouvel en-tête | L'overlay et le canevas faisaient tout |
+| D21 | ARC : variables du canevas | Valeur sans blancs de fin (le `§` réaligne) | Longueur fixe, blancs compris (probable) |
 
 Questions ouvertes :
 
@@ -51,7 +56,12 @@ Questions ouvertes :
 | 🟠 | Encours client à l'ajout d'une ligne | NEG520 F9 → DOS901 'C' | Contrôlé à la création de l'en-tête seulement pour l'instant |
 | 🟠 | Copie d'une commande | DOS500S option 3, DOS505 COPT 03 | |
 | 🟠 | Copie / transfert de reliquat d'une ligne vers une autre commande | NEG510 F14 | Déplace quantité et réservation : opération transactionnelle |
-| 🟠 | ARC (édition, envoi, visualisation) | ARC105P, ARC525, ARC100 (type 1), NEG510 F18 | Service documents commun (cadrage) |
+| ✅ | ~~ARC : édition et aperçu~~ | ARC105P, NEG510 F18 | Fait (30/10) : PDF produit par l'application (QuestPDF), canevas ARC010F / ARC015F décodés, traductions PRT008, aperçu à côté de la fiche mis à jour à chaque modification. Guide : `docs/editions-pdf.md` |
+| 🟠 | ARC : envoi par e-mail | NEG510 F18 (ARC105CLP, ARC106, chapitre A du canevas), EnvoiARC | Destinataire AA0003.CEMAIL ou PRT051F ; corps = chapitre A. Pas de SMTP dans le prototype : à faire avec le service documents |
+| 🟠 | ARC : logos des sociétés | PRT003F (overlays AFP) | Fournir les logos en image (dossier `Documents:Logos`) ; à défaut, en-tête texte |
+| ⚪ | ARC : historique des envois, ARC sans prix, ARC modificatif | — | N'existent pas dans le RPG : à décider |
+| ⚪ | ARC des dossiers de fabrication (type 1) | ARC100 / ARC105F | Hors commandes de négoce et produit fini |
+| ⚪ | Maintenance des canevas d'ARC | ARC010S / ARC010 (5250 seulement) | Écran à reprendre si les canevas restent la source des textes |
 | 🟠 | Lancement en fabrication / affectation de stock | NEG515, NEG510 F10 (création auto des OF) | Frontière avec le module Production |
 | 🟠 | Reprise des lignes d'un devis | NEG520 F10 (NEG52009) | Les prix de beaucoup de commandes réelles en viennent (DNDEV) |
 | 🟠 | Articles avec nomenclature | NEG520 (lignes composants, DNLCOM) | Refusés aujourd'hui |
@@ -89,6 +99,8 @@ Questions ouvertes :
 | 🟠 | Liste de choix « Article » | Manque dans `IListesDeChoix` |
 | 🟠 | Service Compteurs (n° de dossier, GETDOSSIER) | Cible du cadrage : attribution atomique |
 | 🟠 | Qualité client (CQUACL) | Règle transverse devis / commande / BL : à porter dans le Noyau |
+| ✅ | ~~Éditions PDF~~ | Socle `Documents` (QuestPDF, page standard, aperçu, formats) et Noyau `ISocietes.LireIdentiteAsync` (en-tête, mentions légales, logo) : à réutiliser pour l'édition du devis (`docs/editions-pdf.md`) |
+| 🟠 | Licence QuestPDF | Community gratuite sous 1 M$ de CA annuel ; sinon licence Professional, ou bascule sur PDFsharp/MigraDoc (MIT) |
 | ⚪ | Droit du profil sur la société à la connexion (PRT000P1) | Déjà noté dans decisions.md |
 
 ## 3. Production
