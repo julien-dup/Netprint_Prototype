@@ -39,7 +39,7 @@ internal static class RequeteListeCommandes
     private static string Source(string b, bool toutesLesLignes) => $"""
         FROM {b}.AB001 a
         LEFT OUTER JOIN {b}.NEG100 b ON b.RSOC = a.RSOC AND b.RDOSS = a.RDOSS AND b.DNDCLE = a.CCDCLE
-        {(toutesLesLignes ? "" : "     AND (b.DNSTAT = '1' OR (b.DNSTAT = '3' AND (b.DNQTEC > 0 OR b.DNQTEL > 0)))")}
+        {(toutesLesLignes ? "     AND b.DNSTAT IN ('1', '3')" : "     AND (b.DNSTAT = '1' OR (b.DNSTAT = '3' AND (b.DNQTEC > 0 OR b.DNQTEL > 0)))")}
         LEFT OUTER JOIN {b}.SPF010 c ON c.RSOC = b.RSOC AND c.AARTIC = b.DNART AND c.AINDIC = b.DNIND
         LEFT OUTER JOIN {b}.AA0003 e ON e.RSOC = a.RSOC AND e.RGEN = a.RGEN AND e.RCLI = a.RCLI
         LEFT OUTER JOIN {b}.AA0003 f1 ON f1.RSOC = b.RSOC AND f1.RGEN = b.DNGENF AND f1.RCLI = b.DNCLIF AND b.DNCLIF <> 0
@@ -59,8 +59,9 @@ internal static class RequeteListeCommandes
         a.CCTYPV, a.CCNAEA, a.CTXRM, a.CCRCVD
         """;
 
-    // Fiche : une commande de type 3 ou 4, toutes ses lignes, dans l'ordre des n° de ligne
-    public static Requete ConstruireFiche(string bib, int societe, CleCommande cle)
+    // Fiche : une commande de type 3 ou 4, toutes ses lignes fermes et « à la demande », dans l'ordre des n° de ligne ;
+    // avec un représentant imposé, la commande n'est lue que si elle est à lui
+    public static Requete ConstruireFiche(string bib, int societe, CleCommande cle, int? representant = null)
     {
         var b = BaseDb2.Bibliotheque(bib);
         var sql = $"""
@@ -68,10 +69,10 @@ internal static class RequeteListeCommandes
             {ColonnesFiche}
             {Source(b, toutesLesLignes: true)}
             LEFT OUTER JOIN {b}.AA00081 rg ON rg.RSOC = a.RSOC AND rg.RTABLE = 'RG' AND rg.RARG = a.CCMOD AND rg.TTAG <> '*'
-            WHERE a.RSOC = ? AND a.RDOSS = ? AND a.CCDCLE = ? AND a.CCTYPC IN ('3', '4')
+            WHERE a.RSOC = ? AND a.RDOSS = ? AND a.CCDCLE = ? AND a.CCTYPC IN ('3', '4'){(representant is null ? "" : " AND a.CCREP = ?")}
             ORDER BY b.DNNLIG
             """;
-        return new Requete(sql, [societe, cle.Numero, cle.Cle]);
+        return new Requete(sql, representant is null ? [societe, cle.Numero, cle.Cle] : [societe, cle.Numero, cle.Cle, representant]);
     }
 
     public static Requete Construire(string bib, int societe, CriteresCommandes c)

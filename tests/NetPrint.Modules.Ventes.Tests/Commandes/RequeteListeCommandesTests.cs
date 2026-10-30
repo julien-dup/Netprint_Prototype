@@ -169,6 +169,24 @@ public class RequeteListeCommandesTests
     }
 
     [Fact]
+    public void Fiche_lignes_fermes_et_a_la_demande_et_cle_parametree()
+    {
+        var r = RequeteListeCommandes.ConstruireFiche("NP11F", 8, new CleCommande(68916, "9"));
+        Assert.Contains("AND b.DNSTAT IN ('1', '3')", r.Sql);
+        Assert.DoesNotContain("CCREP = ?", r.Sql);
+        Assert.Equal([8, 68916, "9"], r.Parametres);
+        Assert.Equal("?".Length * 3, r.Sql.Count(ch => ch == '?'));
+    }
+
+    [Fact]
+    public void Fiche_limitee_au_representant_impose()
+    {
+        var r = RequeteListeCommandes.ConstruireFiche("NP11F", 8, new CleCommande(1, "A"), representant: 12);
+        Assert.Contains("AND a.CCREP = ?", r.Sql);
+        Assert.Equal([8, 1, "A", 12], r.Parametres);
+    }
+
+    [Fact]
     public void Bibliotheque_invalide_refusee() =>
         Assert.Throws<InvalidOperationException>(() =>
             RequeteListeCommandes.Construire("NP11F; DROP", 7, new CriteresCommandes { Numero = 1 }));

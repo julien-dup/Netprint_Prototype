@@ -83,7 +83,7 @@ public class ConsultationCommandesDb2Tests(ITestOutputHelper sortie)
         var commandes = ConsultationCommandesService.Regrouper(await Donnees.RechercherAsync(BaseDeTest.Societe, Client(), default));
         foreach (var c in new[] { commandes.FirstOrDefault(c => c.Soldee), commandes.FirstOrDefault(c => !c.Soldee) }.OfType<CommandeListe>())
         {
-            var brut = await Donnees.LireFicheAsync(BaseDeTest.Societe, c.Cle, default);
+            var brut = await Donnees.LireFicheAsync(BaseDeTest.Societe, c.Cle, null, default);
             Assert.NotNull(brut);
             var fiche = ConsultationCommandesService.VersFiche(brut, DroitsCommandes.Tous);
             Assert.Equal(c.Cle, fiche.Entete.Cle);
@@ -97,7 +97,7 @@ public class ConsultationCommandesDb2Tests(ITestOutputHelper sortie)
 
     [FactDb2]
     public async Task Fiche_inexistante() =>
-        Assert.Null(await Donnees.LireFicheAsync(BaseDeTest.Societe, new CleCommande(99999, "Z"), default));
+        Assert.Null(await Donnees.LireFicheAsync(BaseDeTest.Societe, new CleCommande(99999, "Z"), null, default));
 
     [FactDb2]
     public async Task Representant_et_droits_lisibles()

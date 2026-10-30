@@ -518,7 +518,7 @@
     {
         if (cle is null) return;
         Etat.Selection = cle;
-        Navigation.NavigateTo($"ventes/commandes/{cle.Numero}/{Uri.EscapeDataString(cle.Cle)}");
+        Navigation.NavigateTo(Adresse(cle));
     }
 
     private void Basculer(CommandeListe c)
@@ -687,9 +687,6 @@
         }
     };
 
-
-    private static string BulleLigne(LigneCommandeListe l) =>
-        string.Join("\n", new[] { l.Designation, l.Texte }.Where(t => t != ""));
 
 
 

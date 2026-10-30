@@ -71,6 +71,8 @@ public class ConsultationCommandesServiceTests
     [InlineData(450, 5000, 0, 450)]                // unité sans diviseur
     [InlineData(10, 333, 1000, 3.33)]              // arrondi au centime
     [InlineData(10, 335, 1000, 3.35)]
+    [InlineData(450, 0, 999999999, 0)]             // « à la demande » entièrement appelée : rien
+    [InlineData(12.5, 0, 1000, 0)]
     public void Valeur_d_une_ligne(decimal prix, int quantite, long tnum, decimal attendu) =>
         Assert.Equal(attendu, ConsultationCommandesService.Valeur(prix, quantite, tnum));
 
@@ -152,6 +154,13 @@ public class ConsultationCommandesServiceTests
         Assert.Equal(0m, c.Lignes[0].Valeur);
         Assert.Equal("Gratuit", c.Lignes[0].Prix);
         Assert.Equal("Prix à définir", c.Lignes[1].Prix);
+    }
+
+    [Fact]
+    public void Ligne_soldee_sans_reste_a_livrer()
+    {
+        var c = Assert.Single(ConsultationCommandesService.Regrouper([Brut(1, "A", 1) with { Dnsold = "O", Dnqter = 2500 }]));
+        Assert.Equal(0, c.Lignes[0].ResteALivrer);
     }
 
     [Fact]
@@ -288,6 +297,7 @@ public class ConsultationCommandesServiceTests
         var fiche = await new ConsultationCommandesService(source, new UtilisateurFactice()).LireAsync(new CleCommande(1, " a "));
         Assert.NotNull(fiche);
         Assert.Equal("A", source.DerniereCle!.Cle);
+        Assert.Equal(12, source.DernierRepresentant);   // le filtre est passé à la lecture
     }
 
     [Fact]
@@ -387,10 +397,13 @@ public class ConsultationCommandesServiceTests
         public FicheBrute? Fiche { get; init; }
         public CleCommande? DerniereCle { get; private set; }
 
-        public Task<FicheBrute?> LireFicheAsync(int societe, CleCommande cle, CancellationToken ct)
+        public int? DernierRepresentant { get; private set; }
+
+        public Task<FicheBrute?> LireFicheAsync(int societe, CleCommande cle, int? representant, CancellationToken ct)
         {
             DerniereCle = cle;
-            return Task.FromResult(Fiche);
+            DernierRepresentant = representant;
+            return Task.FromResult(representant is null || Fiche?.Entete.Commune.Ccrep == representant ? Fiche : null);
         }
     }
 }

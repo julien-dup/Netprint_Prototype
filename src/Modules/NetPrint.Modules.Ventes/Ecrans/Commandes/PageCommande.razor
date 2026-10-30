@@ -1,4 +1,4 @@
-@page "/ventes/commandes/{Numero:int}/{Cle}"
+@page "/ventes/commandes/{Numero:int}/{Cle?}"
 @* =====================================================================
    Fiche d'une commande client (négoce ou produit fini), en lecture seule.
    Reprise de NEG510 (en-tête, menu de la commande) et de FEN_commandes (HistoriqueDossiers) :
@@ -61,9 +61,9 @@
                 <div class="indicateur"><span class="valeur-indicateur">@Montant(e.Valeur)</span><span>valeur</span></div>
                 <div class="indicateur"><span class="valeur-indicateur">@fiche.Lignes.Count</span><span>ligne@(fiche.Lignes.Count > 1 ? "s" : "")</span></div>
                 <div class="indicateur">
-                    <span class="valeur-indicateur">@(TauxLivraison is { } t ? t.ToString("P0") : "—")</span>
+                    <span class="valeur-indicateur">@(fiche.TauxLivraison is { } t ? t.ToString("P0") : "—")</span>
                     <span>livré</span>
-                    @if (TauxLivraison is { } taux)
+                    @if (fiche.TauxLivraison is { } taux)
                     {
                         <span class="avancement large"><span class="barre" style="width:@((int)(taux * 100))%"></span></span>
                     }
@@ -147,36 +147,42 @@
 
 @code {
     [Parameter] public int Numero { get; set; }
-    [Parameter] public string Cle { get; set; } = "";
+    [Parameter] public string? Cle { get; set; }
 
-    private CleCommande CleCourante => new(Numero, Cle.ToUpperInvariant());
+    private CleCommande CleCourante => new(Numero, (Cle ?? "").Trim().ToUpperInvariant());
 
     private FicheCommande? fiche;
     private bool chargement = true;
     private string onglet = "lignes";
     private readonly HashSet<int> lignesOuvertes = [];
 
+    // Passage d'une commande à une autre : seule la dernière lecture demandée est affichée
+    private int lecture;
+
     protected override async Task OnParametersSetAsync()
     {
+        var cle = CleCourante;
+        var numeroLecture = ++lecture;
         chargement = true;
         lignesOuvertes.Clear();
+        FicheCommande? lue = null;
         try
         {
-            fiche = await Consultation.LireAsync(CleCourante);
-            Etat.Selection = CleCourante;
+            lue = await Consultation.LireAsync(cle);
         }
         catch (Exception ex)
         {
-            fiche = null;
-            Notifications.Erreur($"Lecture de la commande impossible : {ex.Message}");
+            if (numeroLecture == lecture) Notifications.Erreur($"Lecture de la commande impossible : {ex.Message}");
         }
-        finally
-        {
-            chargement = false;
-        }
+        if (numeroLecture != lecture) return;
+        fiche = lue;
+        if (fiche is not null) Etat.Selection = cle;
+        chargement = false;
     }
 
     private void Retour() => Navigation.NavigateTo("ventes/commandes");
+
+
 
     private IEnumerable<(string Cle, string Libelle, int Nombre)> Onglets =>
     [
@@ -187,16 +193,6 @@
         ("historique", "Historique", fiche.Historique.Count),
     ];
 
-    // Part livrée des lignes fermes (même règle que la liste)
-    private decimal? TauxLivraison
-    {
-        get
-        {
-            var fermes = fiche!.Lignes.Select(l => l.Ligne).Where(l => !l.ALaDemande && l.Quantite > 0).ToList();
-            var total = fermes.Sum(l => (decimal)l.Quantite);
-            return total == 0 ? null : fermes.Sum(l => (decimal)Math.Min(l.QuantiteLivree, l.Quantite)) / total;
-        }
-    }
 
     private void BasculerLigne(int n)
     {
@@ -223,8 +219,8 @@
                     <tr class="@(l.Soldee ? "ligne-soldee" : "")" @onclick="() => BasculerLigne(l.NumeroLigne)">
                         <td class="col-chevron"><button type="button" class="chevron @(ouverte ? "ouvert" : "")" title="Détail de la ligne">▸</button></td>
                         <td class="nombre">@l.NumeroLigne</td>
-                        <td><b>@(l.Indice != "" ? $"{l.Article} {l.Indice}" : l.Article)</b>@if (l.ReferenceImprime != "") {<span class="discret"> · @l.ReferenceImprime</span>}</td>
-                        <td title="@string.Join("\n", new[] { l.Designation, l.Texte }.Where(t => t != ""))">@l.Designation</td>
+                        <td><b>@ArticleIndice(l)</b>@if (l.ReferenceImprime != "") {<span class="discret"> · @l.ReferenceImprime</span>}</td>
+                        <td title="@BulleLigne(l)">@l.Designation</td>
                         <td>
                             @if (l.ALaDemande) { <span class="badge badge-demande">À la demande</span> }
                             else if (l.EstAppel) { <span class="badge badge-appel" title="Appel de la ligne @lf.LigneOrigine">Appel @l.NumeroAppel</span> }
@@ -347,6 +343,10 @@
 
     private RenderFragment TableJournal => __builder =>
     {
+        if (fiche!.JournalTronque)
+        {
+            <p class="aide">Seuls les mouvements les plus récents sont affichés.</p>
+        }
         <table class="grille grille-fiche">
             <thead>
                 <tr><th>Date</th><th>Opération</th><th class="nombre">Ligne</th><th>Profil</th><th>Article</th><th class="nombre">Quantité</th><th class="nombre">Prix</th></tr>
@@ -374,6 +374,10 @@
 
     private RenderFragment TableHistorique => __builder =>
     {
+        if (fiche!.HistoriqueTronque)
+        {
+            <p class="aide">Seul l'historique le plus récent est affiché.</p>
+        }
         <table class="grille grille-fiche grille-etroite">
             <thead><tr><th>Date</th><th>Type</th><th>Initiales</th></tr></thead>
             <tbody>

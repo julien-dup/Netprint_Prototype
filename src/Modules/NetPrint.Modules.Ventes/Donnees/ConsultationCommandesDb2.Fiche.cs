@@ -11,7 +11,9 @@ internal sealed record FicheBrute(
     IReadOnlyList<LivraisonCommande> Livraisons,
     IReadOnlyList<FactureCommande> Factures,
     IReadOnlyList<EvenementLigne> Journal,
-    IReadOnlyList<HistoriqueDossier> Historique);
+    IReadOnlyList<HistoriqueDossier> Historique,
+    bool JournalTronque = false,
+    bool HistoriqueTronque = false);
 
 internal sealed record ComplementEnteteBrut(
     LigneCommandeBrute Commune, string Ccfact, string Ccnint, int Ccdtsa, int Ccdtss, decimal Cctxco, string Ccat,
@@ -26,13 +28,17 @@ internal sealed record ComplementLigneBrut(
 
 internal sealed partial class ConsultationCommandesDb2
 {
-    public async Task<FicheBrute?> LireFicheAsync(int societe, CleCommande cle, CancellationToken ct)
+    // Limites d'affichage du journal des lignes et de l'historique (les plus récents d'abord)
+    public const int MaxJournal = 1000;
+    public const int MaxHistorique = 500;
+
+    public async Task<FicheBrute?> LireFicheAsync(int societe, CleCommande cle, int? representant, CancellationToken ct)
     {
         var b = Bib;
         await using var cnx = await OuvrirAsync(ct);
 
         // En-tête et lignes
-        var requete = RequeteListeCommandes.ConstruireFiche(b, societe, cle);
+        var requete = RequeteListeCommandes.ConstruireFiche(b, societe, cle, representant);
         ComplementEnteteBrut? entete = null;
         var lignes = new List<(LigneCommandeBrute, ComplementLigneBrut)>();
         await using (var cmd = Commande(cnx, requete.Sql, [.. requete.Parametres]))
@@ -47,11 +53,15 @@ internal sealed partial class ConsultationCommandesDb2
         }
         if (entete is null) return null;
 
+        var journal = await JournalAsync(cnx, b, societe, cle, ct);
+        var historique = await HistoriqueAsync(cnx, b, societe, cle, ct);
         return new FicheBrute(entete, lignes,
             await LivraisonsAsync(cnx, b, societe, cle, ct),
             await FacturesAsync(cnx, b, societe, cle, ct),
-            await JournalAsync(cnx, b, societe, cle, ct),
-            await HistoriqueAsync(cnx, b, societe, cle, ct));
+            journal.Take(MaxJournal).ToList(),
+            historique.Take(MaxHistorique).ToList(),
+            JournalTronque: journal.Count > MaxJournal,
+            HistoriqueTronque: historique.Count > MaxHistorique);
     }
 
     private const int F = RequeteListeCommandes.NbColonnes;   // première colonne des compléments de la fiche
@@ -108,12 +118,13 @@ internal sealed partial class ConsultationCommandesDb2
         return parBl.Values.Select(v => v.Bl).ToList();
     }
 
-    // Factures de la commande (FAC090) : une ligne par facture, quantités et montants cumulés sur ses éléments
+    // Factures de la commande (FAC090) : une ligne par facture, quantités et montants cumulés sur ses éléments ;
+    // date = la plus récente des éléments, prise en entier (et non année, mois, jour maximum chacun de leur côté)
     private static async Task<List<FactureCommande>> FacturesAsync(
         System.Data.Odbc.OdbcConnection cnx, string b, int societe, CleCommande cle, CancellationToken ct)
     {
         var sql = $"""
-            SELECT RNFAC, MAX(FEANNE), MAX(FEMOIS), MAX(FEJOUR), SUM(FEQTE), SUM(FEVEN)
+            SELECT RNFAC, MAX(FEANNE * 10000 + FEMOIS * 100 + FEJOUR), SUM(FEQTE), SUM(FEVEN)
             FROM {b}.FAC090
             WHERE RSOC = ? AND FEDOSS = ? AND FECLE = ?
             GROUP BY RNFAC
@@ -123,8 +134,7 @@ internal sealed partial class ConsultationCommandesDb2
         await using var cmd = Commande(cnx, sql, societe, cle.Numero, cle.Cle);
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct))
-            factures.Add(new FactureCommande(rd.Entier(0), BaseDb2.Date(rd.Entier(1), rd.Entier(2), rd.Entier(3)),
-                rd.Entier(4), rd.Nombre(5)));
+            factures.Add(new FactureCommande(rd.Entier(0), BaseDb2.DateAAAAMMJJ(rd.Entier(1)), rd.Entier(2), rd.Nombre(3)));
         return factures;
     }
 
@@ -137,7 +147,7 @@ internal sealed partial class ConsultationCommandesDb2
             FROM {b}.NEG100E
             WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ?
             ORDER BY DEDTMO DESC, DEDTHE DESC, DNNLIG
-            FETCH FIRST 1000 ROWS ONLY
+            FETCH FIRST {MaxJournal + 1} ROWS ONLY
             """;
         var journal = new List<EvenementLigne>();
         await using var cmd = Commande(cnx, sql, societe, cle.Numero, cle.Cle);
@@ -161,7 +171,7 @@ internal sealed partial class ConsultationCommandesDb2
             FROM {b}.DOS040
             WHERE RSOC = ? AND RDOSS = ? AND HICLE = ?
             ORDER BY HIDTMA DESC, HIDTMM DESC, HIDTMJ DESC, HIHEUR DESC
-            FETCH FIRST 500 ROWS ONLY
+            FETCH FIRST {MaxHistorique + 1} ROWS ONLY
             """;
         var historique = new List<HistoriqueDossier>();
         await using var cmd = Commande(cnx, sql, societe, cle.Numero, cle.Cle);

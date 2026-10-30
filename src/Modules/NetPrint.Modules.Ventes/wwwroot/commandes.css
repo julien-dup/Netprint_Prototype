@@ -46,7 +46,9 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .grille tbody tr.sous-ligne { background: #f8fafd; }
 .grille tbody tr.sous-ligne td { border-top-color: transparent; font-size: 12.5px; }
 .grille tbody tr.sous-ligne.ligne-soldee td, .grille tbody tr.ligne-soldee td { color: #8a94a6; }
-.resume-ligne { display: flex; align-items: center; gap: 12px; white-space: nowrap; overflow: hidden; padding-left: 4px; border-left: 2px solid var(--accent-clair); }
+.grille-principale tbody tr.sous-ligne td { max-width: none; overflow: visible; }
+/* Résumé de ligne : reste dans la partie visible de la grille, même si elle défile horizontalement */
+.resume-ligne { position: sticky; left: 40px; width: min(1300px, calc(100vw - 120px)); box-sizing: border-box; display: flex; align-items: center; gap: 12px; white-space: nowrap; overflow: hidden; padding-left: 4px; border-left: 2px solid var(--accent-clair); }
 .resume-ligne .num-ligne { color: var(--texte-3, #8a94a6); font-variant-numeric: tabular-nums; }
 .resume-ligne .article-ligne { font-weight: 600; min-width: 120px; }
 .resume-ligne .designation-ligne { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

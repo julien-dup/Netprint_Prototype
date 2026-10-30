@@ -26,4 +26,11 @@ internal static class AffichageCommandes
     public static string Montant(decimal v) => v == 0 ? "" : v.ToString("N2");
     public static string Date(DateOnly? d) => d?.ToString("dd/MM/yyyy") ?? "";
     public static string ArticleIndice(LigneCommandeListe l) => l.Indice != "" ? $"{l.Article} {l.Indice}" : l.Article;
+
+    // Bulle d'une ligne : désignation et texte libre
+    public static string BulleLigne(LigneCommandeListe l) => string.Join("\n", new[] { l.Designation, l.Texte }.Where(t => t != ""));
+
+    // Adresse de la fiche ; une clé à blanc donne /ventes/commandes/n° (la clé est facultative dans la route)
+    public static string Adresse(CleCommande c) =>
+        c.Cle == "" ? $"ventes/commandes/{c.Numero}" : $"ventes/commandes/{c.Numero}/{Uri.EscapeDataString(c.Cle)}";
 }

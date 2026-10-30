@@ -16,8 +16,8 @@ internal interface ISourceCommandes
 
     Task<IReadOnlyList<LigneCommandeBrute>> RechercherAsync(int societe, CriteresCommandes criteres, CancellationToken ct);
 
-    // Fiche d'une commande (types 3 et 4) ; null si elle n'existe pas
-    Task<FicheBrute?> LireFicheAsync(int societe, CleCommande cle, CancellationToken ct);
+    // Fiche d'une commande (types 3 et 4) ; null si elle n'existe pas ou n'est pas au représentant imposé
+    Task<FicheBrute?> LireFicheAsync(int societe, CleCommande cle, int? representant, CancellationToken ct);
 }
 
 // Ligne lue telle quelle (une ligne NEG100 et son en-tête AB001 ; zones de ligne à vide si la commande n'a pas de ligne)

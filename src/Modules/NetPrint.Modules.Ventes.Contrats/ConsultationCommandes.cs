@@ -121,15 +121,18 @@ public sealed record CommandeListe(
     public int NbLignes => Lignes.Count;
     public bool Soldee => Etat == EtatCommande.Soldee;
 
-    // Part livrée des lignes fermes (hors lignes « à la demande »), de 0 à 1 ; null si aucune quantité commandée
-    public decimal? TauxLivraison
+    public decimal? TauxLivraison => AvancementLivraison.Taux(Lignes);
+}
+
+public static class AvancementLivraison
+{
+    // Part livrée des lignes fermes (hors lignes « à la demande », livrées par leurs appels), de 0 à 1 ;
+    // une sur-livraison compte pour la quantité commandée ; null si aucune quantité ferme
+    public static decimal? Taux(IEnumerable<LigneCommandeListe> lignes)
     {
-        get
-        {
-            var fermes = Lignes.Where(l => !l.ALaDemande && l.Quantite > 0).ToList();
-            var total = fermes.Sum(l => (decimal)l.Quantite);
-            return total == 0 ? null : Math.Min(1m, fermes.Sum(l => (decimal)Math.Min(l.QuantiteLivree, l.Quantite)) / total);
-        }
+        var fermes = lignes.Where(l => !l.ALaDemande && l.Quantite > 0).ToList();
+        var total = fermes.Sum(l => (decimal)l.Quantite);
+        return total == 0 ? null : fermes.Sum(l => (decimal)Math.Min(l.QuantiteLivree, l.Quantite)) / total;
     }
 }
 
@@ -175,7 +178,12 @@ public sealed record FicheCommande(
     IReadOnlyList<EvenementLigne> Journal,          // NEG100E : créations, modifications, suppressions de lignes
     IReadOnlyList<HistoriqueDossier> Historique,    // DOS040 : créations, modifications, soldes du dossier
     int NbDocuments,
-    DroitsCommandes Droits);
+    DroitsCommandes Droits,
+    bool JournalTronque = false,                    // seuls les mouvements les plus récents sont lus
+    bool HistoriqueTronque = false)
+{
+    public decimal? TauxLivraison => AvancementLivraison.Taux(Lignes.Select(l => l.Ligne));
+}
 
 public static class TypesFacturation
 {

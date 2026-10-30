@@ -83,12 +83,11 @@ internal sealed class ConsultationCommandesService(ISourceCommandes donnees, IUt
     public async Task<FicheCommande?> LireAsync(CleCommande cle, CancellationToken ct = default)
     {
         var u = await utilisateur.ExigerAsync();
-        var brut = await donnees.LireFicheAsync(u.Societe, cle with { Cle = cle.Cle.Trim().ToUpperInvariant() }, ct);
-        if (brut is null) return null;
-
-        // Représentant limité : une commande d'un autre représentant n'est pas visible (DOS500S R6, FEN_commandes)
+        // Représentant limité : une commande d'un autre représentant n'est pas visible (DOS500S R6, FEN_commandes) ;
+        // le filtre est dans la requête, rien d'autre n'est lu pour une commande interdite
         var impose = await donnees.RepresentantImposeAsync(u.Societe, u.Profil, ct);
-        if (impose is not null && brut.Entete.Commune.Ccrep != impose) return null;
+        var brut = await donnees.LireFicheAsync(u.Societe, cle with { Cle = cle.Cle.Trim().ToUpperInvariant() }, impose, ct);
+        if (brut is null) return null;
 
         var droits = Droits(await donnees.OptionsProgrammeAsync(ProgrammeDroits, u.Profil, ct));
         return VersFiche(brut, droits);
@@ -140,7 +139,7 @@ internal sealed class ConsultationCommandesService(ISourceCommandes donnees, IUt
             Valeur: lignes.Sum(l => l.Ligne.Valeur));
 
         return new FicheCommande(entete, lignes, brut.Livraisons, brut.Factures, brut.Journal, brut.Historique,
-            c.NbDocuments, droits);
+            c.NbDocuments, droits, brut.JournalTronque, brut.HistoriqueTronque);
     }
 
     // Mode de règlement (table RG) et échéance : « 30 jours le 10, arrêté au 31 »
@@ -242,7 +241,8 @@ internal sealed class ConsultationCommandesService(ISourceCommandes donnees, IUt
             Quantite: l.Dnqtec,
             QuantiteLivree: l.Dnqtel,
             QuantiteFacturee: l.Dnqtef,
-            ResteALivrer: l.Dnqter,
+            // MAJ520 ne recalcule le reste (DNQTER) que sur les lignes actives : une ligne soldée n'a plus rien à livrer
+            ResteALivrer: l.Dnsold == "O" ? 0 : l.Dnqter,
             PrixUnitaire: l.Dnpus,
             Unite: l.Dnuv,
             Gratuite: gratuite,
@@ -258,8 +258,9 @@ internal sealed class ConsultationCommandesService(ISourceCommandes donnees, IUt
 
     // Valeur d'une ligne (colonne « Valeur » de HistoriqueDossiers) : prix × quantité / diviseur de l'unité de vente ;
     // « Le tout » (TNUM 999999999) ou unité sans diviseur : le prix est celui de la ligne entière.
+    // Une ligne sans quantité (ligne « à la demande » entièrement appelée) ne vaut rien, même « Le tout ».
     internal static decimal Valeur(decimal prix, int quantite, long tnum) =>
-        tnum is TnumLeTout or <= 0 ? prix : Math.Round(prix * quantite / tnum, 2, MidpointRounding.AwayFromZero);
+        quantite == 0 ? 0 : tnum is TnumLeTout or <= 0 ? prix : Math.Round(prix * quantite / tnum, 2, MidpointRounding.AwayFromZero);
 
     private static bool Vide(string? s) => string.IsNullOrWhiteSpace(s);
 }
