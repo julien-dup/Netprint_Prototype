@@ -14,6 +14,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/NetPrint.Architecture.Tests/NetPrint.Architecture.Tests.csproj" />
     <Project Path="tests/NetPrint.Socle.Tests/NetPrint.Socle.Tests.csproj" />
+    <Project Path="tests/NetPrint.Modules.Ventes.Tests/NetPrint.Modules.Ventes.Tests.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path="Directory.Build.props" />

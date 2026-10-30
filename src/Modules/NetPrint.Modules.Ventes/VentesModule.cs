@@ -6,6 +6,7 @@ using Microsoft.Net.Http.Headers;
 using Microsoft.Extensions.DependencyInjection;
 using NetPrint.Modules.Ventes.Contrats;
 using NetPrint.Modules.Ventes.Donnees;
+using NetPrint.Modules.Ventes.Ecrans.Commandes;
 using NetPrint.Modules.Ventes.Ecrans.Devis;
 using NetPrint.Modules.Ventes.Services;
 using NetPrint.Socle;
@@ -36,6 +37,19 @@ public static class VentesModule
         services.AddScoped<IDecompositionDevis, DecompositionDevisService>();   // décomposition analytique, prix remis (lot E)
         services.AddScoped<DecompositionDevisDb2>();
         services.AddScoped<EtatConsultationDevis>();   // critères et liste conservés pendant la session (retour du détail)
+
+        // Commandes clients (négoce et produit fini) : entrée de menu et tuile d'accueil propres
+        services.AddSingleton(new DescriptionModule(
+            Code: "VENTES-COMMANDES",
+            Nom: "Commandes clients",
+            Url: "/ventes/commandes",
+            Icone: "🧾",
+            Ordre: 2,
+            Assemblage: typeof(VentesModule).Assembly,
+            Description: "Commandes de négoce et de produit fini : recherche, lignes, livraisons. À venir : saisie, ARC."));
+        services.AddScoped<IConsultationCommandes, ConsultationCommandesService>();
+        services.AddScoped<ISourceCommandes, ConsultationCommandesDb2>();
+        services.AddScoped<EtatListeCommandes>();
         return services;
     }
 

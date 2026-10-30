@@ -82,16 +82,15 @@
         _ = InvokeAsync(StateHasChanged);
     }
 
-    // Module de l'adresse courante : premier segment de son URL (« /ventes/devis » → « /ventes »)
+    // Module de l'adresse courante : l'entrée dont l'URL complète préfixe l'adresse (un module peut en déclarer
+    // plusieurs, ex. « /ventes/devis » et « /ventes/commandes »), sinon la première du même premier segment (« /ventes »)
     private void TrouverModule()
     {
         var chemin = "/" + Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0];
-        moduleCourant = Modules.FirstOrDefault(m =>
-        {
-            var segment = "/" + m.Url.Trim('/').Split('/')[0];
-            return chemin.Equals(segment, StringComparison.OrdinalIgnoreCase)
-                || chemin.StartsWith(segment + "/", StringComparison.OrdinalIgnoreCase);
-        });
+        static bool Prefixe(string chemin, string url) =>
+            chemin.Equals(url, StringComparison.OrdinalIgnoreCase) || chemin.StartsWith(url + "/", StringComparison.OrdinalIgnoreCase);
+        moduleCourant = Modules.Where(m => Prefixe(chemin, "/" + m.Url.Trim('/'))).MaxBy(m => m.Url.Length)
+            ?? Modules.FirstOrDefault(m => Prefixe(chemin, "/" + m.Url.Trim('/').Split('/')[0]));
     }
 
     private void Aller(string url)

@@ -1,0 +1,65 @@
+/* Commandes clients (module Ventes) : compléments à app.css, chargés par les écrans /ventes/commandes */
+
+input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
+.champ-case { flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; min-height: 32px; }
+.champ-case span { margin: 0; }
+
+.separateur-compteur { margin: 0 6px; color: var(--texte-3, #8a94a6); }
+.compteur .avertissement { color: var(--orange); }
+
+/* Pastilles d'état : filtre rapide */
+.pastilles-etat { display: flex; gap: 6px; flex-wrap: wrap; }
+.pastille-etat {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px;
+    border: 1px solid var(--bord); border-radius: 999px; background: var(--surface); font-size: 12px; color: var(--texte);
+}
+.pastille-etat:hover { border-color: var(--bord-fort); }
+.pastille-etat.active { border-color: var(--accent); background: var(--accent-clair); color: var(--accent-fonce); font-weight: 600; }
+.pastille-etat .nombre-etat { min-width: 18px; padding: 0 5px; border-radius: 999px; background: #eef2f8; font-size: 11px; text-align: center; }
+.pastille-etat.active .nombre-etat { background: var(--surface); }
+
+/* États d'une commande */
+.badge-etat.etat-encours { background: #e0edff; color: var(--accent-fonce); }
+.badge-etat.etat-partielle { background: var(--orange-clair); color: var(--orange); }
+.badge-etat.etat-livree { background: #dcfce7; color: var(--vert); }
+.badge-etat.etat-soldee { background: #eef0f3; color: #5b6475; }
+.pastille-etat[class*="etat-"]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; }
+.pastille-etat.etat-encours::before { background: var(--accent); }
+.pastille-etat.etat-partielle::before { background: var(--orange); }
+.pastille-etat.etat-livree::before { background: var(--vert); }
+.pastille-etat.etat-soldee::before { background: #9aa3b2; }
+.grille tbody tr.commande-soldee td { color: #6b7385; }
+
+.code-commande { font-weight: 600; font-variant-numeric: tabular-nums; }
+.type-commande { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: #f1f4f9; }
+.type-commande.type-4 { background: #f3e8ff; color: #6b21a8; }
+.grille td.col-norme { color: #166534; font-weight: 600; }
+
+/* Dépliage des lignes d'une commande */
+.grille .col-chevron { text-align: center; padding: 0; }
+.chevron {
+    width: 24px; min-height: 24px; padding: 0; border: none; background: transparent; color: var(--texte-3, #8a94a6);
+    transition: transform .15s ease;
+}
+.chevron:hover { color: var(--accent); background: var(--accent-clair); }
+.chevron.ouvert { transform: rotate(90deg); color: var(--accent); }
+.grille tbody tr.sous-ligne { background: #f8fafd; }
+.grille tbody tr.sous-ligne td { border-top-color: transparent; font-size: 12.5px; }
+.grille tbody tr.sous-ligne.ligne-soldee td, .grille tbody tr.ligne-soldee td { color: #8a94a6; }
+.resume-ligne { display: flex; align-items: center; gap: 12px; white-space: nowrap; overflow: hidden; padding-left: 4px; border-left: 2px solid var(--accent-clair); }
+.resume-ligne .num-ligne { color: var(--texte-3, #8a94a6); font-variant-numeric: tabular-nums; }
+.resume-ligne .article-ligne { font-weight: 600; min-width: 120px; }
+.resume-ligne .designation-ligne { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.resume-ligne .quantites, .resume-ligne .prix-ligne, .resume-ligne .valeur-ligne, .resume-ligne .date-ligne { font-variant-numeric: tabular-nums; }
+.resume-ligne .quantites { min-width: 150px; text-align: right; }
+.resume-ligne .quantites .livre { color: var(--vert); }
+.resume-ligne .prix-ligne { min-width: 90px; text-align: right; color: var(--texte-2, #5b6475); }
+.resume-ligne .valeur-ligne { min-width: 90px; text-align: right; font-weight: 600; }
+.resume-ligne .date-ligne { min-width: 80px; }
+.badge-demande { background: #fef9c3; color: #854d0e; }
+.badge-appel { background: #e0f2fe; color: #075985; }
+
+/* Avancement des livraisons */
+.avancement { display: inline-block; width: 60px; height: 6px; margin-right: 6px; border-radius: 3px; background: #e6eaf0; vertical-align: middle; overflow: hidden; }
+.avancement .barre { display: block; height: 100%; background: var(--vert); border-radius: 3px; }
+.taux { font-size: 12px; color: var(--texte-2, #5b6475); font-variant-numeric: tabular-nums; }

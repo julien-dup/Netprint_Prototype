@@ -1,0 +1,705 @@
+@page "/ventes/commandes"
+@* =====================================================================
+   Commandes clients (négoce et produit fini) — reprise de DOS500S (5250) et de l'onglet « Cdes PFS »
+   de HistoriqueDossiers (WinDev), en lecture seule.
+   Deux vues : une ligne par commande (lignes dépliables, avancement des livraisons) ou une ligne par ligne de commande.
+   Pastilles d'état (en cours, partiellement livrée, livrée, soldée) : filtre rapide sur la liste chargée.
+   Prochaines étapes : fiche de la commande, création (DOS505), lignes (NEG520).
+   ===================================================================== *@
+@inject IConsultationCommandes Consultation
+@inject EtatListeCommandes Etat
+@inject NetPrint.Socle.Session.IUtilisateurCourant UtilisateurCourant
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+@inject IPreferencesGrilles PreferencesGrilles
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Commandes clients · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button class="bouton-principal" disabled title="Prochaine étape (en-tête de commande, DOS505)">＋ Nouvelle commande</button>
+    <span class="separateur-vertical"></span>
+    <div class="bascule" title="Présentation de la liste">
+        <button class="@(Etat.Vue == "C" ? "actif" : "")" @onclick='() => ChangerVueAsync("C")'>Par commande</button>
+        <button class="@(Etat.Vue == "L" ? "actif" : "")" @onclick='() => ChangerVueAsync("L")'>Par ligne</button>
+    </div>
+    @if (Etat.Vue == "C" && Etat.Resultat is { Commandes.Count: > 0 })
+    {
+        <button title="Déplier toutes les commandes affichées" @onclick="ToutDeplier">⊞ Tout déplier</button>
+        <button title="Replier toutes les commandes" @onclick="() => Etat.Depliees.Clear()">⊟ Tout replier</button>
+    }
+    <span class="espace"></span>
+    <button disabled="@(Selection is null)" title="Prochaine étape (fiche de la commande)">🔎 Ouvrir la commande</button>
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="RechercherAsync">
+    <div class="champ">
+        <span>N° commande</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" @bind="C.Numero" />
+            <input class="code-cle" maxlength="1" title="Lettre-clé (facultative)" @bind="C.Cle" />
+        </div>
+    </div>
+    <div class="champ">
+        <span>Client</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
+            <input type="number" class="num7" title="Compte client (auxiliaire)" @bind="C.CompteClient" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+        </div>
+    </div>
+    <label class="champ">
+        <span>Réf. cde client</span>
+        <input class="court" placeholder="Commence par" @bind="C.ReferenceCommandeClient" />
+    </label>
+    <div class="champ">
+        <span>Article</span>
+        <div class="ligne-champs">
+            <input class="court" placeholder="* pour compléter" title="ABC* commence par, *ABC finit par, *ABC* contient" @bind="C.Article" />
+            <input class="code" maxlength="2" title="Indice" @bind="C.Indice" />
+        </div>
+    </div>
+    <label class="champ">
+        <span>Ouverte du</span>
+        <input type="date" @bind="C.DateDu" @bind:format="yyyy-MM-dd" />
+    </label>
+    <label class="champ">
+        <span>au</span>
+        <input type="date" @bind="C.DateAu" @bind:format="yyyy-MM-dd" />
+    </label>
+    <div class="champ">
+        <span>Représentant</span>
+        <div class="ligne-champs">
+            <input type="number" class="num3" @bind="C.Representant" disabled="@(contexte?.RepresentantImpose is not null)"
+                   title="@(contexte?.RepresentantImpose is not null ? "Vous ne voyez que vos commandes" : null)" />
+            <BoutonRecherche Liste="ListeChoix.Representant" Disabled="@(contexte?.RepresentantImpose is not null)" OnChoix='l => C.Representant = Entier(l.Code)' />
+        </div>
+    </div>
+    <label class="champ">
+        <span>Type</span>
+        <select @bind="C.TypeCommande">
+            <option value="">Négoce et produit fini</option>
+            <option value="3">Négoce</option>
+            <option value="4">Produit fini</option>
+        </select>
+    </label>
+    <label class="champ champ-case">
+        <input type="checkbox" @bind="C.AvecSoldees" />
+        <span>Avec les soldées</span>
+    </label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@chargement">🔍 Rechercher</button>
+        <button type="button" class="bouton-gomme" title="Réinitialiser tous les critères" @onclick="Effacer">
+            <img src="gomme.png" alt="" /> Effacer
+        </button>
+        <button type="button" class="bouton-lien" @onclick="() => Etat.PlusDeCriteres = !Etat.PlusDeCriteres">
+            @(Etat.PlusDeCriteres ? "▴ Moins de critères" : "▾ Plus de critères")
+        </button>
+    </div>
+
+    @if (Etat.PlusDeCriteres)
+    {
+        <div class="groupe-criteres">
+            <span class="titre-groupe">Commande</span>
+            <label class="champ"><span>Désignation</span><input class="recherche" placeholder="Un ou plusieurs mots" @bind="C.Designation" /></label>
+            <label class="champ"><span>N° appel</span><input class="court" @bind="C.NumeroAppel" /></label>
+            <label class="champ"><span>N° devis</span><input type="number" class="num6" @bind="C.Devis" /></label>
+            <div class="champ"><span>Fabricant</span><div class="ligne-champs"><input class="code" maxlength="3" @bind="C.Fabricant" /><BoutonRecherche Liste="ListeChoix.Fabricant" OnChoix='l => C.Fabricant = l.Code' /></div></div>
+            <label class="champ"><span>Enseigne</span><input class="code" maxlength="1" @bind="C.Enseigne" /></label>
+            <label class="champ"><span>Livraison du</span><input type="date" @bind="C.LivraisonDu" @bind:format="yyyy-MM-dd" /></label>
+            <label class="champ"><span>au</span><input type="date" @bind="C.LivraisonAu" @bind:format="yyyy-MM-dd" /></label>
+            <label class="champ"><span>N° BL</span><input type="number" class="num6" @bind="C.BonLivraison" /></label>
+            <label class="champ"><span>N° facture</span><input type="number" class="num6" @bind="C.Facture" /></label>
+        </div>
+        <div class="groupe-criteres">
+            <span class="titre-groupe">Article</span>
+            <label class="champ"><span>N° produit</span><input type="number" class="num6" title="Le client doit être renseigné" @bind="C.Produit" /></label>
+            <label class="champ"><span>Réf. imprimé</span><input class="court" placeholder="Commence par" @bind="C.ReferenceImprime" /></label>
+            <div class="champ"><span>Catégorie</span><div class="ligne-champs"><input class="code" maxlength="2" @bind="C.Categorie" /><BoutonRecherche Liste="ListeChoix.Categorie" OnChoix='l => C.Categorie = l.Code' /></div></div>
+            <div class="champ"><span>Sous-catégorie</span><div class="ligne-champs"><input class="code" maxlength="2" @bind="C.SousCategorie" /><BoutonRecherche Liste="ListeChoix.SousCategorie" Parent="@C.Categorie" OnChoix='l => C.SousCategorie = l.Code' /></div></div>
+            <div class="champ">
+                <span>Format fini</span>
+                <div class="ligne-champs">
+                    <input type="number" step="0.01" class="num6" @bind="C.FiniLargeur" /> x
+                    <input type="number" step="0.01" class="num6" @bind="C.FiniHauteur" /> x
+                    <input type="number" step="0.01" class="num6" @bind="C.FiniTroisiemeCote" />
+                </div>
+            </div>
+        </div>
+    }
+</form>
+
+<div class="contenu">
+    <section class="zone-liste">
+        <div class="ligne-infos">
+            <p class="compteur">
+                @if (Etat.Resultat is not { } r)
+                {
+                    <span>Saisissez au moins un critère puis cliquez sur Rechercher.</span>
+                }
+                else
+                {
+                    <strong>@commandesFiltrees.Count.ToString("N0")</strong>
+                    <span> commande@(commandesFiltrees.Count > 1 ? "s" : "")</span>
+                    <span class="separateur-compteur">·</span>
+                    <strong>@commandesFiltrees.Sum(c => c.NbLignes).ToString("N0")</strong>
+                    <span> ligne@(commandesFiltrees.Sum(c => c.NbLignes) > 1 ? "s" : "")</span>
+                    <span class="separateur-compteur">·</span>
+                    <span>valeur </span><strong>@commandesFiltrees.Sum(c => c.Valeur).ToString("N2")</strong>
+                    @if (r.Tronque)
+                    {
+                        <span class="avertissement"> (seules les @LimitesRecherche.Maximum.ToString("N0") premières lignes sont chargées : affinez la recherche)</span>
+                    }
+                }
+                @if (chargement)
+                {
+                    <span class="chargement"> Chargement…</span>
+                }
+            </p>
+            <div class="menu">
+                <button type="button" class="@(menuColonnes ? "ouvert" : "")" title="Choisir les colonnes affichées"
+                        @onclick="() => menuColonnes = !menuColonnes">▦ Colonnes</button>
+                @if (menuColonnes)
+                {
+                    <div class="fond-menu" @onclick="() => menuColonnes = false"></div>
+                    <ul class="menu-contextuel menu-deroulant a-droite menu-colonnes">
+                        @foreach (var (cle, libelle, obligatoire) in ColonnesCourantes())
+                        {
+                            <li class="@(obligatoire ? "inactif" : "")">
+                                <label>
+                                    <input type="checkbox" disabled="@obligatoire" checked="@(!G.Preferences.Masquees.Contains(cle))"
+                                           @onchange="() => BasculerColonneAsync(cle, obligatoire)" />
+                                    @libelle
+                                </label>
+                            </li>
+                        }
+                        <li class="separateur"></li>
+                        <li @onclick="RetablirAffichageAsync">↺ Rétablir l'affichage d'origine</li>
+                    </ul>
+                }
+            </div>
+        </div>
+
+        @if (Etat.Resultat is { Commandes.Count: > 0 })
+        {
+            <div class="pastilles-etat" role="group" aria-label="Filtrer par état">
+                <button type="button" class="pastille-etat @(Etat.FiltreEtat is null ? "active" : "")" @onclick="() => FiltrerEtat(null)">
+                    Toutes <span class="nombre-etat">@Etat.Resultat.Commandes.Count</span>
+                </button>
+                @foreach (var e in Etats)
+                {
+                    var n = Etat.Resultat.Commandes.Count(c => c.Etat == e);
+                    if (n == 0 && Etat.FiltreEtat != e) continue;
+                    <button type="button" class="pastille-etat etat-@Classe(e) @(Etat.FiltreEtat == e ? "active" : "")" @onclick="() => FiltrerEtat(e)">
+                        @Libelle(e) <span class="nombre-etat">@n</span>
+                    </button>
+                }
+            </div>
+        }
+
+        @if (G.Filtres.Count > 0)
+        {
+            <div class="filtres-actifs ligne-filtres">
+                <span class="titre-filtres">Filtres :</span>
+                @foreach (var f in G.Filtres)
+                {
+                    <span class="pastille-filtre">
+                        @DecrireFiltre(f)
+                        <button type="button" title="Retirer ce filtre" @onclick="() => Filtrer(new ChangementFiltre(f.Colonne, null))">✕</button>
+                    </span>
+                }
+                <button type="button" class="bouton-lien" @onclick="EffacerFiltres">Effacer les filtres de colonnes</button>
+            </div>
+        }
+
+        <div class="zone-grille">
+            @if (Etat.Vue == "C")
+            {
+                <table @ref="tableCommandes" class="grille grille-principale grille-commandes" style="width:@(LargeurTable(colonnesCommandes) + LargeurChevron)px">
+                    <colgroup>
+                        <col style="width:@(LargeurChevron)px" />
+                        @foreach (var c in colonnesCommandes)
+                        {
+                            <col data-cle="@c.Cle" style="width:@(G.Largeur(c))px" />
+                        }
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th class="col-chevron"></th>
+                            @foreach (var c in colonnesCommandes)
+                            {
+                                <EnteteColonne @key="c.Cle" Cle="@c.Cle" Libelle="@c.Libelle" Classe="@c.Classe" Type="c.Type"
+                                               TriCle="@G.TriCle" Descendant="@G.TriDescendant" OnTri="TrierAsync"
+                                               Filtre="@(G.Filtres.FirstOrDefault(f => f.Colonne == c.Cle))" OnFiltre="Filtrer"
+                                               Redimensionnable="true" />
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <Virtualize Items="rangees" Context="rg" ItemSize="36" OverscanCount="20" SpacerElement="tr">
+                            @if (rg.Ligne is null)
+                            {
+                                var cde = rg.Commande;
+                                var depliee = Etat.Depliees.Contains(cde.Cle);
+                                <tr class="@(Etat.Selection == cde.Cle ? "selection" : "") commande-@Classe(cde.Etat)"
+                                    @onclick="() => Etat.Selection = cde.Cle" @ondblclick="() => Basculer(cde)">
+                                    <td class="col-chevron" @onclick="() => Basculer(cde)" @onclick:stopPropagation="true">
+                                        @if (cde.NbLignes > 0)
+                                        {
+                                            <button type="button" class="chevron @(depliee ? "ouvert" : "")" title="@(depliee ? "Replier" : "Voir les lignes")">▸</button>
+                                        }
+                                    </td>
+                                    @foreach (var c in colonnesCommandes)
+                                    {
+                                        @CelluleCommande(c, cde)
+                                    }
+                                </tr>
+                            }
+                            else
+                            {
+                                var l = rg.Ligne;
+                                <tr class="sous-ligne @(l.Soldee ? "ligne-soldee" : "")" @onclick="() => Etat.Selection = rg.Commande.Cle">
+                                    <td></td>
+                                    <td colspan="@colonnesCommandes.Length">@ResumeLigne(l)</td>
+                                </tr>
+                            }
+                        </Virtualize>
+                        @LignesVides(colonnesCommandes.Length + 1, rangees.Count)
+                    </tbody>
+                </table>
+            }
+            else
+            {
+                <table @ref="tableLignes" class="grille grille-principale grille-commandes" style="width:@(LargeurTable(colonnesLignes))px">
+                    <colgroup>
+                        @foreach (var c in colonnesLignes)
+                        {
+                            <col data-cle="@c.Cle" style="width:@(G.Largeur(c))px" />
+                        }
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            @foreach (var c in colonnesLignes)
+                            {
+                                <EnteteColonne @key="c.Cle" Cle="@c.Cle" Libelle="@c.Libelle" Classe="@c.Classe" Type="c.Type"
+                                               TriCle="@G.TriCle" Descendant="@G.TriDescendant" OnTri="TrierAsync"
+                                               Filtre="@(G.Filtres.FirstOrDefault(f => f.Colonne == c.Cle))" OnFiltre="Filtrer"
+                                               Redimensionnable="true" />
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <Virtualize Items="lignesAffichees" Context="la" ItemSize="36" OverscanCount="20" SpacerElement="tr">
+                            <tr class="@(Etat.Selection == la.Commande.Cle ? "selection" : "") @(la.Ligne.Soldee ? "ligne-soldee" : "") commande-@Classe(la.Commande.Etat)"
+                                @onclick="() => Etat.Selection = la.Commande.Cle">
+                                @foreach (var c in colonnesLignes)
+                                {
+                                    <td class="@c.Classe" title="@(c.Bulle?.Invoke(la))">@c.Texte(la)</td>
+                                }
+                            </tr>
+                        </Virtualize>
+                        @LignesVides(colonnesLignes.Length, lignesAffichees.Count)
+                    </tbody>
+                </table>
+            }
+            @if (Etat.Resultat is null)
+            {
+                <div class="grille-attente">
+                    <div class="icone-attente">🧾</div>
+                    <p>Critères : n° de commande, client, référence de commande client, article, dates, représentant…</p>
+                    <p>Le compte général, le type, l'enseigne et le format fini affinent la recherche mais ne suffisent pas seuls.</p>
+                </div>
+            }
+        </div>
+    </section>
+</div>
+
+@code {
+    // ---------- Rangées affichées ----------
+    // Vue par commande : la commande, puis ses lignes si elle est dépliée (même hauteur : la liste reste virtualisée)
+    private sealed record Rangee(CommandeListe Commande, LigneCommandeListe? Ligne);
+    // Vue par ligne : la ligne et sa commande
+    internal sealed record LigneAffichee(CommandeListe Commande, LigneCommandeListe Ligne);
+
+    private const int LargeurChevron = 32;
+    private const TypeColonne T = TypeColonne.Texte, N = TypeColonne.Nombre, D = TypeColonne.Date, ON = TypeColonne.OuiNon;
+    private static readonly EtatCommande[] Etats = [EtatCommande.EnCours, EtatCommande.PartiellementLivree, EtatCommande.Livree, EtatCommande.Soldee];
+
+    private static readonly ColonneListe<CommandeListe>[] ColonnesCommandes =
+    [
+        new("commande", "Commande", 120, "col-code", T, c => (c.Cle.Numero, c.Cle.Cle), c => c.Numero, Obligatoire: true),
+        new("etat", "État", 150, "", T, c => c.Etat, c => Libelle(c.Etat)),
+        new("type", "Type", 105, "", T, c => c.TypeCommande, c => TypesCommande.Libelle(c.TypeCommande)),
+        new("client", "Client", 110, "", T, c => c.Client, c => c.Client),
+        new("nom", "Nom", 200, "", T, c => c.NomClient, c => c.NomClient, c => c.ClientFacture != "" ? $"{c.NomClient}\nFacturé à : {c.ClientFacture}" : c.NomClient),
+        new("refcde", "Réf. cde client", 135, "", T, c => c.ReferenceCommandeClient, c => c.ReferenceCommandeClient),
+        new("designation", "Désignation", 240, "", T, c => c.Designation, c => c.Designation, c => c.Designation),
+        new("ouverture", "Ouverte le", 95, "", D, c => c.DateOuverture, c => Date(c.DateOuverture)),
+        new("datecdeclient", "Cde client du", 105, "", D, c => c.DateCommandeClient, c => Date(c.DateCommandeClient)),
+        new("livraison", "Livraison", 95, "", D, c => c.DateLivraison, c => Date(c.DateLivraison)),
+        new("lignes", "Lignes", 70, "nombre", N, c => c.NbLignes, c => c.NbLignes == 0 ? "" : c.NbLignes.ToString()),
+        new("livre", "Livré", 120, "", N, c => c.TauxLivraison, c => c.TauxLivraison is { } t ? t.ToString("P0") : ""),
+        new("valeur", "Valeur", 110, "nombre", N, c => c.Valeur, c => Montant(c.Valeur)),
+        new("representant", "Représentant", 160, "", T, c => c.Representant, c => c.Representant, c => c.Representant),
+        new("fabricant", "Fab.", 60, "", T, c => c.Fabricant, c => c.Fabricant),
+        new("facture", "Client facturé", 170, "", T, c => c.ClientFacture, c => c.ClientFacture),
+        new("solde", "Soldée le", 95, "", D, c => c.DateSolde, c => Date(c.DateSolde)),
+        new("enseigne", "Ens.", 55, "centre", T, c => c.Enseigne, c => c.Enseigne),
+        new("docs", "Docs", 65, "centre", ON, c => c.NbDocuments, c => c.NbDocuments > 0 ? $"📎 {c.NbDocuments}" : ""),
+    ];
+
+    private static readonly ColonneListe<LigneAffichee>[] ColonnesLignes =
+    [
+        new("commande", "Commande", 110, "col-code", T, x => (x.Commande.Cle.Numero, x.Commande.Cle.Cle, x.Ligne.NumeroLigne), x => x.Commande.Numero, Obligatoire: true),
+        new("ligne", "Ligne", 60, "nombre", N, x => x.Ligne.NumeroLigne, x => x.Ligne.NumeroLigne.ToString()),
+        new("nom", "Client", 190, "", T, x => x.Commande.NomClient, x => x.Commande.NomClient, x => $"{x.Commande.Client} {x.Commande.NomClient}"),
+        new("refcde", "Réf. cde client", 130, "", T, x => x.Commande.ReferenceCommandeClient, x => x.Commande.ReferenceCommandeClient),
+        new("article", "Article", 150, "", T, x => (x.Ligne.Article, x.Ligne.Indice), x => ArticleIndice(x.Ligne)),
+        new("refimp", "Réf. imprimé", 130, "", T, x => x.Ligne.ReferenceImprime, x => x.Ligne.ReferenceImprime),
+        new("designation", "Désignation", 240, "", T, x => x.Ligne.Designation, x => x.Ligne.Designation, x => BulleLigne(x.Ligne)),
+        new("appel", "N° appel", 110, "", T, x => x.Ligne.NumeroAppel, x => x.Ligne.NumeroAppel),
+        new("livraison", "Livraison", 105, "", D, x => x.Ligne.DateLivraison, x => x.Ligne.ALaDemande ? "À la demande" : Date(x.Ligne.DateLivraison)),
+        new("qte", "Quantité", 95, "nombre", N, x => x.Ligne.Quantite, x => Entier(x.Ligne.Quantite)),
+        new("livree", "Livrée", 90, "nombre", N, x => x.Ligne.QuantiteLivree, x => Entier(x.Ligne.QuantiteLivree)),
+        new("facturee", "Facturée", 90, "nombre", N, x => x.Ligne.QuantiteFacturee, x => Entier(x.Ligne.QuantiteFacturee)),
+        new("reste", "Reste", 90, "nombre", N, x => x.Ligne.ResteALivrer, x => Entier(x.Ligne.ResteALivrer)),
+        new("prix", "Prix", 105, "nombre", N, x => x.Ligne.PrixUnitaire, x => x.Ligne.Prix),
+        new("unite", "UV", 50, "centre", T, x => x.Ligne.Unite, x => x.Ligne.Unite),
+        new("valeur", "Valeur", 105, "nombre", N, x => x.Ligne.Valeur, x => Montant(x.Ligne.Valeur)),
+        new("norme", "Norme", 70, "col-norme", T, x => x.Ligne.Norme, x => x.Ligne.Norme),
+        new("produit", "N° produit", 90, "nombre", N, x => x.Ligne.Produit, x => x.Ligne.Produit == 0 ? "" : x.Ligne.Produit.ToString()),
+        new("categorie", "Cat.", 55, "centre", T, x => x.Ligne.Categorie, x => x.Ligne.Categorie),
+        new("souscategorie", "S-cat.", 60, "centre", T, x => x.Ligne.SousCategorie, x => x.Ligne.SousCategorie),
+        new("soldee", "Soldée", 70, "centre", ON, x => x.Ligne.Soldee ? 1 : 0, x => x.Ligne.Soldee ? "✓" : ""),
+        new("commentaires", "Comm.", 65, "centre", ON, x => x.Ligne.NbCommentaires, x => x.Ligne.NbCommentaires > 0 ? $"💬 {x.Ligne.NbCommentaires}" : ""),
+    ];
+
+    private CriteresCommandes C => Etat.Criteres;
+    private EtatGrille G => Etat.GrilleCourante;
+    private CleCommande? Selection => Etat.Selection;
+
+    private ContexteCommandes? contexte;
+    private bool chargement;
+    private bool menuColonnes;
+
+    private List<CommandeListe> commandesFiltrees = [];
+    private List<Rangee> rangees = [];
+    private List<LigneAffichee> lignesAffichees = [];
+    private ColonneListe<CommandeListe>[] colonnesCommandes = ColonnesCommandes;
+    private ColonneListe<LigneAffichee>[] colonnesLignes = ColonnesLignes;
+
+    private ElementReference tableCommandes, tableLignes;
+    private GrilleJs? grille;
+    private string? vueActivee;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Etat.GrilleCommandes.PreferencesLues)
+        {
+            Etat.GrilleCommandes.AppliquerPreferences(await PreferencesGrilles.LireAsync(Etat.GrilleCommandes.Nom), ColonnesCommandes);
+            Etat.GrilleLignes.AppliquerPreferences(await PreferencesGrilles.LireAsync(Etat.GrilleLignes.Nom), ColonnesLignes);
+        }
+        if (!Etat.ValeursDefautLues)
+        {
+            Etat.ValeursDefautLues = true;
+            var v = Etat.GrilleCommandes.Preferences.Valeurs;
+            if (v.TryGetValue(EtatListeCommandes.DefautVue, out var vue) && vue is "C" or "L") Etat.Vue = vue;
+            C.AvecSoldees = v.TryGetValue(EtatListeCommandes.DefautAvecSoldees, out var s) && s == "O";
+        }
+
+        try
+        {
+            contexte = await Consultation.LireContexteAsync();
+            if (contexte.RepresentantImpose is { } rep) C.Representant = rep;
+            if (C.CompteGeneral is null)
+            {
+                var u = await UtilisateurCourant.LireAsync();
+                C.CompteGeneral = u.CompteGeneral;
+                if (u.CompteClient > 0) C.CompteClient = u.CompteClient;
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture des paramètres impossible : {ex.Message}");
+        }
+        Actualiser();
+    }
+
+    // La largeur des colonnes se règle à la souris (grille.js) : à réactiver quand la vue change de tableau
+    protected override async Task OnAfterRenderAsync(bool premierAffichage)
+    {
+        if (vueActivee == Etat.Vue) return;
+        vueActivee = Etat.Vue;
+        if (grille is not null) await grille.DisposeAsync();
+        grille = new GrilleJs(JS) { LargeurChangee = ChangerLargeurAsync };
+        try
+        {
+            await grille.ActiverAsync(Etat.Vue == "L" ? tableLignes : tableCommandes);
+        }
+        catch (JSException ex)
+        {
+            Notifications.Erreur($"Réglage de la largeur des colonnes indisponible : {ex.Message}");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (grille is not null) await grille.DisposeAsync();
+    }
+
+    private async Task RechercherAsync()
+    {
+        chargement = true;
+        try
+        {
+            Etat.Resultat = await Consultation.RechercherAsync(C);
+            Etat.Selection = null;
+            Etat.Depliees.Clear();
+            Etat.FiltreEtat = null;
+            // Une seule commande trouvée : ses lignes sont visibles tout de suite
+            if (Etat.Resultat.Commandes is [var seule]) Etat.Depliees.Add(seule.Cle);
+            Actualiser();
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Recherche impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    // Gomme : critères à blanc ; compte général, représentant imposé et « avec les soldées » par défaut conservés
+    private void Effacer()
+    {
+        var v = Etat.GrilleCommandes.Preferences.Valeurs;
+        Etat.Criteres = new CriteresCommandes
+        {
+            CompteGeneral = C.CompteGeneral,
+            Representant = contexte?.RepresentantImpose,
+            AvecSoldees = v.TryGetValue(EtatListeCommandes.DefautAvecSoldees, out var s) && s == "O",
+        };
+        Etat.Resultat = null;
+        Etat.Selection = null;
+        Etat.Depliees.Clear();
+        Etat.FiltreEtat = null;
+        Actualiser();
+    }
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        C.CompteGeneral = Entier(l.Codes[0]);
+        C.CompteClient = l.Codes.Count > 1 ? Entier(l.Codes[1]) : null;
+    }
+
+    private static int? Entier(string code) => int.TryParse(code, out var n) ? n : null;
+
+    // ---------- Vue, dépliage, état ----------
+    private async Task ChangerVueAsync(string vue)
+    {
+        if (Etat.Vue == vue) return;
+        Etat.Vue = vue;
+        menuColonnes = false;
+        Actualiser();
+        Etat.GrilleCommandes.Preferences.Valeurs[EtatListeCommandes.DefautVue] = vue;
+        await PreferencesGrilles.EcrireAsync(Etat.GrilleCommandes.Nom, Etat.GrilleCommandes.Preferences);
+    }
+
+    private void Basculer(CommandeListe c)
+    {
+        Etat.Selection = c.Cle;
+        if (c.NbLignes == 0) return;
+        if (!Etat.Depliees.Remove(c.Cle)) Etat.Depliees.Add(c.Cle);
+        Actualiser();
+    }
+
+    private void ToutDeplier()
+    {
+        foreach (var c in commandesFiltrees.Where(c => c.NbLignes > 0)) Etat.Depliees.Add(c.Cle);
+        Actualiser();
+    }
+
+    private void FiltrerEtat(EtatCommande? e)
+    {
+        Etat.FiltreEtat = e;
+        Actualiser();
+    }
+
+    // ---------- Tri, filtres, colonnes (mémorisés par utilisateur) ----------
+    private async Task TrierAsync(ChangementTri tri)
+    {
+        G.Trier(tri);
+        Actualiser();
+        await PreferencesGrilles.EcrireAsync(G.Nom, G.Preferences);
+    }
+
+    private void Filtrer(ChangementFiltre changement)
+    {
+        G.Filtrer(changement);
+        Actualiser();
+    }
+
+    private void EffacerFiltres()
+    {
+        G.Filtres.Clear();
+        Actualiser();
+    }
+
+    private IEnumerable<(string Cle, string Libelle, bool Obligatoire)> ColonnesCourantes() =>
+        Etat.Vue == "L"
+            ? ColonnesLignes.Select(c => (c.Cle, c.Libelle, c.Obligatoire))
+            : ColonnesCommandes.Select(c => (c.Cle, c.Libelle, c.Obligatoire));
+
+    private async Task BasculerColonneAsync(string cle, bool obligatoire)
+    {
+        if (obligatoire) return;
+        if (!G.Preferences.Masquees.Remove(cle)) G.Preferences.Masquees.Add(cle);
+        Actualiser();
+        await PreferencesGrilles.EcrireAsync(G.Nom, G.Preferences);
+    }
+
+    private async Task ChangerLargeurAsync(string cle, int largeur)
+    {
+        if (largeur > 0) G.Preferences.Largeurs[cle] = largeur;
+        else G.Preferences.Largeurs.Remove(cle);
+        await InvokeAsync(StateHasChanged);
+        await PreferencesGrilles.EcrireAsync(G.Nom, G.Preferences);
+    }
+
+    private async Task RetablirAffichageAsync()
+    {
+        menuColonnes = false;
+        G.Preferences.Masquees.Clear();
+        G.Preferences.Largeurs.Clear();
+        Actualiser();
+        await PreferencesGrilles.EcrireAsync(G.Nom, G.Preferences);
+    }
+
+    private string DecrireFiltre(FiltreColonne f)
+    {
+        var (libelle, type) = Etat.Vue == "L"
+            ? ColonnesLignes.Where(c => c.Cle == f.Colonne).Select(c => (c.Libelle, c.Type)).FirstOrDefault()
+            : ColonnesCommandes.Where(c => c.Cle == f.Colonne).Select(c => (c.Libelle, c.Type)).FirstOrDefault();
+        return FiltresColonnes.Decrire(f, libelle ?? f.Colonne, type);
+    }
+
+    private int LargeurTable<TL>(ColonneListe<TL>[] colonnes) => colonnes.Sum(c => G.Largeur(c));
+
+    // Liste affichée : filtre d'état, puis filtres et tri de colonnes de la vue courante
+    private void Actualiser()
+    {
+        colonnesCommandes = Etat.GrilleCommandes.Visibles(ColonnesCommandes);
+        colonnesLignes = Etat.GrilleLignes.Visibles(ColonnesLignes);
+        IEnumerable<CommandeListe> commandes = Etat.Resultat?.Commandes ?? [];
+        if (Etat.FiltreEtat is { } e) commandes = commandes.Where(c => c.Etat == e);
+
+        if (Etat.Vue == "L")
+        {
+            var lignes = commandes.SelectMany(c => c.Lignes.Select(l => new LigneAffichee(c, l)));
+            lignesAffichees = Etat.GrilleLignes.Appliquer(lignes, ColonnesLignes);
+            commandesFiltrees = lignesAffichees.Select(x => x.Commande).Distinct().ToList();
+            rangees = [];
+        }
+        else
+        {
+            commandesFiltrees = Etat.GrilleCommandes.Appliquer(commandes, ColonnesCommandes);
+            rangees = [];
+            foreach (var c in commandesFiltrees)
+            {
+                rangees.Add(new Rangee(c, null));
+                if (Etat.Depliees.Contains(c.Cle)) rangees.AddRange(c.Lignes.Select(l => new Rangee(c, l)));
+            }
+            lignesAffichees = [];
+        }
+    }
+
+    // ---------- Rendu ----------
+    private RenderFragment CelluleCommande(ColonneListe<CommandeListe> c, CommandeListe cde) => c.Cle switch
+    {
+        "commande" => @<td class="col-code"><span class="code-commande">@cde.Numero</span></td>,
+        "etat" => @<td><span class="badge badge-etat etat-@Classe(cde.Etat)">@Libelle(cde.Etat)</span></td>,
+        "type" => @<td><span class="type-commande type-@cde.TypeCommande">@TypesCommande.Libelle(cde.TypeCommande)</span></td>,
+        "livre" => @<td title="@(cde.TauxLivraison is { } t ? $"{t:P0} des quantités fermes livrées" : "Aucune quantité ferme")">
+                       @if (cde.TauxLivraison is { } taux)
+                       {
+                           <span class="avancement"><span class="barre" style="width:@((int)(taux * 100))%"></span></span>
+                           <span class="taux">@taux.ToString("P0")</span>
+                       }
+                   </td>,
+        _ => @<td class="@c.Classe" title="@(c.Bulle?.Invoke(cde))">@c.Texte(cde)</td>,
+    };
+
+    // Ligne d'une commande dépliée : l'essentiel sur une ligne
+    private static RenderFragment ResumeLigne(LigneCommandeListe l) =>
+        @<div class="resume-ligne" title="@BulleLigne(l)">
+            <span class="num-ligne">L@(l.NumeroLigne.ToString("00"))</span>
+            <span class="article-ligne">@ArticleIndice(l)</span>
+            <span class="designation-ligne">@l.Designation</span>
+            @if (l.ALaDemande)
+            {
+                <span class="badge badge-demande">À la demande</span>
+            }
+            else if (l.EstAppel)
+            {
+                <span class="badge badge-appel" title="Appel de livraison">Appel @l.NumeroAppel</span>
+            }
+            @if (l.Soldee)
+            {
+                <span class="badge badge-etat etat-soldee">Soldée</span>
+            }
+            <span class="quantites">
+                @Entier(l.Quantite) @l.Unite
+                @if (l.QuantiteLivree > 0)
+                {
+                    <span class="livre"> · livré @Entier(l.QuantiteLivree)</span>
+                }
+            </span>
+            <span class="prix-ligne">@l.Prix</span>
+            <span class="valeur-ligne">@Montant(l.Valeur)</span>
+            <span class="date-ligne">@(l.ALaDemande ? "" : Date(l.DateLivraison))</span>
+        </div>;
+
+    private RenderFragment LignesVides(int nbColonnes, int nbAffichees) => __builder =>
+    {
+        if (!chargement && Etat.Resultat is { Commandes.Count: 0 })
+        {
+            <tr class="ligne-vide"><td colspan="@nbColonnes">Aucune commande ne correspond à ces critères.</td></tr>
+        }
+        else if (!chargement && Etat.Resultat is { Commandes.Count: > 0 } && nbAffichees == 0)
+        {
+            <tr class="ligne-vide"><td colspan="@nbColonnes">Aucune commande ne correspond aux filtres.</td></tr>
+        }
+    };
+
+    private static string ArticleIndice(LigneCommandeListe l) => l.Indice != "" ? $"{l.Article} {l.Indice}" : l.Article;
+
+    private static string BulleLigne(LigneCommandeListe l) =>
+        string.Join("\n", new[] { l.Designation, l.Texte }.Where(t => t != ""));
+
+    private static string Libelle(EtatCommande e) => e switch
+    {
+        EtatCommande.EnCours => "En cours",
+        EtatCommande.PartiellementLivree => "Partiellement livrée",
+        EtatCommande.Livree => "Livrée",
+        _ => "Soldée",
+    };
+
+    private static string Classe(EtatCommande e) => e switch
+    {
+        EtatCommande.EnCours => "encours",
+        EtatCommande.PartiellementLivree => "partielle",
+        EtatCommande.Livree => "livree",
+        _ => "soldee",
+    };
+
+    private static string Entier(int v) => v == 0 ? "" : v.ToString("N0");
+    private static string Montant(decimal v) => v == 0 ? "" : v.ToString("N2");
+    private static string Date(DateOnly? d) => d?.ToString("dd/MM/yyyy") ?? "";
+}
