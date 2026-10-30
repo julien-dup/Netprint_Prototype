@@ -382,7 +382,11 @@
                                     @Info("Emplacement", lf.Emplacement)
                                     @Info("Commentaires (évts)", l.NbCommentaires == 0 ? "" : l.NbCommentaires.ToString())
                                 </div>
-                                @if (PeutModifier)
+                                @if (PeutModifier && l.EstAppel)
+                                {
+                                    <p class="aide">Appel de livraison de la ligne @lf.LigneOrigine : il se modifie encore dans le 5250, le navigateur ou l'EDI.</p>
+                                }
+                                else if (PeutModifier)
                                 {
                                     <div class="actions-ligne">
                                         @if (!l.Soldee)

@@ -113,6 +113,8 @@ public sealed class LigneSaisie
     public int QuantiteFacturee { get; set; }
     public bool Soldee { get; set; }
     public int LigneOrigine { get; set; }
+    public int QuantiteOrigine { get; set; }           // DNQTEO : quantité initiale d'une ligne « à la demande »
+    public bool EstAppel => Statut == StatutsLigne.Normal && LigneOrigine != 0;
     public string ArticleEnregistre { get; set; } = "";   // pour détecter un changement d'article
     public string IndiceEnregistre { get; set; } = "";
     public string ArticleComplete { get; set; } = "";     // article dont les valeurs ont été reprises (« article|indice »)

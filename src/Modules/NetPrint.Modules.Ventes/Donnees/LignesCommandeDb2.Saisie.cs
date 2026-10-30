@@ -228,7 +228,7 @@ internal sealed partial class LignesCommandeDb2
             SELECT n.DNCLIG, n.DNART, n.DNIND, n.DNDESA, n.DNSTAT, n.DNQTEC, n.DNUV, n.DNQMAX, n.DNPUNR, n.DNTXRE, n.DNPXCE,
                    n.DNOPT2, n.DNOPT5, n.DNTXCO, n.DNPUS, n.DNMTHT, n.DNDATB, n.DNDLIV, n.DNLIGA, n.DNRS, n.DNRUE1, n.DNRUE2,
                    n.DNPOST, n.DNVILL, n.DNPAY, n.DNAPPE, n.DNDTAC, n.DNCOMM, n.DNCOM2, n.DNCOM3, n.DNNORM, n.DEMP, n.DNOPT4,
-                   n.DNOPT3, n.DNGENF, n.DNCLIF, n.DNQTEL, n.DNQTEF, n.DNSOLD, n.DNLORI, {textes}
+                   n.DNOPT3, n.DNGENF, n.DNCLIF, n.DNQTEL, n.DNQTEF, n.DNSOLD, n.DNLORI, {textes}, n.DNQTEO
             FROM {b}.NEG100 n
             LEFT OUTER JOIN {b}.NEG100T t ON t.RSOC = n.RSOC AND t.RDOSS = n.RDOSS AND t.DNDCLE = n.DNDCLE AND t.DNNLIG = n.DNNLIG
             WHERE n.RSOC = ? AND n.RDOSS = ? AND n.DNDCLE = ? AND n.DNNLIG = ?
@@ -255,7 +255,7 @@ internal sealed partial class LignesCommandeDb2
             Commentaire2 = rd.Texte(28), Commentaire3 = rd.Texte(29), Norme = rd.Texte(30), Emplacement = rd.Texte(31),
             RegroupementOf = rd.Texte(32) == "O", NouvelleApplication = rd.Texte(33), CompteGeneralFacture = Pos(rd.Entier(34)),
             CompteClientFacture = Pos(rd.Entier(35)), QuantiteLivree = rd.Entier(36), QuantiteFacturee = rd.Entier(37),
-            Soldee = rd.Texte(38) == "O", LigneOrigine = rd.Entier(39),
+            Soldee = rd.Texte(38) == "O", LigneOrigine = rd.Entier(39), QuantiteOrigine = rd.Entier(59),
             Texte = string.Join("\n", Enumerable.Range(40, 19).Select(rd.Texte)).TrimEnd('\n'),
         };
         l.AdresseSiege = l.NumeroAdresse is null && l.AdresseRaisonSociale == "" && l.AdresseVille == "";
@@ -370,7 +370,7 @@ internal sealed partial class LignesCommandeDb2
             // MAJ520 : DNDATB reçoit la date saisie, DNDLIV la date confirmée ou, à défaut, la date saisie
             ("DNDATB", dateSaisie), ("DNDLIV", dateConfirmee != 0 ? dateConfirmee : dateSaisie),
             ("DNSTAT", l.Statut), ("DNAPPE", l.NumeroAppel), ("DNDTAC", l.DateAppel is { } da ? BaseDb2.AAAAMMJJ(da) : 0),
-            ("DNLORI", origine), ("DNQTEO", aLaDemande ? quantite : 0), ("DNQMAX", l.MaxiLivrable ?? 0),
+            ("DNLORI", origine), ("DNQTEO", !aLaDemande ? 0 : ancienne is { Statut: StatutsLigne.ALaDemande } ? ancienne.QuantiteOrigine - (ancienne.Quantite ?? 0) + quantite : quantite), ("DNQMAX", l.MaxiLivrable ?? 0),
             ("DNOPT2", l.Gratuite ? "O" : "N"), ("DNOPT3", l.NouvelleApplication), ("DNOPT4", l.RegroupementOf ? "O" : "N"),
             ("DNOPT5", l.PrixADefinir ? "O" : "N"), ("DNNORM", l.Norme), ("DEMP", l.Emplacement),
             ("DNGENF", l.CompteClientFacture is > 0 ? l.CompteGeneralFacture ?? 0 : 0), ("DNCLIF", l.CompteClientFacture ?? 0),
@@ -547,7 +547,7 @@ internal sealed partial class LignesCommandeDb2
         CleCommande cle, int ligne, CancellationToken ct)
     {
         await using var rd = await Lire(cnx, tx, $"""
-            SELECT DNART, DNIND, DNQTEC, DNPUS, DNUV, DNPXCE, DNSTAT, DNLORI, DNQTEL, DNQTEF, DNSOLD, DNCLIG, DNDESA, DNPUNR, DNTXRE
+            SELECT DNART, DNIND, DNQTEC, DNPUS, DNUV, DNPXCE, DNSTAT, DNLORI, DNQTEL, DNQTEF, DNSOLD, DNCLIG, DNDESA, DNPUNR, DNTXRE, DNQTEO
             FROM {b}.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNNLIG = ? FETCH FIRST 1 ROW ONLY
             """, ct, societe, cle.Numero, cle.Cle, ligne);
         if (!await rd.ReadAsync(ct)) return null;
@@ -556,7 +556,7 @@ internal sealed partial class LignesCommandeDb2
             NumeroLigne = ligne, Article = rd.Texte(0), Indice = rd.Texte(1), Quantite = rd.Entier(2), PrixNet = rd.Nombre(3),
             Unite = rd.Texte(4), PrixCession = rd.Nombre(5), Statut = rd.Texte(6), LigneOrigine = rd.Entier(7),
             QuantiteLivree = rd.Entier(8), QuantiteFacturee = rd.Entier(9), Soldee = rd.Texte(10) == "O", CodeVente = rd.Texte(11),
-            Designation = rd.Texte(12), PrixBrut = rd.Nombre(13), Remise = rd.Nombre(14),
+            Designation = rd.Texte(12), PrixBrut = rd.Nombre(13), Remise = rd.Nombre(14), QuantiteOrigine = rd.Entier(15),
         };
     }
 

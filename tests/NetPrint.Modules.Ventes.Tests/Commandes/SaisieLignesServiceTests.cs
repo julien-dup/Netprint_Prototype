@@ -254,6 +254,24 @@ public class SaisieLignesServiceTests
         else Assert.Contains(extrait, refus);
     }
 
+    [Fact]
+    public void Quantite_d_origine_d_une_ligne_a_la_demande_ajustee_de_l_ecart()
+    {
+        // Contrat de 10 000, 3 000 déjà appelés (reste 7 000) : la quantité restante passe à 8 000 → origine 11 000 (NEG520 R11)
+        var ancienne = Ligne().Avec(x => { x.NumeroLigne = 4; x.Statut = StatutsLigne.ALaDemande; x.Quantite = 7000; x.QuantiteOrigine = 10000; });
+        var l = ancienne.Avec(x => x.Quantite = 8000);
+        var colonnes = LignesCommandeDb2.ColonnesLigne(Contexte(), l, 1, ancienne).ToDictionary(c => c.Colonne, c => c.Valeur);
+        Assert.Equal(11000, colonnes["DNQTEO"]);
+        Assert.Equal(4, colonnes["DNLORI"]);
+    }
+
+    [Fact]
+    public void Un_appel_de_livraison_est_reconnu()
+    {
+        Assert.True(Ligne().Avec(x => { x.Statut = StatutsLigne.Normal; x.LigneOrigine = 4; }).EstAppel);
+        Assert.False(Ligne().Avec(x => { x.Statut = StatutsLigne.ALaDemande; x.LigneOrigine = 4; }).EstAppel);
+    }
+
     // ---------- Corrections de la revue ----------
     [Fact]
     public void Designation_et_unite_saisies_conservees_au_recalcul()

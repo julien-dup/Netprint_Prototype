@@ -284,6 +284,7 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         var a = l.Article == "" ? null : await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct);
         var ancienne = l.NumeroLigne > 0 ? await donnees.LigneAsync(u.Societe, commande, l.NumeroLigne, ct) : null;
         if (l.NumeroLigne > 0 && ancienne is null) throw new RegleMetierException("Cette ligne n'existe plus.");
+        if (ancienne is { EstAppel: true }) throw new RegleMetierException(MessagesLigne.AppelNonRepris);
         if (ancienne is { Soldee: true }) throw new RegleMetierException("Cette ligne est soldée : réactivez-la avant de la modifier.");
         if (a is not null)
         {
@@ -310,6 +311,7 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     {
         var (u, c) = await ContexteAsync(commande, true, ct);
         var l = await donnees.LigneAsync(u.Societe, commande, numeroLigne, ct) ?? throw new RegleMetierException("Cette ligne n'existe plus.");
+        if (l.EstAppel) throw new RegleMetierException(MessagesLigne.AppelNonRepris);
         var v = await donnees.VerifierAsync(u.Societe, commande, c, l, null, ct);
         if (RefusSuppression(l, v) is { } refus) throw new RegleMetierException(refus);
         await donnees.SupprimerAsync(u.Societe, u.Profil, commande, c, numeroLigne, ct);
@@ -329,6 +331,7 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     {
         var (u, c) = await ContexteAsync(commande, true, ct);
         var l = await donnees.LigneAsync(u.Societe, commande, numeroLigne, ct) ?? throw new RegleMetierException("Cette ligne n'existe plus.");
+        if (l.EstAppel) throw new RegleMetierException(MessagesLigne.AppelNonRepris);
         if (l.Soldee) throw new RegleMetierException("Cette ligne est déjà soldée.");
         await donnees.SolderAsync(u.Societe, u.Profil, commande, c, numeroLigne, true, ct);
         await RecalculerStocksAsync(u, c, await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct), l.Article, l.Indice, null, ct);
@@ -339,6 +342,7 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
     {
         var (u, c) = await ContexteAsync(commande, true, ct, soldeeAdmise: true);
         var l = await donnees.LigneAsync(u.Societe, commande, numeroLigne, ct) ?? throw new RegleMetierException("Cette ligne n'existe plus.");
+        if (l.EstAppel) throw new RegleMetierException(MessagesLigne.AppelNonRepris);
         if (!l.Soldee) throw new RegleMetierException("Cette ligne n'est pas soldée.");
         var a = await donnees.ArticleAsync(u.Societe, l.Article, l.Indice, ct);
         if (a?.Remplacement == "C") throw new RegleMetierException(MessagesLigne.ArticleCloture);
@@ -500,4 +504,6 @@ internal static class MessagesLigne
     public const string MaxiMultiple = "Le maxi livrable doit être un multiple du conditionnement.";                          // NEG0041
     public const string ClientInexistant = "Ce compte client n'existe pas.";                                                  // CPT0001
     public const string EmplacementInexistant = "Cet emplacement de stock n'existe pas.";                                     // STO0076
+    public const string AppelNonRepris = "Les appels de livraison se modifient encore dans le 5250, le navigateur ou l'EDI : " +
+        "le report sur la ligne d'origine n'est pas encore repris ici.";
 }
