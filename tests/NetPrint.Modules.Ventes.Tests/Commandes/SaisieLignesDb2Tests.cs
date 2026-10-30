@@ -88,6 +88,20 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
             await service.SupprimerAsync(cle, 1);
             Assert.Null(await service.LireAsync(cle, 1));
 
+            // Actions sur la commande : nouvelle ligne, solde, réactivation, suppression
+            var l2 = l.Avec(x => { x.NumeroLigne = 0; x.Empreinte = ""; });
+            Assert.Equal(1, await service.EnregistrerAsync(cle, l2));
+            IActionsCommande actions = service;
+            await actions.SolderAsync(cle);
+            Assert.True((await service.LireAsync(cle, 1))!.Soldee);
+            Assert.Equal("D", Convert.ToString((await ValeursAsync(cnx, "SELECT CCTAGS FROM NP11F.AB001 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?",
+                BaseDeTest.Societe, cle.Numero, cle.Cle))[0])!.Trim());
+            await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => actions.SolderAsync(cle));
+            await actions.ReactiverAsync(cle);
+            await actions.SupprimerAsync(cle);
+            Assert.Empty(await ValeursAsync(cnx, "SELECT 1 FROM NP11F.AB001 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", BaseDeTest.Societe, cle.Numero, cle.Cle));
+            Assert.Empty(await ValeursAsync(cnx, "SELECT 1 FROM NP11F.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ?", BaseDeTest.Societe, cle.Numero, cle.Cle));
+
             var journal = await ValeursAsync(cnx, "SELECT LISTAGG(DETYMO, '') WITHIN GROUP (ORDER BY DEDTHE) FROM NP11F.NEG100E WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ?",
                 BaseDeTest.Societe, cle.Numero, cle.Cle);
             sortie.WriteLine($"Journal NEG100E : {journal[0]}");
@@ -96,6 +110,15 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
         {
             if (cle is not null) await NettoyerAsync(cnx, cle, client, article!.Value, adtcde);
         }
+    }
+
+    // Lecture seule : une commande livrée et facturée du client d'essai serait refusée à la suppression
+    [FactDb2]
+    public async Task Commande_livree_non_supprimable()
+    {
+        var pieces = await Lignes.PiecesAsync(BaseDeTest.Societe, new CleCommande(68537, "9"), default);
+        Assert.Equal((true, true), pieces);
+        Assert.NotNull(SaisieLignesService.RefusSuppressionCommande(pieces.Bl, pieces.Facture));
     }
 
     [FactDb2Ecriture]

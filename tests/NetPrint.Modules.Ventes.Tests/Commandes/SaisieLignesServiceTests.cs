@@ -242,6 +242,18 @@ public class SaisieLignesServiceTests
         Assert.Equal(2500, colonnes["DNQTEO"]);
     }
 
+    [Theory]
+    [InlineData(true, false, "bon de livraison")]
+    [InlineData(false, true, "facture")]
+    [InlineData(true, true, "bon de livraison")]
+    [InlineData(false, false, null)]
+    public void Refus_de_suppression_d_une_commande(bool bl, bool facture, string? extrait)
+    {
+        var refus = SaisieLignesService.RefusSuppressionCommande(bl, facture);
+        if (extrait is null) Assert.Null(refus);
+        else Assert.Contains(extrait, refus);
+    }
+
     // ---------- Corrections de la revue ----------
     [Fact]
     public void Designation_et_unite_saisies_conservees_au_recalcul()

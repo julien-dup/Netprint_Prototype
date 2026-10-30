@@ -28,6 +28,19 @@ public interface ISaisieLignesCommande
     Task ReactiverAsync(CleCommande commande, int numeroLigne, CancellationToken ct = default);
 }
 
+// Actions sur la commande entière (options SO, RE et 4 de DOS500S)
+public interface IActionsCommande
+{
+    // Toutes les lignes soldées, commande soldée à la date du jour (droit « Création » comme DOS500S)
+    Task SolderAsync(CleCommande commande, CancellationToken ct = default);
+
+    // Commande remise en cours ; ses lignes soldées le restent
+    Task ReactiverAsync(CleCommande commande, CancellationToken ct = default);
+
+    // Refusée s'il existe un BL ou une facture (droit « Suppression »)
+    Task SupprimerAsync(CleCommande commande, CancellationToken ct = default);
+}
+
 public static class StatutsLigne
 {
     public const string Normal = "1";

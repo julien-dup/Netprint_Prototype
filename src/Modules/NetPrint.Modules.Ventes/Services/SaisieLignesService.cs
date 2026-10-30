@@ -18,7 +18,7 @@ namespace NetPrint.Modules.Ventes.Services;
 //     contrôle de la norme (NOR010), reprise de devis, import Excel.
 // =====================================================================
 internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceCommandes commandes, IUtilisateurCourant utilisateur)
-    : ISaisieLignesCommande
+    : ISaisieLignesCommande, IActionsCommande
 {
     private static DateOnly Aujourdhui => DateOnly.FromDateTime(DateTime.Today);
 
@@ -344,6 +344,59 @@ internal sealed class SaisieLignesService(LignesCommandeDb2 donnees, ISourceComm
         if (a?.Remplacement == "C") throw new RegleMetierException(MessagesLigne.ArticleCloture);
         await donnees.SolderAsync(u.Societe, u.Profil, commande, c, numeroLigne, false, ct);
         await RecalculerStocksAsync(u, c, a, l.Article, l.Indice, null, ct);
+    }
+
+    // ------------------------------------------------------------------
+    // Actions sur la commande (DOS500S)
+    // ------------------------------------------------------------------
+    async Task IActionsCommande.SolderAsync(CleCommande commande, CancellationToken ct)
+    {
+        var (u, c) = await ContexteActionAsync(commande, d => d.Creer, ct);
+        if (c.Soldee) throw new RegleMetierException("Cette commande est déjà soldée.");
+        if (c.NonModifiable) throw new RegleMetierException("Commande sous-traitée. Modification impossible.");
+        await donnees.SolderCommandeAsync(u.Societe, u.Profil, commande, c, ct);
+        await RecalculerStocksCommandeAsync(u, c, commande, ct);
+    }
+
+    async Task IActionsCommande.ReactiverAsync(CleCommande commande, CancellationToken ct)
+    {
+        var (u, c) = await ContexteActionAsync(commande, d => d.Creer, ct);
+        if (!c.Soldee) throw new RegleMetierException("Cette commande n'est pas soldée.");
+        await donnees.ReactiverCommandeAsync(u.Societe, u.Profil, commande, ct);
+    }
+
+    async Task IActionsCommande.SupprimerAsync(CleCommande commande, CancellationToken ct)
+    {
+        var (u, c) = await ContexteActionAsync(commande, d => d.Supprimer, ct);
+        if (c.NonModifiable) throw new RegleMetierException("Commande sous-traitée. Modification impossible.");
+        var (bl, facture) = await donnees.PiecesAsync(u.Societe, commande, ct);
+        if (RefusSuppressionCommande(bl, facture) is { } refus) throw new RegleMetierException(refus);
+        var articles = await donnees.ArticlesAsync(u.Societe, commande, ct);
+        await donnees.SupprimerCommandeAsync(u.Societe, u.Profil, commande, c, ct);
+        foreach (var (article, indice) in articles)
+            await RecalculerStocksAsync(u, c, await donnees.ArticleAsync(u.Societe, article, indice, ct), article, indice, null, ct);
+    }
+
+    // DOS500S R7 : une commande livrée ou facturée ne se supprime pas
+    internal static string? RefusSuppressionCommande(bool bl, bool facture) =>
+        bl ? "Suppression impossible : un bon de livraison existe pour cette commande."
+        : facture ? "Suppression impossible : une facture existe pour cette commande."
+        : null;
+
+    private async Task<(UtilisateurConnecte U, ContexteLigne C)> ContexteActionAsync(CleCommande cle, Func<DroitsCommandes, bool> droit,
+        CancellationToken ct)
+    {
+        var (u, c) = await ContexteAsync(cle, false, ct);
+        var droits = ConsultationCommandesService.Droits(
+            await commandes.OptionsProgrammeAsync(ConsultationCommandesService.ProgrammeDroits, u.Profil, ct));
+        if (!droit(droits)) throw new RegleMetierException("Vous n'êtes pas autorisé à faire cette opération sur les commandes.");
+        return (u, c);
+    }
+
+    private async Task RecalculerStocksCommandeAsync(UtilisateurConnecte u, ContexteLigne c, CleCommande commande, CancellationToken ct)
+    {
+        foreach (var (article, indice) in await donnees.ArticlesAsync(u.Societe, commande, ct))
+            await RecalculerStocksAsync(u, c, await donnees.ArticleAsync(u.Societe, article, indice, ct), article, indice, null, ct);
     }
 
     // STOCK03 pour l'ancien et le nouvel article gérés en stock ; après la validation, sans bloquer l'utilisateur
