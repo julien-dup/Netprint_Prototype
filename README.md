@@ -27,6 +27,18 @@ Connexion : profil et mot de passe IBM i, code société (AA0007), compte géné
 d'un poste) dans `src/NetPrint.Web/Logos`, sans les renommer. Mode d'emploi : `src/NetPrint.Web/Logos/LISEZMOI.md` ;
 production des PDF : `docs/editions-pdf.md`.
 
+**Envoi direct des e-mails** (ARC…) : par le serveur SMTP de la société, paramètres FAC010 (comme EnvoideFactures).
+**La base de test contient les vrais serveurs et les vrais contacts des clients** : l'envoi est désactivé par défaut.
+Pour essayer, rediriger tous les messages vers votre adresse (user-secrets de NetPrint.Web) :
+
+```
+dotnet user-secrets set "Messagerie:Mode" "Redirection"
+dotnet user-secrets set "Messagerie:Redirection" "prenom.nom@axilog.net"
+```
+
+`Messagerie:Mode` = `Desactive` (défaut), `Redirection` (test) ou `Reel` (production seulement). Sans envoi direct, le
+bouton « Préparer (Outlook) » reste disponible.
+
 ## Organisation
 
 ```

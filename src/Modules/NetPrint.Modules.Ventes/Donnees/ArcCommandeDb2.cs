@@ -234,20 +234,43 @@ internal sealed class ArcCommandeDb2(IConfiguration config)
         return new DonneesArc(e, lignes, canevas, complement, position, soldees, butoir, cadre, traductions);
     }
 
-    // Lignes soldées par défaut (DOS005.PLGARC) et client de la commande, pour la fenêtre d'édition
-    public async Task<(bool AvecSoldees, int CompteGeneral, int CompteClient)?> OptionsAsync(int societe, CleCommande cle, int? representant,
-        CancellationToken ct)
+    // Lignes soldées par défaut (DOS005.PLGARC) et client de la commande (comptes, nom), pour la fenêtre d'édition
+    public async Task<(bool AvecSoldees, int CompteGeneral, int CompteClient, string Nom)?> OptionsAsync(int societe, CleCommande cle,
+        int? representant, CancellationToken ct)
     {
         var b = Bib;
         await using var cnx = BaseDb2.Connexion(config);
         await cnx.OpenAsync(ct);
         await using var rd = await Lire(cnx, $"""
-            SELECT COALESCE(d.PLGARC, 'O'), a.RGEN, a.RCLI
+            SELECT COALESCE(d.PLGARC, 'O'), a.RGEN, a.RCLI, COALESCE(c.CNOM, '')
             FROM {b}.AB001 a
             LEFT OUTER JOIN {b}.DOS005 d ON d.RSOC = a.RSOC
+            LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = a.RSOC AND c.RGEN = a.RGEN AND c.RCLI = a.RCLI
             WHERE a.RSOC = ? AND a.RDOSS = ? AND a.CCDCLE = ? AND a.CCTYPC IN ('3', '4'){(representant is null ? "" : " AND a.CCREP = ?")}
             """, ct, representant is null ? [societe, cle.Numero, cle.Cle] : [societe, cle.Numero, cle.Cle, representant]);
-        return await rd.ReadAsync(ct) ? (rd.Texte(0) != "N", rd.Entier(1), rd.Entier(2)) : null;
+        return await rd.ReadAsync(ct) ? (rd.Texte(0) != "N", rd.Entier(1), rd.Entier(2), rd.Texte(3)) : null;
+    }
+
+    // Client (comptes, nom) de chaque commande accessible, en une requête (envoi groupé)
+    public async Task<Dictionary<CleCommande, (int CompteGeneral, int CompteClient, string Nom)>> ClientsAsync(int societe,
+        IReadOnlyList<CleCommande> cles, int? representant, CancellationToken ct)
+    {
+        var resultat = new Dictionary<CleCommande, (int, int, string)>();
+        if (cles.Count == 0) return resultat;
+        var b = Bib;
+        await using var cnx = BaseDb2.Connexion(config);
+        await cnx.OpenAsync(ct);
+        var conditions = string.Join(" OR ", cles.Select(_ => "(a.RDOSS = ? AND a.CCDCLE = ?)"));
+        object?[] valeurs = [societe, .. cles.SelectMany(c => new object?[] { c.Numero, c.Cle }), .. representant is null ? [] : new object?[] { representant }];
+        await using var rd = await Lire(cnx, $"""
+            SELECT a.RDOSS, a.CCDCLE, a.RGEN, a.RCLI, COALESCE(c.CNOM, '')
+            FROM {b}.AB001 a
+            LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = a.RSOC AND c.RGEN = a.RGEN AND c.RCLI = a.RCLI
+            WHERE a.RSOC = ? AND ({conditions}) AND a.CCTYPC IN ('3', '4'){(representant is null ? "" : " AND a.CCREP = ?")}
+            """, ct, valeurs);
+        while (await rd.ReadAsync(ct))
+            resultat[new CleCommande(rd.Entier(0), rd.Texte(1))] = (rd.Entier(2), rd.Entier(3), rd.Texte(4));
+        return resultat;
     }
 
     private static async Task<AdresseArc?> AdresseClientAsync(OdbcConnection cnx, string b, int societe, int gen, int cli, CancellationToken ct)

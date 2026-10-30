@@ -1,7 +1,9 @@
 using NetPrint.Modules.Ventes.Contrats;
 using NetPrint.Modules.Ventes.Donnees;
 using NetPrint.Modules.Ventes.Services;
+using NetPrint.Noyau.Messagerie;
 using NetPrint.Noyau.Societes;
+using NetPrint.Socle.Documents;
 using NetPrint.Noyau.Tiers;
 using NetPrint.Socle.Session;
 using Xunit.Abstractions;
@@ -32,9 +34,22 @@ public class EditionArcDb2Tests(ITestOutputHelper sortie)
             Task.FromResult<IReadOnlyList<ContactEnvoi>>([new("Mme ACHATS", "achats@exemple.fr", true)]);
     }
 
-    private static EditionArcService Service() =>
+    // Messagerie factice : les messages sont gardés, jamais envoyés (la base de test a les vrais serveurs et contacts)
+    private sealed class Messagerie : IMessagerie
+    {
+        public List<MessageBrouillon> Envoyes { get; } = [];
+        public Task<EtatMessagerie> EtatAsync(int societe, CancellationToken ct = default) =>
+            Task.FromResult(new EtatMessagerie(true, "", "expediteur@exemple.fr", null));
+        public Task EnvoyerAsync(int societe, MessageBrouillon message, CancellationToken ct = default)
+        {
+            Envoyes.Add(message);
+            return Task.CompletedTask;
+        }
+    }
+
+    private static EditionArcService Service(Messagerie? messagerie = null) =>
         new(new ArcCommandeDb2(BaseDeTest.Configuration), new ConsultationCommandesDb2(BaseDeTest.Configuration), new Societes(), new Contacts(),
-            new Utilisateur());
+            messagerie ?? new Messagerie(), new Utilisateur());
 
     [FactDb2]
     public async Task Arc_d_une_commande_livree_du_client_d_essai()
@@ -68,5 +83,25 @@ public class EditionArcDb2Tests(ITestOutputHelper sortie)
         await File.WriteAllBytesAsync(chemin, eml.Contenu);
         sortie.WriteLine($"{eml.Nom} : {eml.Contenu.Length:N0} octets → {chemin}");
         await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => Service().PreparerMessageAsync([], [], []));
+    }
+
+    // Envoi direct et envoi groupé, par une messagerie factice
+    [FactDb2]
+    public async Task Envoi_direct_et_envoi_groupe()
+    {
+        var messagerie = new Messagerie();
+        var service = Service(messagerie);
+        var cle = new CleCommande(68537, "9");
+        await service.EnvoyerMessageAsync([cle], ["achats@exemple.fr"], []);
+        var m = Assert.Single(messagerie.Envoyes);
+        Assert.Equal(["achats@exemple.fr"], m.Destinataires);
+        Assert.Equal("ARC 68537-9.pdf", Assert.Single(m.PiecesJointes).Nom);
+
+        var plan = Assert.Single(await service.PlanifierEnvoiAsync([cle]));
+        Assert.Equal(("LABORATOIRES CLARINS", "411100 376"), (plan.NomClient, plan.Client));
+        Assert.Equal(["achats@exemple.fr"], plan.Destinataires);
+        var resultat = Assert.Single(await service.EnvoyerParClientAsync([plan]));
+        Assert.True(resultat.Envoye);
+        Assert.Equal(2, messagerie.Envoyes.Count);
     }
 }

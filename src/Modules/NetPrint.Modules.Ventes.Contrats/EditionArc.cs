@@ -20,12 +20,31 @@ public interface IEditionArc
     Task<DocumentGenere> PreparerMessageAsync(IReadOnlyList<CleCommande> commandes, IReadOnlyList<string> destinataires,
         IReadOnlyList<string> copies, bool? avecLignesSoldees = null, CancellationToken ct = default);
 
+    // Envoi direct du même message par le serveur SMTP de la société (comme EnvoideFactures), sans passer par Outlook
+    Task EnvoyerMessageAsync(IReadOnlyList<CleCommande> commandes, IReadOnlyList<string> destinataires, IReadOnlyList<string> copies,
+        bool? avecLignesSoldees = null, CancellationToken ct = default);
+
+    // Envoi groupé de commandes de plusieurs clients : un message par client, à ses contacts ARC (ceux « par défaut »,
+    // sinon tous ; le premier en destinataire, les autres en copie). Planifier montre ce qui partira, sans rien envoyer ;
+    // Envoyer envoie ce plan, tel que l'utilisateur l'a vu et confirmé, et renvoie le résultat client par client
+    // (un échec n'arrête pas les autres).
+    Task<IReadOnlyList<EnvoiArcClient>> PlanifierEnvoiAsync(IReadOnlyList<CleCommande> commandes, CancellationToken ct = default);
+    Task<IReadOnlyList<EnvoiArcClient>> EnvoyerParClientAsync(IReadOnlyList<EnvoiArcClient> plan, bool? avecLignesSoldees = null,
+        CancellationToken ct = default);
+
     // PDF de l'ARC. avecLignesSoldees null = paramètre société. Droit « Édition » (PRT000P1 AOPT07) requis, sauf aperçu.
     Task<DocumentGenere> EditerAsync(CleCommande commande, bool? avecLignesSoldees = null, bool apercu = false,
         CancellationToken ct = default);
 }
 
-public sealed record OptionsArc(bool AvecLignesSoldees, IReadOnlyList<ContactArc> Contacts, bool PeutEditer);
+// EnvoiDirect : le serveur SMTP de la société peut être utilisé (sinon RaisonEnvoiDirect) ; Redirection : en test, adresse
+// qui reçoit tous les messages
+public sealed record OptionsArc(bool AvecLignesSoldees, IReadOnlyList<ContactArc> Contacts, bool PeutEditer, bool EnvoiDirect = false,
+    string RaisonEnvoiDirect = "", string Expediteur = "", string? Redirection = null);
 
-// Contact du client destinataire des ARC ; ParDefaut = proposé d'office (CNARCD)
-public sealed record ContactArc(string Nom, string Email, bool ParDefaut);
+// Un message de l'envoi groupé : client, commandes, destinataires ; Erreur si rien ne peut partir ou si l'envoi a échoué
+public sealed record EnvoiArcClient(string Client, string NomClient, IReadOnlyList<CleCommande> Commandes, IReadOnlyList<string> Destinataires,
+    IReadOnlyList<string> Copies, string? Erreur, bool Envoye);
+
+// Contact du client destinataire des ARC ; ParDefaut = CNARCD ; Propose = coché d'office (contacts par défaut, sinon tous)
+public sealed record ContactArc(string Nom, string Email, bool ParDefaut, bool Propose = false);

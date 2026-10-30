@@ -22,7 +22,13 @@ WinDev `Logo<type><soc><enseigne>`, `Logo<soc><enseigne>`, `Logo<type><soc>`, `L
 `.jpeg`, `.bmp`). Les noms WinDev n'ont pas de séparateur : `Logo12` peut être la société 12 ou la société 1 enseigne 2 ;
 un fichier `12.png` ou `1-2.png` lève le doute. Sans logo, l'en-tête ne montre que le texte.
 
-**Envoi par e-mail.** Comme EnvoiARC et VisuArc (Outlook sur le poste), l'application prépare le message et
+**Envoi direct (SMTP).** `Noyau/Messagerie` : `IMessagerie.EnvoyerAsync(societe, MessageBrouillon)` envoie par le
+serveur de la société, paramètres FAC010 (PSMTPS, PSMTPP, PSMTPU / PSMTPM, PTLS, PEXPEN), comme EnvoideFactures, avec
+accusé de lecture. Garde-fou `Messagerie:Mode` (`Desactive` par défaut, `Redirection` vers `Messagerie:Redirection`,
+`Reel`) : la base de test contient les vrais serveurs et contacts. Voir le README. Dans les tests, une messagerie
+factice garde les messages sans les envoyer.
+
+**Envoi par e-mail (Outlook).** Comme EnvoiARC et VisuArc (Outlook sur le poste), l'application prépare le message et
 l'utilisateur l'envoie : `MessageBrouillon.VersEml(nom)`, téléchargé par l'écran (`JS.TelechargerAsync`, Web.Commun) après avoir traité les erreurs. Outlook classique
 l'ouvre en brouillon, pièces jointes comprises. Évolution possible pour le SaaS : créer le brouillon directement dans
 la boîte Microsoft 365 de l'utilisateur (Microsoft Graph), sans téléchargement.

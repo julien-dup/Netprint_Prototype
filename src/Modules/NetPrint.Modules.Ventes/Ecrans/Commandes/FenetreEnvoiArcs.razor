@@ -1,0 +1,128 @@
+@* =====================================================================
+   Envoi groupé des ARC de plusieurs clients (EnvoiARC étendu, serveur SMTP de la société comme EnvoideFactures) :
+   un message par client, à ses contacts ARC. La fenêtre montre d'abord ce qui partira, puis le résultat client par client.
+   ===================================================================== *@
+@inject IEditionArc Arc
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+
+<div class="voile" @onclick="Fermer">
+    <div class="fenetre fenetre-arc fenetre-envois" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+        <div class="titre-fenetre">📤 Envoi des ARC · @Commandes.Count commande@(Commandes.Count > 1 ? "s" : "")</div>
+        <div class="corps-fenetre">
+            @if (plan is null || options is null)
+            {
+                <p class="chargement">Préparation de l'envoi…</p>
+            }
+            else
+            {
+                <label class="champ-case"><input type="checkbox" @bind="soldees" disabled="@(envoye || enCours)" /> <span>Avec les lignes soldées</span></label>
+                <table class="grille grille-compacte">
+                    <thead><tr><th>Client</th><th class="nombre">ARC</th><th>Destinataires</th><th>État</th></tr></thead>
+                    <tbody>
+                        @foreach (var e in plan)
+                        {
+                            <tr class="@(e.Erreur is not null ? "ligne-erreur" : "")">
+                                <td><b>@e.NomClient</b> <span class="discret">@e.Client</span></td>
+                                <td class="nombre" title="@string.Join(", ", e.Commandes.Select(c => c.Libelle))">@e.Commandes.Count</td>
+                                <td>@string.Join(", ", e.Destinataires)@if (e.Copies.Count > 0) {<span class="discret"> · copie : @string.Join(", ", e.Copies)</span>}</td>
+                                <td>
+                                    @if (e.Envoye) { <span class="badge badge-etat etat-livree">Envoyé</span> }
+                                    else if (e.Erreur is not null) { <span class="message-erreur">@e.Erreur</span> }
+                                    else if (envoye) { <span class="discret">—</span> }
+                                    else { <span class="discret">à envoyer</span> }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (!options.EnvoiDirect)
+                {
+                    <p class="avertissement-saisie">@options.RaisonEnvoiDirect</p>
+                    <p class="aide">Pour passer par Outlook, recherchez les commandes d'un seul client : la fenêtre d'envoi propose alors
+                        « Préparer (Outlook) ».</p>
+                }
+                else if (options.Redirection is { } test)
+                {
+                    <p class="avertissement-saisie">Envoi de test : tous les messages partent vers @test.</p>
+                }
+                else
+                {
+                    <p class="aide">Expéditeur : @options.Expediteur · accusé de lecture demandé.</p>
+                }
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="espace"></span>
+            <button type="button" @onclick="Fermer">@(envoye ? "Fermer" : "Annuler")</button>
+            @if (plan is not null && options is not null && !envoye)
+            {
+                <button type="button" class="bouton-principal" disabled="@(!options.EnvoiDirect || AEnvoyer == 0 || enCours)" @onclick="EnvoyerAsync">
+                    @(enCours ? "Envoi en cours…" : $"📤 Envoyer {AEnvoyer} message{(AEnvoyer > 1 ? "s" : "")}")
+                </button>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<CleCommande> Commandes { get; set; } = [];
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private IReadOnlyList<EnvoiArcClient>? plan;
+    private OptionsArc? options;
+    private bool soldees = true;
+    private bool enCours, envoye;
+
+    private int AEnvoyer => plan?.Count(e => e.Erreur is null) ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            options = await Arc.LireOptionsAsync(Commandes);
+            soldees = options.AvecLignesSoldees;
+            // Envoi direct impossible (désactivé, serveur non renseigné) : la raison tout de suite, sans calculer le plan
+            plan = options.EnvoiDirect ? await Arc.PlanifierEnvoiAsync(Commandes) : [];
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+            await OnFermer.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Préparation de l'envoi impossible : {ex.Message}");
+            await OnFermer.InvokeAsync();
+        }
+    }
+
+    private async Task EnvoyerAsync()
+    {
+        if (!await Dialogues.ConfirmerAsync($"Envoyer {AEnvoyer} message{(AEnvoyer > 1 ? "s" : "")} d'ARC à vos clients ?", "Envoi des ARC", "Envoyer"))
+            return;
+        enCours = true;
+        try
+        {
+            plan = await Arc.EnvoyerParClientAsync(plan!, soldees);   // le plan affiché et confirmé
+            envoye = true;
+            var ok = plan.Count(e => e.Envoye);
+            if (ok == plan.Count) Notifications.Succes($"{ok} message{(ok > 1 ? "s" : "")} envoyé{(ok > 1 ? "s" : "")}.");
+            else Notifications.Erreur($"{ok} message(s) envoyé(s) sur {plan.Count} : voir le détail.");
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Envoi impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private Task Fermer() => enCours ? Task.CompletedTask : OnFermer.InvokeAsync();
+}
