@@ -9,6 +9,30 @@ namespace NetPrint.Modules.Ventes.Tests.Commandes;
 // Règles de la saisie de l'en-tête de commande (DOS505)
 public class SaisieCommandesServiceTests
 {
+    // ---------- Texte complémentaire (AB0011, 8 lignes de 40) ----------
+    [Fact]
+    public void Texte_complementaire_en_lignes_de_40()
+    {
+        Assert.Equal(["Ligne 1", "", "Ligne 3"], SaisieCommandesService.LignesTexte("Ligne 1  \r\n\r\nLigne 3\n\n\n"));
+        Assert.Equal(["   Quai n° 3"], SaisieCommandesService.LignesTexte("   Quai n° 3"));   // alignement de l'utilisateur gardé
+        Assert.Empty(SaisieCommandesService.LignesTexte(""));
+    }
+
+    [Fact]
+    public void Texte_complementaire_limite_a_8_lignes()
+    {
+        var s = new EnteteSaisie { TexteComplementaire = string.Join("\n", Enumerable.Range(1, 9).Select(i => $"ligne {i}")) };
+        Assert.Contains(SaisieCommandesService.Controler(s, References(), false, false), x => x.Zone == nameof(EnteteSaisie.TexteComplementaire));
+        s.TexteComplementaire = string.Join("\n", Enumerable.Range(1, 8).Select(i => $"ligne {i}"));
+        Assert.DoesNotContain(SaisieCommandesService.Controler(s, References(), false, false), x => x.Zone == nameof(EnteteSaisie.TexteComplementaire));
+        // Une ligne de plus de 40 caractères est refusée (pas coupée au milieu d'un mot)
+        s.TexteComplementaire = "ok\n" + new string('a', 41);
+        Assert.Contains(SaisieCommandesService.Controler(s, References(), false, false),
+            x => x.Zone == nameof(EnteteSaisie.TexteComplementaire) && x.Message.Contains("ligne 2"));
+        // Le texte entre dans l'empreinte (modification concurrente détectée)
+        Assert.NotEqual(SaisieCommandesService.Empreinte(s), SaisieCommandesService.Empreinte(s.Copier().Avec(x => x.TexteSurArc = true)));
+    }
+
     // ---------- Qualité client et encours ----------
     [Theory]
     [InlineData("", false, null, false)]

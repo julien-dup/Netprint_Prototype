@@ -267,6 +267,7 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
             // Historique DOS040 (type EN) : seulement pour un dossier antidaté, comme DOS505
             if (s.DateDossier < DateOnly.FromDateTime(DateTime.Today))
                 await HistoriqueAsync(cnx, tx, b, societe, numero, cle, s, "EN", ct);
+            await TexteComplementaireAsync(cnx, tx, b, societe, numero, cle, s, null, ct);
 
             await tx.CommitAsync(ct);
             await AuditAsync(cnx, b, societe, profil, numero, cle, "CR");
@@ -302,6 +303,38 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
             ("CCTXHO", s.TauxHonoraires ?? 0m), ("CCCDEG", s.CommandesGroupees ?? 0), ("CCCDET", s.TexteCommandesGroupees),
             ("CCEDIQ", s.EditionEtiquettes ? "O" : "N"),
         ];
+    }
+
+    // Texte complémentaire (DOS560 SPVAL) : AB0011 mise à jour, ou créée s'il y a un texte ou une case cochée.
+    // Le texte arrive déjà contrôlé (8 lignes de 40 au plus). Renvoie vrai si le texte ou ses cases ont changé.
+    private static async Task<bool> TexteComplementaireAsync(OdbcConnection cnx, OdbcTransaction tx, string b, int societe, int numero,
+        string cle, EnteteSaisie s, EnteteSaisie? avant, CancellationToken ct)
+    {
+        var lignes = (s.TexteComplementaire == "" ? [] : s.TexteComplementaire.Split('\n')).Take(8).ToList();
+        while (lignes.Count < 8) lignes.Add("");
+        static string ON(bool v) => v ? "O" : "N";
+        object?[] valeurs = [.. lignes.Select(l => l == "" ? " " : l), ON(s.TexteSurArc), ON(s.TexteSurBl), ON(s.TexteSurFacture)];
+        var change = avant is null
+            ? s.TexteComplementaire != "" || s.TexteSurArc || s.TexteSurBl || s.TexteSurFacture
+            : avant.TexteComplementaire != s.TexteComplementaire || avant.TexteSurArc != s.TexteSurArc
+              || avant.TexteSurBl != s.TexteSurBl || avant.TexteSurFacture != s.TexteSurFacture;
+        if (!change) return false;
+        var misAJour = 0;
+        // Création : la ligne ne peut pas exister (sauf reste d'un ancien dossier de même n° : mise à jour, comme AB001FA)
+        await using (var cmd = Commande(cnx, tx, $"""
+            UPDATE {b}.AB0011 SET CCTXT1 = ?, CCTXT2 = ?, CCTXT3 = ?, CCTXT4 = ?, CCTXT5 = ?, CCTXT6 = ?, CCTXT7 = ?, CCTXT8 = ?,
+                CCIARC = ?, CCIBL = ?, CCIFAC = ?
+            WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?
+            """, [.. valeurs, societe, numero, cle]))
+            misAJour = await cmd.ExecuteNonQueryAsync(ct);
+        if (misAJour == 0)
+            await using (var cmd = Commande(cnx, tx, $"""
+                INSERT INTO {b}.AB0011 (CCTXT1, CCTXT2, CCTXT3, CCTXT4, CCTXT5, CCTXT6, CCTXT7, CCTXT8, CCIARC, CCIBL, CCIFAC,
+                    RSOC, RDOSS, CCDCLE)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [.. valeurs, societe, numero, cle]))
+                await cmd.ExecuteNonQueryAsync(ct);
+        return true;
     }
 
     private static async Task HistoriqueAsync(OdbcConnection cnx, OdbcTransaction tx, string b, int societe, int numero,
@@ -346,7 +379,8 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
         a.CGENF, a.CCLIF, a.CCRCVD, a.CCREP, a.CCTXCO, a.CCINAT, a.CCTYPV, a.CCMON, a.CCOP10, a.CCECAL, a.CCPORT, a.CCNBLV,
         a.CCLFAC, a.CCMOD, a.CCECH, a.CCLE, a.CCART, a.CCESC, a.CCREL, a.CCNOMH, a.CCMTHO, a.CCTXHO, a.CCCDEG, a.CCCDET,
         a.CCEDIQ, a.CCTAGS, a.CCOP11,
-        (SELECT COUNT(*) FROM {b}.NEG100 n WHERE n.RSOC = a.RSOC AND n.RDOSS = a.RDOSS AND n.DNDCLE = a.CCDCLE)
+        (SELECT COUNT(*) FROM {b}.NEG100 n WHERE n.RSOC = a.RSOC AND n.RDOSS = a.RDOSS AND n.DNDCLE = a.CCDCLE),
+        t.CCTXT1, t.CCTXT2, t.CCTXT3, t.CCTXT4, t.CCTXT5, t.CCTXT6, t.CCTXT7, t.CCTXT8, t.CCIARC, t.CCIBL, t.CCIFAC
         """;
 
     public async Task<EnteteSaisie?> LireAsync(int societe, CleCommande cle, int? representant, CancellationToken ct)
@@ -362,6 +396,7 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
             SELECT {ColonnesLecture.Replace("{b}", b)}
             FROM {b}.AB001 a
             LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = a.RSOC AND c.RGEN = a.RGEN AND c.RCLI = a.RCLI
+            LEFT OUTER JOIN {b}.AB0011 t ON t.RSOC = a.RSOC AND t.RDOSS = a.RDOSS AND t.CCDCLE = a.CCDCLE
             WHERE a.RSOC = ? AND a.RDOSS = ? AND a.CCDCLE = ? AND a.CCTYPC IN ('3', '4'){(representant is null ? "" : " AND a.CCREP = ?")}
             """;
         object?[] valeurs = representant is null ? [societe, cle.Numero, cle.Cle] : [societe, cle.Numero, cle.Cle, representant];
@@ -388,6 +423,10 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
             MontantHonoraires = PosD(rd.Nombre(44)), TauxHonoraires = PosD(rd.Nombre(45)), CommandesGroupees = Pos(rd.Entier(46)),
             TexteCommandesGroupees = rd.Texte(47), EditionEtiquettes = rd.Texte(48) == "O",
             Soldee = rd.Texte(49) != "", Bloquee = rd.Texte(50) == "O", AvecLignes = rd.Entier(51) > 0,
+            // Blancs de début conservés (texte aligné par l'utilisateur), blancs et lignes vides de fin retirés
+            TexteComplementaire = string.Join("\n", Enumerable.Range(52, 8)
+                .Select(i => rd.IsDBNull(i) ? "" : Convert.ToString(rd.GetValue(i))!.TrimEnd())).TrimEnd('\n'),
+            TexteSurArc = rd.Texte(60) == "O", TexteSurBl = rd.Texte(61) == "O", TexteSurFacture = rd.Texte(62) == "O",
         };
     }
 
@@ -434,8 +473,18 @@ internal sealed class SaisieCommandesDb2(IConfiguration config) : ISourceSaisieC
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
+            var texteChange = await TexteComplementaireAsync(cnx, tx, b, societe, cle.Numero, cle.Cle, s, actuel, ct);
+            // Historique d'un dossier antérieur au jour : une seule ligne par enregistrement, la clé de DOS040 (dossier, date,
+            // heure à la seconde) étant unique. EN (DOS505) si l'en-tête change, TT (DOS560) si seul le texte change.
             if (s.DateDossier < DateOnly.FromDateTime(DateTime.Today))
-                await HistoriqueAsync(cnx, tx, b, societe, cle.Numero, cle.Cle, s, "EN", ct);
+            {
+                var enteteChange = !ColonnesEntete(actuel, semaine).Select(c => Convert.ToString(c.Valeur))
+                    .SequenceEqual(colonnes.Select(c => Convert.ToString(c.Valeur)));
+                if (enteteChange || !texteChange)
+                    await HistoriqueAsync(cnx, tx, b, societe, cle.Numero, cle.Cle, s, "EN", ct);
+                else
+                    await HistoriqueAsync(cnx, tx, b, societe, cle.Numero, cle.Cle, s, "TT", ct);
+            }
             await tx.CommitAsync(ct);
             await AuditAsync(cnx, b, societe, profil, cle.Numero, cle.Cle, "MO");
             return true;

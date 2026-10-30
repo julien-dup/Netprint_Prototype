@@ -334,6 +334,26 @@
                     <label class="champ large"><span>Texte</span><input maxlength="20" @bind="e.TexteCommandesGroupees" /></label>
                 </div>
             </details>
+
+            @* Texte complémentaire (DOS560, option 3 de NEG510) : imprimé selon les cases sur l'ARC, le BL, la facture *@
+            <details class="carte carte-texte" open="@TexteOuvert">
+                <summary><h3>Texte complémentaire</h3></summary>
+                <label class="champ large @Classe(nameof(e.TexteComplementaire))">
+                    <span>8 lignes de 40 caractères</span>
+                    <textarea rows="8" cols="42" class="texte-fixe" @bind="e.TexteComplementaire" @bind:event="oninput"></textarea>
+                </label>
+                @Message(nameof(e.TexteComplementaire))
+                <div class="ligne-cases">
+                    <span class="discret">Imprimer sur :</span>
+                    <label class="champ-case"><input type="checkbox" @bind="e.TexteSurArc" /> <span>l'ARC</span></label>
+                    <label class="champ-case"><input type="checkbox" @bind="e.TexteSurBl" /> <span>le BL</span></label>
+                    <label class="champ-case"><input type="checkbox" @bind="e.TexteSurFacture" /> <span>la facture</span></label>
+                </div>
+                @if (e.TexteComplementaire != "" && !e.TexteSurArc && !e.TexteSurBl && !e.TexteSurFacture)
+                {
+                    <p class="aide">Aucune case cochée : le texte est gardé mais n'est imprimé nulle part.</p>
+                }
+            </details>
         </div>
     }
 </div>
@@ -343,6 +363,18 @@
     [Parameter] public string? Cle { get; set; }
 
     private bool Creation => Numero is null;
+
+    // Carte du texte complémentaire : ouverte d'emblée s'il y a un texte à la lecture ; ensuite, l'utilisateur la plie ou
+    // la déplie (la valeur ne suit pas la frappe, sinon la carte se fermerait quand on efface le texte)
+    private bool? ouvertureTexte;
+    private bool TexteOuvert
+    {
+        get
+        {
+            if (ouvertureTexte is null && entete is not null) ouvertureTexte = entete.TexteComplementaire != "";
+            return ouvertureTexte ?? false;
+        }
+    }
     private CleCommande CleCourante => new(Numero ?? 0, (Cle ?? "").Trim().ToUpperInvariant());
 
     private ContexteSaisieCommande? contexte;

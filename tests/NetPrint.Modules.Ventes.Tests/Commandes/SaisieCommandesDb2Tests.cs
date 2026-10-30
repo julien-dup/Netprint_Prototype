@@ -90,6 +90,19 @@ public class SaisieCommandesDb2Tests(ITestOutputHelper sortie)
             // Lecture périmée : refus
             await Assert.ThrowsAsync<RegleMetierException>(() => service.ModifierAsync(cle, lue));
 
+            // Texte complémentaire (AB0011) : créé, imprimé sur l'ARC seulement si la case est cochée
+            var avecTexte = (await service.LireAsync(cle))!;
+            avecTexte.TexteComplementaire = "Livraison sur rendez-vous\nQuai n° 3";
+            avecTexte.TexteSurArc = true;
+            await service.ModifierAsync(cle, avecTexte);
+            var relue = (await service.LireAsync(cle))!;
+            Assert.Equal(("Livraison sur rendez-vous\nQuai n° 3", true, false), (relue.TexteComplementaire, relue.TexteSurArc, relue.TexteSurBl));
+            var arc = await new ArcCommandeDb2(BaseDeTest.Configuration).LireAsync(BaseDeTest.Societe, cle, null, default);
+            Assert.Equal(["Livraison sur rendez-vous", "Quai n° 3"], arc!.TexteComplementaire);
+            relue.TexteSurArc = false;
+            await service.ModifierAsync(cle, relue);
+            Assert.Empty((await new ArcCommandeDb2(BaseDeTest.Configuration).LireAsync(BaseDeTest.Societe, cle, null, default))!.TexteComplementaire);
+
             // La commande apparaît dans la consultation
             var fiche = await new ConsultationCommandesService(new ConsultationCommandesDb2(BaseDeTest.Configuration), new Utilisateur())
                 .LireAsync(cle);
@@ -128,6 +141,7 @@ public class SaisieCommandesDb2Tests(ITestOutputHelper sortie)
         await Executer("DELETE FROM NP11F.DOS040 WHERE RSOC = ? AND RDOSS = ? AND HICLE = ?", BaseDeTest.Societe, cle.Numero, cle.Cle);
         await Executer("DELETE FROM NP11F.EVE200 WHERE RSOC = ? AND AMDOSS = ? AND AMDCLE = ?", BaseDeTest.Societe, cle.Numero, cle.Cle);
         await Executer("DELETE FROM NP11F.AB001FA WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", BaseDeTest.Societe, cle.Numero, cle.Cle);
+        await Executer("DELETE FROM NP11F.AB0011 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", BaseDeTest.Societe, cle.Numero, cle.Cle);
         await Executer("DELETE FROM NP11F.AB001 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", BaseDeTest.Societe, cle.Numero, cle.Cle);
         await Executer("UPDATE NP11F.AA0003 SET CDDTPC = ?, CDDTDC = ?, CDDDOS = ?, CDDCLE = ? WHERE RSOC = ? AND RGEN = ? AND RCLI = ?",
             client[0], client[1], client[2], client[3], BaseDeTest.Societe, BaseDeTest.CompteGeneral, BaseDeTest.CompteClient);

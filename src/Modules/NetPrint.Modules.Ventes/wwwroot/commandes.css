@@ -153,3 +153,6 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .fenetre.fenetre-envois { width: min(900px, 96vw); }
 .fenetre-envois table { width: 100%; }
 .fenetre-envois .corps-fenetre { max-height: 70vh; overflow: auto; }
+
+/* Texte complémentaire : chasse fixe, largeur de 40 caractères */
+.texte-fixe { font-family: 'Courier New', monospace; width: 42ch; resize: vertical; }

@@ -184,6 +184,7 @@ internal sealed partial class LignesCommandeDb2
         ("ABCOUTD", "CODOSS", "CODCLE"), ("ABCOUTB", "CODOSS", "CODCLE"), ("ABDIRL", "RDOSS", "CCDCLE"),
         ("ABDIRP", "RDOSS", "CCDCLE"), ("DIR100", "RDOSS", "CCDCLE"), ("AFC020", "FCDOSS", "FCDCLE"),
         ("AB0020", "LADOSC", "LACLDC"),   // liens commande → OF : commande d'origine
+        ("AB0011", "RDOSS", "CCDCLE"),    // texte complémentaire (DOS560)
     ];
 
     // Tables satellites présentes dans cette installation avec les colonnes utilisées (sinon le DELETE échouerait et annulerait

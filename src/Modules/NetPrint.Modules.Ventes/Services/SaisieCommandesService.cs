@@ -205,7 +205,25 @@ internal sealed class SaisieCommandesService(
         Si(s.Arrete is < 0 or > 31, nameof(s.Arrete), Messages.Jour31);
         Si(s.Releve != "" && !ValeursEntete.Releves.Contains(s.Releve), nameof(s.Releve), Messages.Releve);
         Si(s.Escompte is < 0 or >= 10, nameof(s.Escompte), "L'escompte doit être compris entre 0 et 9,9 %.");
+        var lignesTexte = LignesTexte(s.TexteComplementaire);
+        Si(lignesTexte.Count > LignesTexteMax, nameof(s.TexteComplementaire),
+            $"Le texte complémentaire est limité à {LignesTexteMax} lignes de {LargeurTexte} caractères ({lignesTexte.Count} lignes).");
+        var longue = lignesTexte.FindIndex(l => l.Length > LargeurTexte);
+        Si(longue >= 0, nameof(s.TexteComplementaire),
+            $"La ligne {longue + 1} du texte complémentaire dépasse {LargeurTexte} caractères ({(longue >= 0 ? lignesTexte[longue].Length : 0)}).");
         return e;
+    }
+
+    // Texte complémentaire (AB0011.CCTXT1-8) : lignes de 40 caractères au plus (une ligne plus longue est refusée, pas
+    // coupée au milieu d'un mot), blancs de fin de ligne et lignes vides de fin retirés, blancs de début conservés
+    internal const int LignesTexteMax = 8;
+    internal const int LargeurTexte = 40;
+
+    internal static List<string> LignesTexte(string texte)
+    {
+        var lignes = (texte ?? "").Replace("\r", "").Split('\n').Select(l => l.TrimEnd()).ToList();
+        while (lignes.Count > 0 && lignes[^1] == "") lignes.RemoveAt(lignes.Count - 1);
+        return lignes;
     }
 
     // Semaine écrite dans AB001 : celle saisie, sinon celle de la date de livraison (D300F)
@@ -277,7 +295,7 @@ internal sealed class SaisieCommandesService(
         e.Revendeur, e.Representant, e.TauxCommission, e.Fabricant, e.CodeVente, e.SousTraitee, e.EnlevementOuLivraison, e.Port,
         e.NbLieux, e.AdresseFacturation, e.ModeReglement, e.Echeance, e.Le, e.Arrete, e.Escompte, e.Releve, e.NomHonoraires,
         e.MontantHonoraires, e.TauxHonoraires, e.CommandesGroupees, e.TexteCommandesGroupees, e.EditionEtiquettes, e.Soldee,
-        e.Bloquee, e.AvecLignes);
+        e.Bloquee, e.AvecLignes, e.TexteComplementaire, e.TexteSurArc, e.TexteSurBl, e.TexteSurFacture);
 
     // Codes en majuscules, textes sans blancs autour ; longueurs des zones AB001
     internal static EnteteSaisie Normaliser(EnteteSaisie saisie)
@@ -302,6 +320,7 @@ internal sealed class SaisieCommandesService(
         s.Releve = Code(s.Releve, 1);
         s.NomHonoraires = Texte(s.NomHonoraires, 12);
         s.TexteCommandesGroupees = Texte(s.TexteCommandesGroupees, 20);
+        s.TexteComplementaire = string.Join("\n", LignesTexte(s.TexteComplementaire));
         if (s.EnlevementOuLivraison == "E")
         {
             s.Port = "";

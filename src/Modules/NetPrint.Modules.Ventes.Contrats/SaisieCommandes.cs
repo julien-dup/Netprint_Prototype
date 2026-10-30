@@ -103,6 +103,13 @@ public sealed class EnteteSaisie
     public string TexteCommandesGroupees { get; set; } = "";
     public bool EditionEtiquettes { get; set; } = true;
 
+    // Texte complémentaire de la commande (DOS560, option 3 de NEG510 ; table AB0011) : 8 lignes de 40 caractères,
+    // imprimé sur l'ARC, le BL ou la facture selon les cases (non par défaut, comme NEG510)
+    public string TexteComplementaire { get; set; } = "";
+    public bool TexteSurArc { get; set; }
+    public bool TexteSurBl { get; set; }
+    public bool TexteSurFacture { get; set; }
+
     // Modification : facturation figée dès qu'une ligne existe ; commande soldée ou sous-traitée (CCOP11) non modifiable ;
     // empreinte de la lecture (contrôle de concurrence)
     public bool AvecLignes { get; set; }

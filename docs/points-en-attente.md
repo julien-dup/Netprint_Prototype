@@ -55,7 +55,7 @@ Questions ouvertes :
 | ⚪ | Appels : import Excel en mode appels | NEG520 SpExcel | 4e point d'entrée, à brancher sur `IAppelsLivraison` (canal `ImportExcel`) |
 | 🟠 | Encours client à l'ajout d'une ligne | NEG520 F9 → DOS901 'C' | Contrôlé à la création de l'en-tête seulement pour l'instant |
 | 🟠 | Copie d'une commande | DOS500S option 3, DOS505 COPT 03 | |
-| 🟠 | Copie / transfert de reliquat d'une ligne vers une autre commande | NEG510 F14 | Déplace quantité et réservation : opération transactionnelle |
+
 | ✅ | ~~ARC : édition et aperçu~~ | ARC105P, NEG510 F18 | Fait (30/10) : PDF produit par l'application (QuestPDF), canevas ARC010F / ARC015F décodés, traductions PRT008, aperçu à côté de la fiche mis à jour à chaque modification. Guide : `docs/editions-pdf.md` |
 | ✅ | ~~ARC : envoi par e-mail~~ | NEG510 F18, ARC105CLP / ARC106, EnvoiARC, VisuArc | Fait (30/10) : brouillon Outlook (.eml) avec les ARC joints, sans SMTP ; contacts ARC PRT051F (1er coché = destinataire, autres en copie) ; objet d'ARC105CLP / EnvoiARC, texte = chapitre A du canevas. Depuis la fiche (une commande) et la liste (commandes affichées d'un client, 50 au plus) |
 | ✅ | ~~ARC : envoi groupé direct~~ | EnvoideFactures (SMTP FAC010) | Fait (30/10) : depuis la liste, un message par client à ses contacts ARC, résultat client par client ; depuis la fenêtre ARC, « Envoyer » à côté de « Préparer (Outlook) ». Garde-fou `Messagerie:Mode` (désactivé par défaut, redirection de test) |
@@ -71,7 +71,7 @@ Questions ouvertes :
 | ⚪ | ARC : historique des envois, ARC sans prix, ARC modificatif | — | N'existent pas dans le RPG : à décider |
 | ⚪ | ARC des dossiers de fabrication (type 1) | ARC100 / ARC105F | Hors commandes de négoce et produit fini |
 | ⚪ | Maintenance des canevas d'ARC | ARC010S / ARC010 (5250 seulement) | Écran à reprendre si les canevas restent la source des textes |
-| 🟠 | Lancement en fabrication / affectation de stock | NEG515, NEG510 F10 (création auto des OF) | Frontière avec le module Production |
+| 🔴 | **Lancement en fabrication / affectation de stock** (prochaine étape) | NEG515, NEG510 F10 (création auto des OF) | Initialise la production à partir de la commande (David). Analyse en cours |
 | 🟠 | Reprise des lignes d'un devis | NEG520 F10 (NEG52009) | Les prix de beaucoup de commandes réelles en viennent (DNDEV) |
 | 🟠 | Articles avec nomenclature | NEG520 (lignes composants, DNLCOM) | Refusés aujourd'hui |
 | ⚪ | Articles libres « 999… » | CTL520 l. 804-845 | Refusés aujourd'hui |
@@ -81,7 +81,9 @@ Questions ouvertes :
 | ⚪ | Contrôle de la norme | NOR010 (colonnes inconnues dans la cartographie) | Non contrôlée aujourd'hui |
 | ⚪ | Paramètres de facturation automatique (F13) | DOS505 DOS50505, AB001FA | Valeurs par défaut écrites, pas de saisie |
 | ⚪ | Changement de client d'une commande (F17) | DOS505 R15 | Client figé en modification |
-| ⚪ | Texte complémentaire ARC, événements | DOS560, EVE300 | |
+| ✅ | ~~Texte complémentaire~~ | DOS560 (option 3 de NEG510), AB0011 | Fait (30/10) : saisi avec l'en-tête (8 lignes de 40, cases ARC / BL / facture), imprimé sur l'ARC si la case est cochée, supprimé avec la commande ; AB0011 journalisée |
+| ⚪ | Événements et commentaires | EVE300 (option 5 de NEG510, option EC de NEG515) | Commun à plusieurs écrans |
+| ⛔ | ~~Copie / transfert de reliquat d'une ligne vers une autre commande (NEG510 F14)~~ | — | Abandonné (David, 30/10) |
 | ⚪ | Transformation d'un dossier de fabrication en commande | DOS500S option TR | RAUCLEF absent des sources |
 | ⚪ | Création depuis une proforma | DOS505 R20 | Doit passer par le même service que la saisie |
 | ⚪ | Recherche d'article (F4) dans la saisie de ligne | — | Pas de liste « Article » dans le Noyau (`IListesDeChoix`) |

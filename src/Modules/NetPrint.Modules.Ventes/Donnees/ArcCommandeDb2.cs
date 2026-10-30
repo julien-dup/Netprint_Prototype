@@ -209,7 +209,8 @@ internal sealed class ArcCommandeDb2(IConfiguration config)
             WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ? AND CCIARC = 'O'
             """, ct, societe, cle.Numero, cle.Cle))
             if (await rd.ReadAsync(ct))
-                complement = Enumerable.Range(0, 8).Select(rd.Texte).Reverse().SkipWhile(x => x == "").Reverse().ToList();
+                complement = Enumerable.Range(0, 8).Select(i => rd.IsDBNull(i) ? "" : Convert.ToString(rd.GetValue(i))!.TrimEnd())
+                    .Reverse().SkipWhile(x => x == "").Reverse().ToList();
 
         bool soldees = true, butoir = false, cadre = true;
         var position = "B";
