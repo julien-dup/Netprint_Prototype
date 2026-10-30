@@ -123,6 +123,29 @@ public static class VentesModule
                 }
             });
 
+        // Brouillon de message Outlook (.eml) avec les ARC en pièces jointes, sans serveur SMTP :
+        // GET /api/ventes/commandes/arc/message?c=24-1&c=25-1&a=client@exemple.fr&cc=autre@exemple.fr&soldees=O
+        api.MapGet("/commandes/arc/message",
+            async (string[]? c, string[]? a, string[]? cc, string? soldees, HttpContext http, IEditionArc arc, CancellationToken ct) =>
+            {
+                var cles = new List<CleCommande>();
+                foreach (var v in c ?? [])
+                    if (v.Split('-') is [var n, var k] && int.TryParse(n, out var numero)) cles.Add(new CleCommande(numero, k.Trim().ToUpperInvariant()));
+                    else return Results.BadRequest($"Commande invalide : {v}");
+                try
+                {
+                    var eml = await arc.PreparerMessageAsync(cles, a ?? [], cc ?? [],
+                        soldees switch { "O" or "o" => true, "N" or "n" => false, _ => null }, ct);
+                    http.Response.Headers.ContentDisposition =
+                        new ContentDispositionHeaderValue("attachment") { FileNameStar = eml.Nom }.ToString();
+                    return Results.File(eml.Contenu, MessageBrouillon.TypeEml);
+                }
+                catch (RegleMetierException ex)
+                {
+                    return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
         // Ouverture d'un document d'un devis (fenêtre Documents) : GET /api/ventes/devis/documents/123
         // PDF, images et texte s'affichent dans le navigateur, les autres fichiers se téléchargent.
         api.MapGet("/devis/documents/{id:int}",

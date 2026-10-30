@@ -15,6 +15,9 @@ namespace NetPrint.Modules.Ventes.Impressions;
 // =====================================================================
 internal sealed class DocumentArc(ModeleArc m, IdentiteSociete? societe, bool apercu) : IDocument
 {
+    // Logos des éditions WinDev propres à l'ARC : LogoArc<soc>…
+    public const string TypeLogo = "Arc";
+
     public void Compose(IDocumentContainer conteneur) => conteneur.Page(page =>
     {
         page.PageStandard(apercu);

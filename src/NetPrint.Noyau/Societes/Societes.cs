@@ -11,12 +11,14 @@ public interface ISocietes
     // Nom réduit de la société (AA0007.SRS) ; null si la société n'existe pas
     Task<string?> LireNomAsync(int societe, CancellationToken ct = default);
 
-    // Identité de la société émettrice des documents (en-tête, mentions légales, logo de l'enseigne) ; null si absente
-    Task<IdentiteSociete?> LireIdentiteAsync(int societe, string enseigne = "", CancellationToken ct = default);
+    // Identité de la société émettrice des documents (en-tête, mentions légales, logo de l'enseigne) ; null si absente.
+    // typeLogo : logo propre au document (« Arc » : LogoArc<soc>… des éditions WinDev), sinon le logo général.
+    Task<IdentiteSociete?> LireIdentiteAsync(int societe, string enseigne = "", string typeLogo = "", CancellationToken ct = default);
 }
 
-// Société émettrice (AA0007). Le logo vient du dossier configuré Documents:Logos ({société}-{enseigne}.png, puis
-// {société}.png ; .jpg accepté) : les logos de l'IBM i sont des overlays d'impression, inutilisables hors du 5250.
+// Société émettrice (AA0007). Le logo vient du dossier configuré Documents:Logos : les logos des éditions IBM i sont des
+// objets *OVL, inutilisables hors du 5250 ; on reprend les fichiers des éditions WinDev (répertoire de NetPrint sur les
+// postes), sous leurs noms : voir SocietesDb2.NomsLogo.
 public sealed record IdentiteSociete(
     int Societe, string RaisonSociale, string FormeJuridique, string Rue1, string Rue2, string CodePostal, string Ville,
     string Telephone, string Email, string SiteWeb, string Siren, string Siret, string Ape, string Capital, byte[]? Logo)
@@ -52,11 +54,11 @@ internal sealed class SocietesDb2(IConfiguration config, IHostEnvironment env) :
         return res is null ? null : res is DBNull ? "" : Convert.ToString(res)!.Trim();
     }
 
-    public async Task<IdentiteSociete?> LireIdentiteAsync(int societe, string enseigne = "", CancellationToken ct = default)
+    public async Task<IdentiteSociete?> LireIdentiteAsync(int societe, string enseigne = "", string typeLogo = "", CancellationToken ct = default)
     {
         if (ModeDemo.Actif(config, env) && string.IsNullOrWhiteSpace(config.GetConnectionString(BaseDb2.NomChaine)))
             return new IdentiteSociete(societe, $"SOCIÉTÉ {societe} (démo)", "SAS", "1 rue de l'Exemple", "", "75000", "PARIS",
-                "01 00 00 00 00", "", "", "", "", "", "", Logo(societe, enseigne));
+                "01 00 00 00 00", "", "", "", "", "", "", Logo(societe, enseigne, typeLogo));
 
         var bib = BaseDb2.Bibliotheque(config);
         await using var cnx = BaseDb2.Connexion(config);
@@ -71,15 +73,14 @@ internal sealed class SocietesDb2(IConfiguration config, IHostEnvironment env) :
         if (!await rd.ReadAsync(ct)) return null;
         string T(int i) => rd.IsDBNull(i) ? "" : Convert.ToString(rd.GetValue(i))!.Trim();
         return new IdentiteSociete(societe, T(0), T(1), T(2), T(3), T(4), T(5), T(6), T(7), T(8), T(9), T(10), T(11), T(12),
-            Logo(societe, enseigne));
+            Logo(societe, enseigne, typeLogo));
     }
 
-    private byte[]? Logo(int societe, string enseigne)
+    private byte[]? Logo(int societe, string enseigne, string typeLogo)
     {
         if (config["Documents:Logos"] is not { Length: > 0 } dossier || !Directory.Exists(dossier)) return null;
-        var noms = enseigne.Trim() == "" ? new[] { $"{societe}" } : [$"{societe}-{enseigne.Trim()}", $"{societe}"];
-        foreach (var nom in noms)
-            foreach (var ext in new[] { ".png", ".jpg" })
+        foreach (var nom in LogosSociete.Noms(societe, enseigne, typeLogo))
+            foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".bmp" })
                 if (Path.Combine(dossier, nom + ext) is var chemin && File.Exists(chemin)) return LireLogo(chemin);
         return null;
     }
@@ -94,5 +95,25 @@ internal sealed class SocietesDb2(IConfiguration config, IHostEnvironment env) :
         var contenu = File.ReadAllBytes(chemin);
         Logos[chemin] = (date, contenu);
         return contenu;
+    }
+}
+
+public static class LogosSociete
+{
+    // Noms cherchés, du plus précis au plus général, d'abord ceux sans ambiguïté (<soc>-<enseigne>, <soc>), puis ceux des
+    // visionneuses WinDev (VisuArc : Logo<type><soc><n°>, Logo<soc><n°>, Logo<type><soc>, Logo<soc>, Logo<type>), le n°
+    // étant l'enseigne. Les noms WinDev n'ont pas de séparateur (Logo12 = société 12, ou société 1 enseigne 2) : un
+    // fichier <soc>-<enseigne> ou <soc> lève l'ambiguïté.
+    public static IEnumerable<string> Noms(int societe, string enseigne, string typeLogo = "")
+    {
+        var e = enseigne.Trim();
+        var t = typeLogo.Trim();
+        if (e != "") yield return $"{societe}-{e}";
+        yield return $"{societe}";
+        if (e != "" && t != "") yield return $"Logo{t}{societe}{e}";
+        if (e != "") yield return $"Logo{societe}{e}";
+        if (t != "") yield return $"Logo{t}{societe}";
+        yield return $"Logo{societe}";
+        if (t != "") yield return $"Logo{t}";
     }
 }

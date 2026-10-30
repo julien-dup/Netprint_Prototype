@@ -1,0 +1,164 @@
+@* =====================================================================
+   ARC d'une ou de plusieurs commandes d'un client (NEG510 F18, EnvoiARC) : PDF, ou message Outlook préparé.
+   Le message est un brouillon .eml (pièces jointes comprises) qui s'ouvre dans la messagerie de l'utilisateur :
+   pas de serveur SMTP, l'utilisateur relit et envoie, comme avec EnvoiARC.
+   Destinataires : contacts ARC du client (PRT051F), le premier coché en destinataire, les autres en copie (EnvoiARC R5).
+   ===================================================================== *@
+@inject IEditionArc Arc
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+@inject IJSRuntime JS
+
+<div class="voile" @onclick="Fermer">
+    <div class="fenetre fenetre-arc" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+        <div class="titre-fenetre">🖨 Accusé de réception @(Commandes.Count == 1 ? $"de la commande {Commandes[0].Cle.Libelle}" : $"de {Commandes.Count} commandes") · @Client</div>
+        <div class="corps-fenetre">
+            @if (options is null)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else
+            {
+                @if (Commandes.Count > 1)
+                {
+                    <h3>Commandes</h3>
+                    <div class="liste-cases">
+                        @foreach (var c in Commandes)
+                        {
+                            <label class="champ-case">
+                                <input type="checkbox" checked="@retenues.Contains(c.Cle)" @onchange="e => Basculer(retenues, c.Cle, e)" />
+                                <span><b>@c.Cle.Libelle</b> @c.Libelle</span>
+                            </label>
+                        }
+                    </div>
+                }
+                <label class="champ-case"><input type="checkbox" @bind="soldees" /> <span>Avec les lignes soldées (quantité commandée ; sinon reste à livrer)</span></label>
+
+                <h3>Envoi par e-mail</h3>
+                @if (options.Contacts.Count == 0)
+                {
+                    <p class="aide">Aucun contact ARC pour ce client (fiche client, contacts « envoi d'ARC »).</p>
+                }
+                <div class="liste-cases">
+                    @foreach (var contact in options.Contacts)
+                    {
+                        <label class="champ-case">
+                            <input type="checkbox" checked="@coches.Contains(contact.Email)" @onchange="e => Basculer(coches, contact.Email, e)" />
+                            <span>@contact.Nom <span class="discret">&lt;@contact.Email&gt;</span>@if (contact.ParDefaut) {<span class="badge badge-appel">par défaut</span>}</span>
+                        </label>
+                    }
+                </div>
+                <label class="champ large"><span>Autres adresses (séparées par « ; »)</span><input @bind="autres" @bind:event="oninput" /></label>
+                <p class="aide">
+                    @if (Destinataires.Count == 0)
+                    {
+                        <span>Sans destinataire, le message s'ouvre à compléter.</span>
+                    }
+                    else
+                    {
+                        <span>À : <b>@Destinataires[0]</b>@if (Destinataires.Count > 1) {<span> · copie : @string.Join(", ", Destinataires.Skip(1))</span>}</span>
+                    }
+                    Le message s'ouvre dans Outlook avec les ARC joints ; vous le relisez et l'envoyez.
+                </p>
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="espace"></span>
+            <button type="button" @onclick="Fermer">Fermer</button>
+            @if (options is not null && Commandes.Count == 1)
+            {
+                <a class="bouton-ancre" href="@AdressePdf" target="_blank" rel="noopener">📄 Ouvrir le PDF</a>
+            }
+            @if (options is not null)
+            {
+                @if (retenues.Count > Maximum)
+                {
+                    <span class="message-erreur">@Maximum ARC au plus par message (@retenues.Count cochés).</span>
+                }
+                <button type="button" class="bouton-principal" disabled="@(retenues.Count == 0 || retenues.Count > Maximum || enCours)"
+                        title="Brouillon de message (.eml) à ouvrir dans Outlook" @onclick="PreparerMessageAsync">
+                    @(enCours ? "Préparation…" : "✉ Préparer le message")
+                </button>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    public sealed record CommandeArc(CleCommande Cle, string Libelle);
+
+    [Parameter, EditorRequired] public IReadOnlyList<CommandeArc> Commandes { get; set; } = [];
+    [Parameter] public string Client { get; set; } = "";
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private OptionsArc? options;
+    private bool soldees = true;
+    private readonly HashSet<CleCommande> retenues = [];
+    private readonly HashSet<string> coches = new(StringComparer.OrdinalIgnoreCase);
+    private string autres = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            options = await Arc.LireOptionsAsync(Commandes.Select(c => c.Cle).ToList());
+            soldees = options.AvecLignesSoldees;
+            retenues.UnionWith(Commandes.Select(c => c.Cle));
+            // Destinataires par défaut (CNARCD), sinon tous les contacts ARC (comme EnvoiARC)
+            var defaut = options.Contacts.Where(c => c.ParDefaut).ToList();
+            coches.UnionWith((defaut.Count > 0 ? defaut : options.Contacts).Select(c => c.Email));
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Préparation de l'ARC impossible : {ex.Message}");
+            await OnFermer.InvokeAsync();
+        }
+    }
+
+    // Ordre : contacts dans l'ordre de la fiche (le défaut en premier), puis adresses saisies
+    private List<string> Destinataires =>
+        (options?.Contacts.Where(c => coches.Contains(c.Email)).Select(c => c.Email) ?? [])
+        .Concat(autres.Split(';', ',').Select(a => a.Trim()).Where(a => a.Contains('@')))
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private string Soldees => soldees ? "O" : "N";
+
+    private string AdressePdf => $"api/ventes/commandes/{Commandes[0].Cle.Numero}/{Commandes[0].Cle.Cle}/arc?soldees={Soldees}";
+
+    private bool enCours;
+    private const int Maximum = 50;   // comme EditionArcService
+
+    // Brouillon produit ici (erreurs affichées dans l'application), puis téléchargé : le navigateur l'ouvre dans Outlook
+    private async Task PreparerMessageAsync()
+    {
+        enCours = true;
+        try
+        {
+            var d = Destinataires;
+            var eml = await Arc.PreparerMessageAsync(Commandes.Select(c => c.Cle).Where(retenues.Contains).ToList(), d.Take(1).ToList(),
+                d.Skip(1).ToList(), soldees);
+            await JS.TelechargerAsync(eml.Nom, NetPrint.Socle.Documents.MessageBrouillon.TypeEml, eml.Contenu);
+            Notifications.Succes("Message préparé : ouvrez-le dans Outlook pour le relire et l'envoyer.");
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Préparation du message impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private static void Basculer<T>(HashSet<T> ensemble, T valeur, ChangeEventArgs e)
+    {
+        if (e.Value is true) ensemble.Add(valeur);
+        else ensemble.Remove(valeur);
+    }
+
+    private Task Fermer() => OnFermer.InvokeAsync();
+}

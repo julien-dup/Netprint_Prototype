@@ -57,8 +57,9 @@ Questions ouvertes :
 | 🟠 | Copie d'une commande | DOS500S option 3, DOS505 COPT 03 | |
 | 🟠 | Copie / transfert de reliquat d'une ligne vers une autre commande | NEG510 F14 | Déplace quantité et réservation : opération transactionnelle |
 | ✅ | ~~ARC : édition et aperçu~~ | ARC105P, NEG510 F18 | Fait (30/10) : PDF produit par l'application (QuestPDF), canevas ARC010F / ARC015F décodés, traductions PRT008, aperçu à côté de la fiche mis à jour à chaque modification. Guide : `docs/editions-pdf.md` |
-| 🟠 | ARC : envoi par e-mail | NEG510 F18 (ARC105CLP, ARC106, chapitre A du canevas), EnvoiARC | Destinataire AA0003.CEMAIL ou PRT051F ; corps = chapitre A. Pas de SMTP dans le prototype : à faire avec le service documents |
-| 🟠 | ARC : logos des sociétés | PRT003F (overlays AFP) | Fournir les logos en image (dossier `Documents:Logos`) ; à défaut, en-tête texte |
+| ✅ | ~~ARC : envoi par e-mail~~ | NEG510 F18, ARC105CLP / ARC106, EnvoiARC, VisuArc | Fait (30/10) : brouillon Outlook (.eml) avec les ARC joints, sans SMTP ; contacts ARC PRT051F (1er coché = destinataire, autres en copie) ; objet d'ARC105CLP / EnvoiARC, texte = chapitre A du canevas. Depuis la fiche (une commande) et la liste (commandes affichées d'un client, 50 au plus) |
+| 🟠 | Brouillon .eml dans le nouvel Outlook / Outlook web | — | Outlook classique ouvre le brouillon ; le nouvel Outlook et Outlook web gèrent mal `X-Unsent`. Pour le SaaS : brouillon créé par Microsoft Graph dans la boîte de l'utilisateur |
+| 🟠 | ARC : logos des sociétés | Fichiers BMP / JPEG des éditions WinDev (répertoire NetPrint des postes) | Les copier dans le dossier `Documents:Logos`, sous leurs noms (`LogoArc<soc>`…) ; à défaut, en-tête texte |
 | ⚪ | ARC : historique des envois, ARC sans prix, ARC modificatif | — | N'existent pas dans le RPG : à décider |
 | ⚪ | ARC des dossiers de fabrication (type 1) | ARC100 / ARC105F | Hors commandes de négoce et produit fini |
 | ⚪ | Maintenance des canevas d'ARC | ARC010S / ARC010 (5250 seulement) | Écran à reprendre si les canevas restent la source des textes |

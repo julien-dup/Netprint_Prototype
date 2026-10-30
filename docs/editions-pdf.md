@@ -11,10 +11,21 @@ schéma.
 | `Socle/Documents/DocumentsPdf.cs` | Licence et polices QuestPDF, `PageStandard(apercu)` (A4, marges, police, filigrane « APERÇU »), formats français (`Montant`, `Prix`, `Quantite`, `Date`), `Gras(bool)`, couleurs, `Reponse(http, document)` (PDF affiché dans le navigateur), `DocumentGenere(Nom, Contenu)` |
 | `Noyau/Societes` : `ISocietes.LireIdentiteAsync(societe, enseigne)` | Société émettrice (AA0007) : raison sociale, adresse, contacts, `MentionsLegales` (forme, capital, SIRET, APE), logo |
 | `Directory.Packages.props` | QuestPDF (licence Community : gratuite sous 1 M$ de chiffre d'affaires annuel, sinon licence Professional) |
+| `Socle/Documents/MessageBrouillon.cs` | Message à envoyer par la messagerie de l'utilisateur, **sans serveur SMTP** : fichier `.eml` « non envoyé » (`X-Unsent: 1`) avec destinataires, objet, texte et pièces jointes ; Outlook l'ouvre comme un brouillon prêt à partir |
+| `Noyau/Tiers` : `IContactsTiers.LireAsync(..., DocumentEnvoye)` | Contacts du client destinataires d'un document (PRT051F : ARC, offre, BL, facture, PV de contrôle, BAG), « par défaut » en premier |
 
-**Logos.** Les logos de l'IBM i sont des overlays d'impression (PRT003F : PRINTOR, ADEM2…), inutilisables hors du
-5250. Ils sont remplacés par des images : dossier `Documents:Logos` (configuration ou user-secrets de NetPrint.Web),
-fichiers `{société}-{enseigne}.png`, puis `{société}.png` (`.jpg` accepté). Sans logo, l'en-tête ne montre que le texte.
+**Logos.** Ceux des éditions IBM i sont des objets `*OVL`, inutilisables hors du 5250. On reprend les fichiers BMP ou
+JPEG des éditions WinDev (répertoire de NetPrint sur les postes), copiés dans le dossier `Documents:Logos`
+(configuration ou user-secrets de NetPrint.Web), sous leurs noms. Ordre de recherche (`LogosSociete.Noms`, type de
+document passé à `LireIdentiteAsync`, « Arc » pour l'ARC) : `<soc>-<enseigne>`, `<soc>` (sans ambiguïté), puis les noms
+WinDev `Logo<type><soc><enseigne>`, `Logo<soc><enseigne>`, `Logo<type><soc>`, `Logo<soc>`, `Logo<type>` (`.png`, `.jpg`,
+`.jpeg`, `.bmp`). Les noms WinDev n'ont pas de séparateur : `Logo12` peut être la société 12 ou la société 1 enseigne 2 ;
+un fichier `12.png` ou `1-2.png` lève le doute. Sans logo, l'en-tête ne montre que le texte.
+
+**Envoi par e-mail.** Comme EnvoiARC et VisuArc (Outlook sur le poste), l'application prépare le message et
+l'utilisateur l'envoie : `MessageBrouillon.VersEml(nom)`, téléchargé par l'écran (`JS.TelechargerAsync`, Web.Commun) après avoir traité les erreurs. Outlook classique
+l'ouvre en brouillon, pièces jointes comprises. Évolution possible pour le SaaS : créer le brouillon directement dans
+la boîte Microsoft 365 de l'utilisateur (Microsoft Graph), sans téléchargement.
 
 ## Ce que fait chaque module
 

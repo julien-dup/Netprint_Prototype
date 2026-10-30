@@ -214,6 +214,29 @@ internal static partial class ArcCommande
     }
 
     // ------------------------------------------------------------------
+    // Message d'envoi : objet d'ARC105CLP (« Accusé de réception de votre commande <réf.> du <date> ») pour une commande,
+    // d'EnvoiARC (« ARC du client <nom> ») pour plusieurs ; texte = chapitre A du canevas (variables de la 1re commande)
+    // ------------------------------------------------------------------
+    internal const string TexteParDefaut = "Veuillez trouver ci-joint notre accusé de réception de commande.\n\n" +
+        "Nous restons à votre entière disposition pour tout renseignement complémentaire.\n\nLe service commercial";
+
+    internal static (string Objet, string Texte) Message(IReadOnlyList<DonneesArc> commandes, DateOnly aujourdhui)
+    {
+        var e = commandes[0].Entete;
+        string objet;
+        if (commandes.Count > 1) objet = $"ARC du client {e.Client.RaisonSociale}";
+        else if (e.ReferenceCommande != "")
+            objet = $"Accusé de réception de votre commande {e.ReferenceCommande}" +
+                    (e.DateCommandeClient is { } dc ? $" du {dc:dd/MM/yyyy}" : "");
+        else objet = $"Accusé de réception de la commande {e.Cle.Libelle}";
+
+        var d = commandes[0];
+        var lignes = Chapitre(Canevas(d.Canevas, e.TypeProduit, e.Categorie, e.SousCategorie, e.Langue, "A"), "A",
+            Variables(e, Libelles.Pour(d.Traductions), aujourdhui));
+        var texte = lignes.Count > 0 ? string.Join("\n", lignes.Select(l => l.Texte.TrimEnd())) : TexteParDefaut;
+        return (objet, texte);
+    }
+
     public static ModeleArc Construire(DonneesArc d, bool avecSoldees, DateOnly aujourdhui)
     {
         var e = d.Entete;

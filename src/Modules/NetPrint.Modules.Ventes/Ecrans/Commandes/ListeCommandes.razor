@@ -34,8 +34,16 @@
         <button title="Replier toutes les commandes" @onclick="() => Etat.Depliees.Clear()">⊟ Tout replier</button>
     }
     <span class="espace"></span>
+    <button disabled="@(RaisonEnvoiArc is not null)" title="@(RaisonEnvoiArc ?? "Préparer un message Outlook avec les ARC des commandes affichées (EnvoiARC)")"
+            @onclick="() => envoiArc = true">✉ Envoyer les ARC</button>
     <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche de la commande sélectionnée (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir la commande</button>
 </fieldset>
+
+@if (envoiArc && RaisonEnvoiArc is null)
+{
+    <FenetreArc Commandes="@(commandesFiltrees.Select(c => new FenetreArc.CommandeArc(c.Cle, $"{c.ReferenceCommandeClient} {c.Designation}".Trim())).ToList())"
+                Client="@commandesFiltrees[0].NomClient" OnFermer="() => envoiArc = false" />
+}
 
 <form class="panneau-criteres" @onsubmit="RechercherAsync">
     <div class="champ">
@@ -388,6 +396,14 @@
     private bool menuColonnes;
 
     private List<CommandeListe> commandesFiltrees = [];
+
+    // Envoi groupé des ARC (EnvoiARC) : commandes affichées d'un seul client (recherche par client et période)
+    private bool envoiArc;
+    private string? RaisonEnvoiArc =>
+        contexte?.Droits.Editer == false ? "Vous n'êtes pas autorisé à éditer les commandes"
+        : commandesFiltrees.Count == 0 ? "Recherchez d'abord les commandes d'un client (par exemple sur une période)"
+        : commandesFiltrees.Select(c => c.Client).Distinct().Count() > 1 ? "Les commandes affichées doivent être celles d'un seul client"
+        : null;
     private List<Rangee> rangees = [];
     private List<LigneAffichee> lignesAffichees = [];
     private ColonneListe<CommandeListe>[] colonnesCommandes = ColonnesCommandes;

@@ -147,3 +147,5 @@ input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
 .barre-outils button.actif { background: #e0f2fe; border-color: #7dd3fc; }
 .fenetre.fenetre-arc { width: min(560px, 94vw); }
 .fenetre-arc .corps-fenetre { display: flex; flex-direction: column; gap: 10px; }
+.fenetre-arc h3 { margin: 6px 0 0; font-size: 0.95em; }
+.fenetre-arc .liste-cases { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }

@@ -209,6 +209,33 @@ public class ArcCommandeTests
         Assert.False(ArcCommande.Construire(Donnees([new("", "", "", "2", "", 1, "Facturé à : $CRSF", false)]), true, new(2026, 10, 30)).EnteteParCanevas);
     }
 
+    // ---------- Message d'envoi ----------
+    [Fact]
+    public void Objet_et_texte_du_message()
+    {
+        var aujourdhui = new DateOnly(2026, 10, 30);
+        var chapitreA = new List<LigneCanevas> { new("", "", "", "A", "", 1, "Veuillez trouver l'ARC de la commande $EDOS.", false) };
+        var une = Donnees(chapitreA);
+        Assert.Equal(("Accusé de réception de la commande 00024/1", "Veuillez trouver l'ARC de la commande 00024/1."),
+            ArcCommande.Message([une], aujourdhui));
+
+        var avecReference = une with { Entete = une.Entete with { ReferenceCommande = "PO-12", DateCommandeClient = new(2026, 10, 2) } };
+        Assert.Equal("Accusé de réception de votre commande PO-12 du 02/10/2026", ArcCommande.Message([avecReference], aujourdhui).Objet);
+
+        var deux = ArcCommande.Message([une, une with { Entete = une.Entete with { Cle = new CleCommande(25, "1") } }], aujourdhui);
+        Assert.Equal("ARC du client LABORATOIRES CLARINS", deux.Objet);
+
+        Assert.Equal(ArcCommande.TexteParDefaut, ArcCommande.Message([Donnees([])], aujourdhui).Texte);   // sans chapitre A
+    }
+
+    [Fact]
+    public void Noms_des_logos_sans_ambiguite_d_abord()
+    {
+        Assert.Equal(["8-1", "8", "LogoArc81", "Logo81", "LogoArc8", "Logo8", "LogoArc"],
+            NetPrint.Noyau.Societes.LogosSociete.Noms(8, "1", "Arc"));
+        Assert.Equal(["8", "Logo8"], NetPrint.Noyau.Societes.LogosSociete.Noms(8, "", ""));
+    }
+
     // ---------- Jeux d'essai ----------
     private static LigneArc Ligne(int n) => new(
         Numero: n, TypeLigne: "V", ALaDemande: false, Article: "393228", Indice: "A", Designation: "ETIQUETTE", QuantiteCommandee: 2500,
