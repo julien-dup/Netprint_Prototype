@@ -12,7 +12,7 @@ public class JournalisationDb2Tests(ITestOutputHelper sortie)
     public static readonly string[] TablesEcrites =
     [
         "AB001", "AB001FA", "AB0016", "NEG100", "NEG100E", "NEG100T", "NEG100S", "EXP020", "EVE100", "EVE105", "SYN100",
-        "DOS040", "ABREPE", "ABREPD", "ABCOUTE", "ABCOUTD", "ABCOUTB", "AFC020", "AB0020", "ABDIRL", "ABDIRP", "DIR100",
+        "DOS040", "ABREPE", "ABREPD", "ABCOUTE", "ABCOUTD", "ABCOUTB", "AFC020", "AB0020", "ABDIRL", "ABDIRP", "DIR100", "ENV100",
     ];
 
     [FactDb2]
