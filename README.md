@@ -23,6 +23,10 @@ Toute connexion est alors acceptée (développement uniquement) ; les écrans qu
 
 Connexion : profil et mot de passe IBM i, code société (AA0007), compte général (411000 par défaut).
 
+**Logos des éditions PDF** (ARC, devis…) : copier les fichiers BMP / JPEG des éditions WinDev (répertoire NetPrint
+d'un poste) dans `src/NetPrint.Web/Logos`, sans les renommer. Mode d'emploi : `src/NetPrint.Web/Logos/LISEZMOI.md` ;
+production des PDF : `docs/editions-pdf.md`.
+
 ## Organisation
 
 ```

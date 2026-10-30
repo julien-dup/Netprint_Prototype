@@ -15,8 +15,8 @@ schéma.
 | `Noyau/Tiers` : `IContactsTiers.LireAsync(..., DocumentEnvoye)` | Contacts du client destinataires d'un document (PRT051F : ARC, offre, BL, facture, PV de contrôle, BAG), « par défaut » en premier |
 
 **Logos.** Ceux des éditions IBM i sont des objets `*OVL`, inutilisables hors du 5250. On reprend les fichiers BMP ou
-JPEG des éditions WinDev (répertoire de NetPrint sur les postes), copiés dans le dossier `Documents:Logos`
-(configuration ou user-secrets de NetPrint.Web), sous leurs noms. Ordre de recherche (`LogosSociete.Noms`, type de
+JPEG des éditions WinDev (répertoire de NetPrint sur les postes), copiés dans le dossier `src/NetPrint.Web/Logos`
+(ou celui de la clé `Documents:Logos`), sous leurs noms : mode d'emploi dans `src/NetPrint.Web/Logos/LISEZMOI.md`. Ordre de recherche (`LogosSociete.Noms`, type de
 document passé à `LireIdentiteAsync`, « Arc » pour l'ARC) : `<soc>-<enseigne>`, `<soc>` (sans ambiguïté), puis les noms
 WinDev `Logo<type><soc><enseigne>`, `Logo<soc><enseigne>`, `Logo<type><soc>`, `Logo<soc>`, `Logo<type>` (`.png`, `.jpg`,
 `.jpeg`, `.bmp`). Les noms WinDev n'ont pas de séparateur : `Logo12` peut être la société 12 ou la société 1 enseigne 2 ;

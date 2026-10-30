@@ -16,7 +16,8 @@ public interface ISocietes
     Task<IdentiteSociete?> LireIdentiteAsync(int societe, string enseigne = "", string typeLogo = "", CancellationToken ct = default);
 }
 
-// Société émettrice (AA0007). Le logo vient du dossier configuré Documents:Logos : les logos des éditions IBM i sont des
+// Société émettrice (AA0007). Le logo vient du dossier Logos de l'application (src/NetPrint.Web/Logos, ou celui de la
+// clé Documents:Logos) : voir Logos/LISEZMOI.md. Les logos des éditions IBM i sont des
 // objets *OVL, inutilisables hors du 5250 ; on reprend les fichiers des éditions WinDev (répertoire de NetPrint sur les
 // postes), sous leurs noms : voir SocietesDb2.NomsLogo.
 public sealed record IdentiteSociete(
@@ -78,7 +79,9 @@ internal sealed class SocietesDb2(IConfiguration config, IHostEnvironment env) :
 
     private byte[]? Logo(int societe, string enseigne, string typeLogo)
     {
-        if (config["Documents:Logos"] is not { Length: > 0 } dossier || !Directory.Exists(dossier)) return null;
+        // Dossier Logos de l'application (à côté de NetPrint.Web), sauf autre dossier configuré (Documents:Logos)
+        var dossier = config["Documents:Logos"] is { Length: > 0 } configure ? configure : Path.Combine(env.ContentRootPath, "Logos");
+        if (!Directory.Exists(dossier)) return null;
         foreach (var nom in LogosSociete.Noms(societe, enseigne, typeLogo))
             foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".bmp" })
                 if (Path.Combine(dossier, nom + ext) is var chemin && File.Exists(chemin)) return LireLogo(chemin);
