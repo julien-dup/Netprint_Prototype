@@ -1,0 +1,21 @@
+# Fins de ligne normalisées dans le dépôt (LF), converties selon le poste à l'extraction.
+# Évite qu'un fichier apparaisse « entièrement modifié » entre deux postes.
+* text=auto
+
+# Scripts shell : toujours LF (le garde-fou .githooks/pre-push doit rester exécutable sous Git Bash)
+*.sh       text eol=lf
+.githooks/* text eol=lf
+
+# Fichiers Windows : CRLF
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+*.ps1      text eol=crlf
+
+# Binaires
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
