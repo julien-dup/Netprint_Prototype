@@ -33,6 +33,8 @@
             @onclick="() => repriseDevis = true">📄 Ligne d'après un devis</button>
     <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Reporter la date de livraison de plusieurs lignes (F19 de NEG520)" : RaisonNonModifiable)"
             @onclick="() => reportDates = true">📅 Reporter des dates</button>
+    <button disabled="@(fiche is null)" title="Paramètres de facturation automatique (F13 de DOS505)"
+            @onclick="() => facturationAuto = true">🧾 Facturation auto</button>
     @if (fiche is { Entete.Soldee: true })
     {
         <button disabled="@(!fiche.Droits.Creer || fiche.Entete.NonModifiable)" title="Remettre la commande en cours (ses lignes soldées le restent)"
@@ -204,6 +206,10 @@
     <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" Initiale="ligneInitiale" CodesVente="codesVente"
                   ClientArticles="@fiche.Entete.Client"
                   OnFermer="FermerLigneAsync" />
+}
+@if (facturationAuto && fiche is not null)
+{
+    <FenetreFacturationAuto Commande="CleCourante" Modifiable="PeutModifier" OnFermer="() => facturationAuto = false" />
 }
 @if (reportDates && fiche is not null)
 {
@@ -378,6 +384,8 @@
 
     // Nouvel appel de livraison sur une ligne « à la demande »
     private Task OuvrirAppelAsync(int origine) => OuvrirLigneAsync(0, origine);
+
+    private bool facturationAuto;
 
     // Report de dates en masse : la fiche est relue après un report
     private bool reportDates;

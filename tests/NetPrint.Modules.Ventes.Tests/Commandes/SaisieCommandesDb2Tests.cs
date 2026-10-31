@@ -54,6 +54,59 @@ public class SaisieCommandesDb2Tests(ITestOutputHelper sortie)
         sortie.WriteLine(r.ToString());
     }
 
+    // Paramètres de facturation automatique (F13 de DOS505, AB001FA) d'une commande d'essai : lecture, contrôles, écriture
+    [FactDb2Ecriture]
+    public async Task Parametres_de_facturation_automatique()
+    {
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var client = await LireDatesClientAsync(cnx);
+        CleCommande? cle = null;
+        try
+        {
+            var service = Service();
+            var e = await service.PreparerAsync(new DebutCommande
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, TypeCommande = "4", Enseigne = "1",
+            });
+            (e.Designation1, e.DateLivraison, e.Interlocuteur, e.Fabricant) =
+                ("TEST NETPRINT SAAS FACTURATION - A SUPPRIMER", DateOnly.FromDateTime(DateTime.Today.AddDays(15)), "TEST SAAS", "LEN");
+            cle = await service.CreerAsync(e);
+            var facturation = new FacturationAutomatiqueService(new FacturationAutomatiqueDb2(BaseDeTest.Configuration), service,
+                new ConsultationCommandesDb2(BaseDeTest.Configuration), new Utilisateur());
+
+            var f = (await facturation.LireAsync(cle))!;
+            sortie.WriteLine($"Commande {cle.Libelle} : auto {f.Automatique}, adresse {f.NumeroAdresse}, règlement {f.ConditionsReglement}, texte {f.TextePied}");
+
+            // N° d'adresse inexistant, n° et adresse ensemble, origine inconnue : refusés
+            f.NumeroAdresse = 9999;
+            var ex = await Assert.ThrowsAsync<SaisieInvalideException>(() => facturation.EnregistrerAsync(cle, f));
+            Assert.Contains(ex.Erreurs, x => x.Message == MessagesFacturation.AdresseInexistante);
+            f.Nom = "CLARINS COMPTABILITE";
+            ex = await Assert.ThrowsAsync<SaisieInvalideException>(() => facturation.EnregistrerAsync(cle, f));
+            Assert.Contains(ex.Erreurs, x => x.Message == MessagesFacturation.AdresseOuNumero);
+            (f.NumeroAdresse, f.OrigineTechnique) = (null, "ZZZ");
+            ex = await Assert.ThrowsAsync<SaisieInvalideException>(() => facturation.EnregistrerAsync(cle, f));
+            Assert.Equal(nameof(FacturationAutomatique.OrigineTechnique), Assert.Single(ex.Erreurs).Zone);
+
+            // Adresse saisie, acompte, conditions du donneur d'ordre : écrits puis relus
+            (f.OrigineTechnique, f.Automatique, f.Rue1, f.CodePostal, f.Ville, f.Attention, f.Acompte, f.ConditionsReglement, f.EditionDetailBl) =
+                ("", false, "1 rue des Tests", "76000", "ROUEN", "Service comptable", 150.5m, ConditionsFacturation.DonneurOrdre, true);
+            await facturation.EnregistrerAsync(cle, f);
+            var lue = (await facturation.LireAsync(cle))!;
+            Assert.Equal((false, (int?)null, "CLARINS COMPTABILITE", "ROUEN", "Service comptable", (decimal?)150.5m, "1", true),
+                (lue.Automatique, lue.NumeroAdresse, lue.Nom, lue.Ville, lue.Attention, lue.Acompte, lue.ConditionsReglement, lue.EditionDetailBl));
+
+            // Fenêtre restée ouverte pendant une autre modification : refus
+            f.Attention = "AUTRE";
+            await Assert.ThrowsAsync<RegleMetierException>(() => facturation.EnregistrerAsync(cle, f));
+        }
+        finally
+        {
+            if (cle is not null) await NettoyerAsync(cnx, cle, client);
+        }
+    }
+
     [FactDb2Ecriture]
     public async Task Creation_puis_modification_d_un_en_tete()
     {
