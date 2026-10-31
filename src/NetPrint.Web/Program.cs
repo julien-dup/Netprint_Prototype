@@ -49,6 +49,7 @@ app.MapEndpointsCompte();
 
 // API des modules : une ligne par module
 app.MapModuleVentes();
+app.MapModuleLogistique();
 
 // Écrans : ceux de NetPrint.Web + ceux de chaque module (trouvés via leur DescriptionModule)
 var assemblagesModules = app.Services.GetServices<DescriptionModule>()

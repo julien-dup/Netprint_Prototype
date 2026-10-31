@@ -28,6 +28,17 @@ public sealed class FactDb2Attribute : FactAttribute
     }
 }
 
+// Tests qui écrivent dans NP11F (données d'essai seulement) : lancés à la demande
+public sealed class FactDb2EcritureAttribute : FactAttribute
+{
+    public FactDb2EcritureAttribute()
+    {
+        if (!BaseDeTest.Disponible) Skip = "Pas de connexion DB2 de test (ConnectionStrings:Db2) sur ce poste.";
+        else if (Environment.GetEnvironmentVariable("NETPRINT_TESTS_ECRITURE") != "1")
+            Skip = "Test d'écriture dans NP11F : lancer avec NETPRINT_TESTS_ECRITURE=1.";
+    }
+}
+
 // Culture de l'application (Program.cs de NetPrint.Web), quel que soit le poste qui lance les tests
 internal static class CultureDesTests
 {

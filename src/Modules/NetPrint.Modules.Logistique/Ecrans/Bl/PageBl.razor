@@ -2,9 +2,10 @@
 @* =====================================================================
    Fiche d'un bon de livraison (lecture seule) : destinataire, transport et totaux (EXP009), éléments = dossiers livrés
    (EXP010) avec leur facturation, lignes (EXP015) et lots / emplacements (EXP016), texte de pied (EXP012).
-   Remplace la visualisation EXP525 et le détail de ConsultationBL.
+   Remplace la visualisation EXP525 et le détail de ConsultationBL. Aperçu et impression du BL en PDF (EXP035P2).
    ===================================================================== *@
 @inject IConsultationBl Consultation
+@inject IEditionBl Edition
 @inject NavigationManager Navigation
 @inject Notifications Notifications
 
@@ -13,6 +14,14 @@
 
 <fieldset class="barre-outils">
     <button @onclick='() => Navigation.NavigateTo("logistique/bl")' title="Retour à la liste des BL">← Liste des BL</button>
+    @if (fiche is not null)
+    {
+        @* PDF dans un onglet ; « Imprimer » marque le BL édité (EXP035P2), l'aperçu n'écrit rien *@
+        <a class="bouton-ancre" href="@($"api/logistique/bl/{Numero}/pdf?apercu=1")" target="_blank" rel="noopener"
+           title="Aperçu du BL en PDF, sans le marquer édité">👁 Aperçu</a>
+        <a class="bouton-ancre" href="@($"api/logistique/bl/{Numero}/pdf")" target="_blank" rel="noopener" @onclick="MarquerEdite"
+           title="BL en PDF à imprimer ou envoyer ; le BL est marqué édité">🖨 Imprimer</a>
+    }
 </fieldset>
 
 <div class="contenu contenu-detail fiche-bl">
@@ -149,6 +158,23 @@
         if (n != lecture) return;
         fiche = lue;
         chargement = false;
+    }
+
+    // « Imprimer » : le lien ouvre le PDF (sans écriture) ; le clic pose la marque « édité » (EXP035P2)
+    private async Task MarquerEdite()
+    {
+        try
+        {
+            await Edition.MarquerEditeAsync(Numero);
+        }
+        catch (RegleMetierException ex)
+        {
+            Notifications.Info(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Le BL n'a pas pu être marqué édité : {ex.Message}");
+        }
     }
 
     // État de livraison d'une ligne (EXP015.DETALI)

@@ -15,11 +15,11 @@ internal sealed class ConsultationBlDb2(IConfiguration config)
 {
     private string Bib => BaseDb2.Bibliotheque(config);
 
-    // Représentant imposé au profil (B000F.ILIMIT = 'O') : il ne voit que les BL de ses dossiers
-    private async Task<int?> RepresentantImposeAsync(OdbcConnection cnx, int societe, string profil, CancellationToken ct)
+    // Représentant imposé au profil (B000F.ILIMIT = 'O') : il ne voit que les BL de ses dossiers (aussi pour l'édition)
+    internal static async Task<int?> RepresentantImposeAsync(OdbcConnection cnx, string bib, int societe, string profil, CancellationToken ct)
     {
-        await using var rd = await Lire(cnx,
-            $"SELECT RREPR, ILIMIT FROM {Bib}.B000F WHERE RSOC = ? AND IPROF = ? AND ITAG <> '*' FETCH FIRST 1 ROW ONLY", ct,
+        await using var rd = await Lecteur.ExecuterAsync(cnx,
+            $"SELECT RREPR, ILIMIT FROM {bib}.B000F WHERE RSOC = ? AND IPROF = ? AND ITAG <> '*' FETCH FIRST 1 ROW ONLY", ct,
             societe, profil.ToUpperInvariant());
         if (!await rd.ReadAsync(ct)) return null;
         return rd.Texte(1) == "O" ? rd.Entier(0) : null;
@@ -33,7 +33,7 @@ internal sealed class ConsultationBlDb2(IConfiguration config)
     {
         var b = Bib;
         await using var cnx = await OuvrirAsync(ct);
-        var (filtre, valeurs) = Filtre(c, await RepresentantImposeAsync(cnx, societe, profil, ct));
+        var (filtre, valeurs) = Filtre(c, await RepresentantImposeAsync(cnx, b, societe, profil, ct));
         var maximum = LimitesRecherche.Maximum;
         await using var rd = await Lire(cnx, $"""
             SELECT e.HNOBL, e.HNUM, h.HDEXAA, h.HDEXMM, h.HDEXJJ, e.HETABL, e.HNODOS, e.HCLEF, e.HREFCD,
@@ -41,7 +41,7 @@ internal sealed class ConsultationBlDb2(IConfiguration config)
                    e.HGENF, e.HCLIF, COALESCE(f.CMODIR, ''),
                    COALESCE((SELECT SUM(l.DQTE) FROM {b}.EXP015 l WHERE l.RSOC = e.RSOC AND l.DNBL = e.HNOBL AND l.DNUM = e.HNUM), 0),
                    h.HNCOLT, h.HNPALT, h.HPDSTT, h.HCP, h.HVILLE, COALESCE(t.MNOM, ''),
-                   e.HFACTU, e.HNOFAC, e.HDAFAA, e.HDAFAM, e.HDAFAJ, h.HPROF, e.HREP, {NomRepresentant(b, "e.HREP")}, h.HEDBL, e.HNOBLO
+                   e.HFACTU, e.HNOFAC, e.HDAFAA, e.HDAFAM, e.HDAFAJ, h.HPROF, e.HREP, {NomRepresentant(b, "e.HREP")}, h.HDEDBA, e.HNOBLO
             FROM {b}.EXP010 e
             JOIN {b}.EXP009 h ON h.RSOC = e.RSOC AND h.HNOBL = e.HNOBL
             LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = h.RSOC AND c.RGEN = h.HGENE AND c.RCLI = h.HCLIE
@@ -60,7 +60,7 @@ internal sealed class ConsultationBlDb2(IConfiguration config)
                 rd.Entier(6), rd.Texte(7), rd.Texte(8), gen, cli, rd.Texte(11), rd.Texte(12), factureA,
                 rd.Entier(16), rd.Entier(17), rd.Entier(18), rd.Entier(19), rd.Texte(20), rd.Texte(21), rd.Texte(22),
                 rd.Texte(23) == "O", rd.Entier(24), BaseDb2.Date(rd.Entier(25), rd.Entier(26), rd.Entier(27)),
-                rd.Texte(28), rd.Entier(29), rd.Texte(30), rd.Texte(31) == "O", rd.Entier(32)));
+                rd.Texte(28), rd.Entier(29), rd.Texte(30), rd.Entier(31) != 0, rd.Entier(32)));
         }
         var tronque = liste.Count > maximum;
         return new(tronque ? liste[..maximum] : liste, tronque);
@@ -109,7 +109,7 @@ internal sealed class ConsultationBlDb2(IConfiguration config)
     {
         var b = Bib;
         await using var cnx = await OuvrirAsync(ct);
-        var representant = await RepresentantImposeAsync(cnx, societe, profil, ct);
+        var representant = await RepresentantImposeAsync(cnx, b, societe, profil, ct);
         EnteteBl entete;
         await using (var rd = await Lire(cnx, $"""
             SELECT h.HDEXAA, h.HDEXMM, h.HDEXJJ, h.HGENE, h.HCLIE, COALESCE(c.CNOM, ''), h.HNADRE, h.HRS, h.HRUE1, h.HRUE2, h.HCP, h.HVILLE,
@@ -126,7 +126,7 @@ internal sealed class ConsultationBlDb2(IConfiguration config)
                 rd.Entier(6), rd.Texte(7), rd.Texte(8), rd.Texte(9), rd.Texte(10), rd.Texte(11), rd.Texte(12),
                 [.. new[] { rd.Texte(13), rd.Texte(14), rd.Texte(15) }.Where(o => o != "")], rd.Texte(16),
                 rd.Entier(17), rd.Entier(18), rd.Entier(19), rd.Entier(21) > 0 ? $"{rd.Entier(21)} {rd.Texte(20)}".Trim() : "",
-                rd.Texte(22), rd.Texte(23), rd.Entier(24), rd.Texte(25), rd.Texte(26), rd.Texte(27) == "O",
+                rd.Texte(22), rd.Texte(23), rd.Entier(24), rd.Texte(25), rd.Texte(26), rd.Entier(28) != 0,
                 BaseDb2.Date(rd.Entier(28), rd.Entier(29), rd.Entier(30)), rd.Texte(31) == "O");
         }
 
@@ -216,25 +216,6 @@ internal sealed class ConsultationBlDb2(IConfiguration config)
         return cnx;
     }
 
-    // Lecteur qui libère aussi sa commande
-    private async Task<Lecteur> Lire(OdbcConnection cnx, string sql, CancellationToken ct, params object?[] valeurs)
-    {
-        var cmd = cnx.CreateCommand();
-        cmd.CommandText = sql.Replace("{b}", Bib);
-        foreach (var v in valeurs) cmd.Parameters.Valeur(v is string t && t == "" ? " " : v);
-        return new Lecteur(cmd, await cmd.ExecuteReaderAsync(ct));
-    }
-
-    private sealed class Lecteur(OdbcCommand commande, DbDataReader lecteur) : IAsyncDisposable
-    {
-        public Task<bool> ReadAsync(CancellationToken ct) => lecteur.ReadAsync(ct);
-        public string Texte(int i) => lecteur.Texte(i);
-        public int Entier(int i) => lecteur.Entier(i);
-
-        public async ValueTask DisposeAsync()
-        {
-            await lecteur.DisposeAsync();
-            await commande.DisposeAsync();
-        }
-    }
+    private Task<Lecteur> Lire(OdbcConnection cnx, string sql, CancellationToken ct, params object?[] valeurs) =>
+        Lecteur.ExecuterAsync(cnx, sql.Replace("{b}", Bib), ct, valeurs);
 }

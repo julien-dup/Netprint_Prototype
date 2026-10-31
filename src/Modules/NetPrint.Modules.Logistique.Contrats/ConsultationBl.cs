@@ -75,7 +75,7 @@ public sealed record ElementBl(
     int Quantite, int Colis, int Palettes, int Poids,
     string CodePostal, string Ville, string Transporteur,
     bool Facturable, int NumeroFacture, DateOnly? DateFacture,
-    string Profil, int Representant, string NomRepresentant, bool Edite,
+    string Profil, int Representant, string NomRepresentant, bool Edite,   // édité = date d'édition renseignée (EXP009.HDEDB*)
     int BlOrigine)                        // retour : BL d'origine
 {
     public string Libelle => $"{NumeroBl}" + (Element > 1 ? $"/{Element}" : "");

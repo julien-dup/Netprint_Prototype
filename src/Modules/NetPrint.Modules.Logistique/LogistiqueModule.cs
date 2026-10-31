@@ -1,12 +1,17 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using NetPrint.Modules.Logistique.Contrats;
 using NetPrint.Modules.Logistique.Donnees;
 using NetPrint.Modules.Logistique.Services;
+using NetPrint.Socle;
+using NetPrint.Socle.Documents;
 using NetPrint.Socle.Modules;
 
 namespace NetPrint.Modules.Logistique;
 
-// Branchement du module dans NetPrint.Web : builder.Services.AddModuleLogistique();
+// Branchement du module dans NetPrint.Web : builder.Services.AddModuleLogistique(); app.MapModuleLogistique();
 public static class LogistiqueModule
 {
     public static IServiceCollection AddModuleLogistique(this IServiceCollection services)
@@ -23,6 +28,32 @@ public static class LogistiqueModule
         services.AddScoped<ConsultationBlDb2>();
         services.AddScoped<IConsultationBl, ConsultationBlService>();   // ConsultationBL / EXP010S
         services.AddScoped<Ecrans.Bl.EtatListeBl>();                    // critères et liste conservés pendant la session
+        services.AddScoped<EditionBlDb2>();
+        services.AddScoped<IEditionBl, EditionBlService>();             // EXP030 / EXP035P2
         return services;
+    }
+
+    public static IEndpointRouteBuilder MapModuleLogistique(this IEndpointRouteBuilder app)
+    {
+        var api = app.MapGroup("/api/logistique").RequireAuthorization();
+
+        // BL en PDF, sans écriture : GET /api/logistique/bl/165139/pdf?apercu=1 (aperçu : filigrane)
+        api.MapGet("/bl/{numero:int}/pdf", async (int numero, int? apercu, HttpContext http, IEditionBl edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.EditerAsync(numero, apercu == 1, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Édition du BL impossible : {ex.Message}", "text/plain; charset=utf-8",
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+        return app;
     }
 }
