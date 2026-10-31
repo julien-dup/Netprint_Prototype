@@ -2,11 +2,13 @@
 @* =====================================================================
    Fiche d'un bon de livraison (lecture seule) : destinataire, transport et totaux (EXP009), éléments = dossiers livrés
    (EXP010) avec leur facturation, lignes (EXP015) et lots / emplacements (EXP016), texte de pied (EXP012).
-   Remplace la visualisation EXP525 et le détail de ConsultationBL. Aperçu et impression du BL en PDF (EXP035P2), envoi par e-mail (EXP010S option EE).
+   Remplace la visualisation EXP525 et le détail de ConsultationBL. Aperçu et impression du BL en PDF (EXP035P2), envoi par e-mail (EXP010S option EE),
+   retour de marchandises (EXP010S RM, ConsultationBL) et suppression d'un retour.
    ===================================================================== *@
 @inject IConsultationBl Consultation
 @inject IEditionBl Edition
 @inject ISaisieBl Saisies
+@inject IRetourBl Retours
 @inject Dialogues Dialogues
 @inject NavigationManager Navigation
 @inject Notifications Notifications
@@ -28,6 +30,16 @@
         <a class="bouton-ancre" href="@($"api/logistique/bl/{Numero}/pdf")" target="_blank" rel="noopener" @onclick="MarquerEdite"
            title="BL en PDF à imprimer ou envoyer ; le BL est marqué édité">🖨 Imprimer</a>
         <button title="Envoyer le BL en PDF par e-mail (contacts « bon de livraison » du client)" @onclick="() => envoi = true">✉ Envoyer</button>
+        @if (fiche.Elements.Any(x => x.Etat == "C"))
+        {
+            <button title="Reprendre de la marchandise livrée par ce BL (lots, palettes ou quantité de fabrication)"
+                    @onclick='() => Navigation.NavigateTo($"logistique/bl/{Numero}/retour")'>↩ Retour de marchandises</button>
+        }
+        @if (fiche.Elements.Count > 0 && fiche.Elements.All(x => x.Etat == "R" && x.NumeroFacture == 0))
+        {
+            <button class="bouton-danger" title="Supprimer ce retour : le stock, la commande et les palettes reviennent comme avant"
+                    @onclick="SupprimerRetourAsync">🗑 Supprimer le retour</button>
+        }
     }
 </fieldset>
 
@@ -190,6 +202,22 @@
     private void Modifier(DetailElementBl e) => Navigation.NavigateTo($"logistique/bl/{Numero}/element/{e.Element}/modifier");
     private void ModifierDivers() => Navigation.NavigateTo($"logistique/bl/{Numero}/divers");
     private void AjouterDossier() => Navigation.NavigateTo($"logistique/bl/nouveau?bl={Numero}");
+
+    // Suppression d'un retour (tout le BL de retour), comme l'option 4 d'EXP010S sur un retour
+    private async Task SupprimerRetourAsync()
+    {
+        if (!await Dialogues.ConfirmerAsync($"Supprimer le retour {Numero} ?\nLa marchandise ressort du stock, la commande et les palettes reviennent comme avant.",
+                "Suppression du retour", "Supprimer")) return;
+        var origine = fiche?.Elements.FirstOrDefault()?.BlOrigine ?? 0;
+        try
+        {
+            await Retours.SupprimerAsync(Numero);
+            Notifications.Succes($"Retour {Numero} supprimé.");
+            Navigation.NavigateTo(origine > 0 ? $"logistique/bl/{origine}" : "logistique/bl");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
+    }
 
     // Suppression d'un élément : confirmation (Échap / Annuler = non), puis liste des BL si le BL a disparu, sinon fiche relue
     private async Task SupprimerAsync(DetailElementBl e)

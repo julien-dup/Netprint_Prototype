@@ -66,7 +66,7 @@ de conformité (EXP045), colisage (EXP046), envoi (EnvoideBL : Outlook), factura
 | L3 ✅ | **Saisie des BL produit fini / négoce** selon le cahier des charges lot 1 : création à partir des lignes de commande ou d'un OPR, ajout d'un dossier, modification, suppression, répartition dépôt / lot / emplacement, port, en une transaction | EXP010, `FEN_CreationBL` d'OPR |
 | L4 ✅ | **BL divers** | EXP010 (BL divers) |
 | L5 ✅ | **Livraisons à effectuer** + **état des préparations** (EXP078) en PDF, avec « Créer le BL » sur les lignes choisies | LivraisonsAEffectuer, EXP078 |
-| L6 | **Envoi des BL** (Outlook / SMTP, journal ENV100 comme les ARC ✅ 31/10) et **retours** | EnvoideBL, `FEN_RetourBLSaisie` |
+| L6 ✅ | **Envoi des BL** (Outlook / SMTP, journal ENV100 comme les ARC, 31/10) et **retours de marchandises** (31/10 : un seul chemin pour EXP010S option RM et le clic droit de ConsultationBL, palettes SSCC comprises) | EnvoideBL, EXP010S, `FEN_RetourBLSaisie` |
 | L7 | **OPR** (création, préparation, BL) | WinDev OPR |
 | L8 | **Pré-BL palettes** et interface avec les web services PHP | PreBL, PreBLSansPalette, EXP540 |
 

@@ -43,6 +43,7 @@ public static class LogistiqueModule
         services.AddScoped<SaisieBlDb2>();
         services.AddScoped<ISaisieBl, SaisieBlService>();               // EXP010, cahier des charges lot 1
         services.AddScoped<IBlDivers, BlDiversService>();               // BL divers (EXP010 état D)
+        services.AddScoped<IRetourBl, RetourBlService>();               // retours de marchandises (EXP010S RM, ConsultationBL)
         services.AddScoped<PreparationDb2>();
         services.AddScoped<IPreparation, PreparationService>();           // EXP078
         services.AddScoped<LivraisonsDb2>();
