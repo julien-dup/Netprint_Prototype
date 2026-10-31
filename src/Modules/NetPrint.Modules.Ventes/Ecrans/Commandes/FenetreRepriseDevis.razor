@@ -1,0 +1,182 @@
+@* =====================================================================
+   Nouvelle ligne d'après un devis (NEG520 F10, fenêtre NEG52009 et choix de l'adresse D50001R) : devis chiffrés du
+   client de la commande, les plus récents d'abord (rien n'est chargé à l'ouverture ; recherche sans critère après
+   confirmation) ; un devis à plusieurs adresses de livraison demande l'adresse.
+   La ligne pré-remplie s'ouvre ensuite dans la fenêtre de ligne, où elle est complétée et enregistrée.
+   ===================================================================== *@
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@inject ISaisieLignesCommande Lignes
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+
+<div class="voile" @onclick="Annuler">
+    <div class="fenetre fenetre-reprise-devis" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+        <div class="titre-fenetre">📄 Nouvelle ligne d'après un devis · commande @Commande.Libelle</div>
+        <div class="corps-fenetre">
+            @if (choisi is null)
+            {
+                <form class="ligne-champs" @onsubmit="ChercherAsync">
+                    <input class="large" placeholder="N° de devis ou mots de la désignation" @bind="recherche" autofocus />
+                    <button type="submit" disabled="@enCours">🔍 Chercher</button>
+                </form>
+                @if (devis is null)
+                {
+                    <p class="aide">@(enCours ? "Recherche…" : "Tapez un n° de devis ou des mots de la désignation, ou cherchez sans critère pour voir tous les devis du client.")</p>
+                }
+                else if (devis.Lignes.Count == 0)
+                {
+                    <p class="aide">Aucun devis chiffré pour ce client@(recherche is { Length: > 0 } ? " avec ce critère" : "").</p>
+                }
+                else
+                {
+                    @if (devis.Tronque)
+                    {
+                        <p class="avertissement-saisie">Seuls les @devis.Lignes.Count devis les plus récents sont affichés : précisez la recherche.</p>
+                    }
+                    <div class="zone-defilement">
+                        <table class="grille grille-fiche grille-devis">
+                            <thead>
+                                <tr><th></th><th>Devis</th><th>Date</th><th>Désignation</th><th>Réf. imprimée</th><th class="nombre">Quantité</th>
+                                    <th>UV</th><th class="nombre">Prix</th><th>Adresses</th><th>État</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var d in devis.Lignes)
+                                {
+                                    <tr class="selectionnable" @ondblclick="() => ChoisirAsync(d)">
+                                        <td><button type="button" class="bouton-ligne" @onclick="() => ChoisirAsync(d)" disabled="@enCours">Reprendre</button></td>
+                                        <td>@d.Devis.Libelle</td>
+                                        <td>@d.Date?.ToString("dd/MM/yyyy")</td>
+                                        <td>@d.Designation</td>
+                                        <td>@d.ReferenceImprime</td>
+                                        <td class="nombre">@Entier(d.Quantite)</td>
+                                        <td>@d.Unite</td>
+                                        <td class="nombre">@d.Prix.ToString("N2")</td>
+                                        <td>@(d.Adresses > 1 ? $"{d.Adresses} adresses" : "")</td>
+                                        <td>@if (d.PasseEnCommande) {<span class="badge" title="Devis déjà passé en commande (dossier ouvert d'après ce devis)">en commande</span>}</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="aide">La ligne reprend la désignation, l'unité, le prix remis et la quantité du devis ; elle est créée « à la demande ».
+                        Un prix « le tout » est ramené au mille.</p>
+                }
+            }
+            else
+            {
+                <p>Le devis <b>@choisi.Devis.Libelle</b> (@choisi.Designation) a plusieurs adresses de livraison : choisissez celle de la ligne.</p>
+                <div class="zone-defilement">
+                    <table class="grille grille-fiche">
+                        <thead><tr><th>Adresse</th><th class="nombre">Quantité</th><th>Commentaire</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var a in adresses)
+                            {
+                                <tr class="selectionnable" @ondblclick="() => ReprendreAsync(choisi, a)">
+                                    <td>@LibelleAdresse(a)</td>
+                                    <td class="nombre">@Entier(a.Quantite)</td>
+                                    <td>@a.Commentaire1</td>
+                                    <td><button type="button" class="bouton-ligne" @onclick="() => ReprendreAsync(choisi, a)" disabled="@enCours">Choisir</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+        <div class="pied-fenetre">
+            @if (choisi is not null)
+            {
+                <button type="button" @onclick="() => choisi = null">← Autre devis</button>
+            }
+            <span class="espace"></span>
+            <button type="button" @onclick="Annuler">Annuler</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleCommande Commande { get; set; } = default!;
+    // Ligne pré-remplie à ouvrir dans la fenêtre de ligne, ou null si annulé
+    [Parameter] public EventCallback<LigneSaisie?> OnFermer { get; set; }
+
+    private string? recherche;
+    private ResultatRecherche<DevisAReprendre>? devis;
+    private DevisAReprendre? choisi;
+    private IReadOnlyList<AdresseDevis> adresses = [];
+    private bool enCours;
+
+    private async Task ChercherAsync()
+    {
+        if (enCours) return;
+        if (string.IsNullOrWhiteSpace(recherche)
+            && !await Dialogues.ConfirmerAsync("Afficher tous les devis chiffrés du client ?", "Recherche sans critère", "Afficher")) return;
+        enCours = true;
+        try
+        {
+            devis = await Lignes.DevisAReprendreAsync(Commande, recherche);
+        }
+        catch (Exception ex)
+        {
+            devis = new([], false);
+            Notifications.Erreur($"Lecture des devis impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private async Task ChoisirAsync(DevisAReprendre d)
+    {
+        if (enCours) return;
+        if (d.Adresses <= 1)
+        {
+            await ReprendreAsync(d, null);
+            return;
+        }
+        enCours = true;
+        try
+        {
+            adresses = await Lignes.AdressesDevisAsync(Commande, d.Devis);
+            choisi = d;
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture des adresses du devis impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private async Task ReprendreAsync(DevisAReprendre d, AdresseDevis? adresse)
+    {
+        if (enCours) return;
+        enCours = true;
+        try
+        {
+            var ligne = await Lignes.NouvelleDepuisDevisAsync(Commande, d.Devis, adresse);
+            await OnFermer.InvokeAsync(ligne);
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Reprise du devis impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private static string LibelleAdresse(AdresseDevis a) =>
+        a.Priorite != 0 ? $"Adresse n° {a.Priorite} du client"
+        : a.Vide ? "Siège du client"
+        : string.Join(" · ", new[] { a.RaisonSociale, a.Rue1, $"{a.CodePostal} {a.Ville}".Trim() }.Where(x => x != ""));
+
+    private Task Annuler() => OnFermer.InvokeAsync(null);
+}

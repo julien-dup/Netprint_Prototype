@@ -29,6 +29,8 @@
             @onclick='() => Navigation.NavigateTo(Adresse(CleCourante) + "/entete")'>✏️ Modifier l'en-tête</button>
     <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Ajouter une ligne à la commande" : RaisonNonModifiable)"
             @onclick="() => OuvrirLigneAsync(0)">＋ Ajouter une ligne</button>
+    <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Nouvelle ligne reprise d'un devis du client (F10 de NEG520)" : RaisonNonModifiable)"
+            @onclick="() => repriseDevis = true">📄 Ligne d'après un devis</button>
     @if (fiche is { Entete.Soldee: true })
     {
         <button disabled="@(!fiche.Droits.Creer || fiche.Entete.NonModifiable)" title="Remettre la commande en cours (ses lignes soldées le restent)"
@@ -197,7 +199,12 @@
 
 @if (ligneOuverte is { } numeroLigne && fiche is not null)
 {
-    <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" CodesVente="codesVente" OnFermer="FermerLigneAsync" />
+    <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" Initiale="ligneInitiale" CodesVente="codesVente"
+                  OnFermer="FermerLigneAsync" />
+}
+@if (repriseDevis && fiche is not null)
+{
+    <FenetreRepriseDevis Commande="CleCourante" OnFermer="FermerRepriseDevisAsync" />
 }
 
 @code {
@@ -365,9 +372,20 @@
     // Nouvel appel de livraison sur une ligne « à la demande »
     private Task OuvrirAppelAsync(int origine) => OuvrirLigneAsync(0, origine);
 
-    private async Task OuvrirLigneAsync(int numero, int origine = 0)
+    // Ligne d'après un devis : la ligne pré-remplie s'ouvre comme une nouvelle ligne
+    private bool repriseDevis;
+    private LigneSaisie? ligneInitiale;
+
+    private async Task FermerRepriseDevisAsync(LigneSaisie? ligne)
+    {
+        repriseDevis = false;
+        if (ligne is not null) await OuvrirLigneAsync(0, initiale: ligne);
+    }
+
+    private async Task OuvrirLigneAsync(int numero, int origine = 0, LigneSaisie? initiale = null)
     {
         origineAppel = origine;
+        ligneInitiale = initiale;
         if (codesVente.Count == 0)
         {
             try { codesVente = (await Saisie.LireContexteAsync()).CodesVente; }

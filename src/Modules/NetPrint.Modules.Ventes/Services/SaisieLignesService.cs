@@ -16,7 +16,7 @@ namespace NetPrint.Modules.Ventes.Services;
 //   - une ligne est enregistrée seule, en transaction, n° de ligne pris en base ; réservations recalculées (STOCK03)
 //     pour l'article touché seulement ;
 //   - non repris pour l'instant : articles libres « 999… », articles avec nomenclature (lignes composants),
-//     contrôle de la norme (NOR010), reprise de devis, import Excel.
+//     contrôle de la norme (NOR010), import Excel.
 // =====================================================================
 internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISourceCommandes commandes, IUtilisateurCourant utilisateur,
     IInitialisationProduction production)
@@ -104,8 +104,10 @@ internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISo
         var cleArticle = $"{l.Article}|{l.Indice}";
         var nouvelArticle = l.ArticleComplete != cleArticle;
         l.ArticleComplete = cleArticle;
-        if (nouvelArticle || l.Designation == "") l.Designation = a.Designation;
-        if (nouvelArticle || l.Unite == "") l.Unite = a.Unite;
+        // Ligne reprise d'un devis : désignation et unité du devis gardées (RECUP ne complète que les zones vides)
+        var duDevis = l.Devis is not null;
+        if (nouvelArticle && !duDevis || l.Designation == "") l.Designation = a.Designation;
+        if (nouvelArticle && !duDevis || l.Unite == "") l.Unite = a.Unite;
         if (nouvelArticle || l.Norme == "") l.Norme = a.Norme;
         if (nouvelArticle && l.NumeroLigne == 0 || l.Emplacement == "" && l.NumeroLigne == 0) l.Emplacement = a.Emplacement;
         if (nouvelArticle || l.Texte == "" && l.NumeroLigne == 0) l.Texte = string.Join("\n", a.Textes).TrimEnd('\n');
@@ -527,6 +529,8 @@ internal static class MessagesLigne
     public const string DepassementOrigine = "Quantité saisie supérieure au reste à appeler de la ligne d'origine";            // NEG0029
     public const string AppelEdi = "Cet appel a été créé par l'EDI : il se modifie ou se supprime dans le tableau de bord EDI.";
     public const string PasUnAppel = "Cette ligne n'est pas un appel de livraison.";
+    public const string DevisInexistant = "Ce N° de Devis n'existe pas.";                                                    // DEV0024
+    public const string AdresseDevisAChoisir = "Choisissez l'adresse de livraison du devis.";
     public const string ArticleAvecAppels = "Changement d'article impossible, il existe des appels de livraison.";
     public const string OrigineModifiee = "La ligne d'origine a été modifiée par un autre utilisateur depuis l'ouverture de l'appel : " +
         "rechargez la commande.";

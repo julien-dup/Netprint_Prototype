@@ -33,6 +33,10 @@
                         <span class="discret"> · article et prix de la ligne d'origine</span>
                     </p>
                 }
+                @if (l.Devis is { } devis && !Appel)
+                {
+                    <p class="aide">📄 D'après le devis <b>@devis.Libelle</b> : désignation, unité et prix du devis sont gardés si vous saisissez l'article.</p>
+                }
                 <div class="grille-ligne">
                     <section>
                         <h3>Article</h3>
@@ -237,6 +241,8 @@
     [Parameter] public int NumeroLigne { get; set; }
     // Nouvel appel de livraison sur cette ligne « à la demande » (NumeroLigne = 0)
     [Parameter] public int LigneOrigine { get; set; }
+    // Nouvelle ligne déjà pré-remplie (reprise d'un devis)
+    [Parameter] public LigneSaisie? Initiale { get; set; }
     [Parameter] public IReadOnlyList<CodeLibelle> CodesVente { get; set; } = [];
     // Résultat : n° de la ligne enregistrée, ou null si annulé
     [Parameter] public EventCallback<int?> OnFermer { get; set; }
@@ -250,7 +256,8 @@
 
     private string Titre => l is { EstAppel: true }
         ? NumeroLigne == 0 ? $"📦 Nouvel appel de livraison sur la ligne {l.LigneOrigine}" : $"Appel {NumeroLigne} de la commande {Commande.Libelle}"
-        : NumeroLigne == 0 ? "＋ Nouvelle ligne" : $"Ligne {NumeroLigne} de la commande {Commande.Libelle}";
+        : NumeroLigne == 0 ? l?.Devis is { } d ? $"📄 Nouvelle ligne d'après le devis {d.Libelle}" : "＋ Nouvelle ligne"
+        : $"Ligne {NumeroLigne} de la commande {Commande.Libelle}";
 
     // Zones de prix reportées sur les appels d'une ligne « à la demande » (NEG520B)
     private static string Prix(LigneSaisie x) =>
@@ -261,6 +268,7 @@
         try
         {
             l = NumeroLigne > 0 ? await Lignes.LireAsync(Commande, NumeroLigne)
+                : Initiale is not null ? Initiale
                 : LigneOrigine > 0 ? await Appels.NouvelAsync(Commande, LigneOrigine)
                 : await Lignes.NouvelleAsync(Commande);
             if (l is not null) prixInitial = Prix(l);

@@ -228,7 +228,8 @@ internal sealed partial class LignesCommandeDb2
             SELECT n.DNCLIG, n.DNART, n.DNIND, n.DNDESA, n.DNSTAT, n.DNQTEC, n.DNUV, n.DNQMAX, n.DNPUNR, n.DNTXRE, n.DNPXCE,
                    n.DNOPT2, n.DNOPT5, n.DNTXCO, n.DNPUS, n.DNMTHT, n.DNDATB, n.DNDLIV, n.DNLIGA, n.DNRS, n.DNRUE1, n.DNRUE2,
                    n.DNPOST, n.DNVILL, n.DNPAY, n.DNAPPE, n.DNDTAC, n.DNCOMM, n.DNCOM2, n.DNCOM3, n.DNNORM, n.DEMP, n.DNOPT4,
-                   n.DNOPT3, n.DNGENF, n.DNCLIF, n.DNQTEL, n.DNQTEF, n.DNSOLD, n.DNLORI, {textes}, n.DNQTEO
+                   n.DNOPT3, n.DNGENF, n.DNCLIF, n.DNQTEL, n.DNQTEF, n.DNSOLD, n.DNLORI, {textes}, n.DNQTEO,
+                   n.DNDEV, n.DNVERS, n.DNHYPO
             FROM {b}.NEG100 n
             LEFT OUTER JOIN {b}.NEG100T t ON t.RSOC = n.RSOC AND t.RDOSS = n.RDOSS AND t.DNDCLE = n.DNDCLE AND t.DNNLIG = n.DNNLIG
             WHERE n.RSOC = ? AND n.RDOSS = ? AND n.DNDCLE = ? AND n.DNNLIG = ?
@@ -256,6 +257,7 @@ internal sealed partial class LignesCommandeDb2
             RegroupementOf = rd.Texte(32) == "O", NouvelleApplication = rd.Texte(33), CompteGeneralFacture = Pos(rd.Entier(34)),
             CompteClientFacture = Pos(rd.Entier(35)), QuantiteLivree = rd.Entier(36), QuantiteFacturee = rd.Entier(37),
             Soldee = rd.Texte(38) == "O", LigneOrigine = rd.Entier(39), QuantiteOrigine = rd.Entier(59),
+            Devis = rd.Entier(60) > 0 ? new ReferenceDevis(rd.Entier(60), rd.Entier(61), rd.Entier(62)) : null,
             Texte = string.Join("\n", Enumerable.Range(40, 19).Select(rd.Texte)).TrimEnd('\n'),
         };
         l.AdresseSiege = l.NumeroAdresse is null && l.AdresseRaisonSociale == "" && l.AdresseVille == "";
@@ -355,7 +357,7 @@ internal sealed partial class LignesCommandeDb2
     }
 
     // Colonnes de NEG100 écrites par MAJ520 (création et modification ; en modification, quantités livrées et facturées,
-    // solde, origine et devis sont conservés)
+    // solde et origine sont conservés, et le devis s'il n'est pas connu de la ligne saisie)
     internal static List<(string Colonne, object? Valeur)> ColonnesLigne(ContexteLigne c, LigneSaisie l, long tnum, LigneSaisie? ancienne)
     {
         var prixNet = MoteurPrixCommande.PrixNet(l.PrixBrut ?? 0, l.Remise ?? 0);
@@ -390,6 +392,9 @@ internal sealed partial class LignesCommandeDb2
             ("DNOPT2", l.Gratuite ? "O" : "N"), ("DNOPT3", l.NouvelleApplication), ("DNOPT4", l.RegroupementOf ? "O" : "N"),
             ("DNOPT5", l.PrixADefinir ? "O" : "N"), ("DNNORM", l.Norme), ("DEMP", l.Emplacement),
             ("DNGENF", l.CompteClientFacture is > 0 ? l.CompteGeneralFacture ?? 0 : 0), ("DNCLIF", l.CompteClientFacture ?? 0),
+            .. ancienne is null || l.Devis is not null
+                ? new (string, object?)[] { ("DNDEV", l.Devis?.Numero ?? 0), ("DNVERS", l.Devis?.Version ?? 0), ("DNHYPO", l.Devis?.Hypothese ?? 0) }
+                : [],
         ];
     }
 
