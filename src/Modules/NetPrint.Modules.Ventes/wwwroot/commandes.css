@@ -181,3 +181,4 @@ input.num9 { width: 110px; }
 /* Ligne d'après un devis (NEG520 F10) */
 .fenetre.fenetre-reprise-devis { width: 1100px; }
 .grille-devis tr.selectionnable { cursor: pointer; }
+.fenetre.fenetre-report-dates { width: 560px; }

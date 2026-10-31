@@ -50,7 +50,16 @@ public interface IActionsCommande
 
     // Refusée s'il existe un BL ou une facture (droit « Suppression ») ; données annexes supprimées dans la même transaction
     Task SupprimerAsync(CleCommande commande, CancellationToken ct = default);
+
+    // Report de date en masse (F19 de NEG520, fenêtre NEG520CW) : les lignes non soldées dont la date d'origine (de
+    // livraison ou confirmée) vaut la date donnée reçoivent la nouvelle date dans la zone choisie. Refusé si une ligne
+    // fait partie d'un OPR non livré. Renvoie le nombre de lignes reportées.
+    Task<int> ReporterDatesAsync(CleCommande commande, ReportDates report, CancellationToken ct = default);
 }
+
+public enum ZoneDate { Livraison = 1, Confirmee = 2 }
+
+public sealed record ReportDates(ZoneDate ZoneOrigine, DateOnly? DateOrigine, ZoneDate ZoneDestination, DateOnly? DateDestination);
 
 // Devis chiffré (D5000F, RCOUT = 'C') : n°, version, hypothèse de quantité
 public sealed record ReferenceDevis(int Numero, int Version, int Hypothese)

@@ -404,6 +404,66 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
         }
     }
 
+    // Report de date en masse (NEG520 F19) : deux lignes à des dates différentes, seule celle à la date d'origine bouge
+    [FactDb2Ecriture]
+    public async Task Report_de_dates_en_masse()
+    {
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var article = await ArticleDuClientAsync(cnx);
+        Assert.NotNull(article);
+        var client = await ValeursAsync(cnx, "SELECT CDDTPC, CDDTDC, CDDDOS, CDDCLE FROM NP11F.AA0003 WHERE RSOC = ? AND RGEN = ? AND RCLI = ?",
+            BaseDeTest.Societe, BaseDeTest.CompteGeneral, BaseDeTest.CompteClient);
+        var adtcde = await ValeursAsync(cnx, "SELECT ADTCDE FROM NP11F.SPF010 WHERE RSOC = ? AND AARTIC = ? AND AINDIC = ?",
+            BaseDeTest.Societe, article.Value.Article, article.Value.Indice);
+        CleCommande? cle = null;
+        try
+        {
+            var entete = new SaisieCommandesService(new SaisieCommandesDb2(BaseDeTest.Configuration), Consultation, new Utilisateur());
+            var e = await entete.PreparerAsync(new DebutCommande
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, TypeCommande = "4", Enseigne = "1",
+            });
+            (e.Designation1, e.DateLivraison, e.Interlocuteur, e.Fabricant) =
+                ("TEST NETPRINT SAAS DATES - A SUPPRIMER", DateOnly.FromDateTime(DateTime.Today.AddDays(20)), "TEST SAAS", "LEN");
+            cle = await entete.CreerAsync(e);
+            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur(), Production());
+            var d1 = NextWorkingDay(DateOnly.FromDateTime(DateTime.Today.AddDays(15)));
+            var d2 = NextWorkingDay(d1.AddDays(3));
+            var d3 = NextWorkingDay(d2.AddDays(5));
+            async Task<int> LigneAsync(DateOnly date)
+            {
+                var l = await service.NouvelleAsync(cle);
+                (l.Article, l.Indice, l.Quantite, l.PrixBrut, l.PrixSaisi, l.AdresseSiege, l.DateLivraison) =
+                    (article.Value.Article, article.Value.Indice, 1000, 49, true, true, date);
+                l = await service.CompleterAsync(cle, l);
+                l.AvertissementsAcceptes = [.. typeof(AvertissementsLigne).GetFields().Select(f => (string)f.GetValue(null)!)];
+                return await service.EnregistrerAsync(cle, l);
+            }
+            var l1 = await LigneAsync(d1);
+            var l2 = await LigneAsync(d2);
+            IActionsCommande actions = service;
+
+            // Dates obligatoires
+            var ex = await Assert.ThrowsAsync<SaisieInvalideException>(() => actions.ReporterDatesAsync(cle, new(ZoneDate.Livraison, null, ZoneDate.Livraison, d3)));
+            Assert.Equal(nameof(ReportDates.DateOrigine), Assert.Single(ex.Erreurs).Zone);
+
+            // Livraison d1 → d3 : la ligne 1 seulement
+            Assert.Equal(1, await actions.ReporterDatesAsync(cle, new(ZoneDate.Livraison, d1, ZoneDate.Livraison, d3)));
+            Assert.Equal((d3, d2), ((await service.LireAsync(cle, l1))!.DateLivraison!.Value, (await service.LireAsync(cle, l2))!.DateLivraison!.Value));
+
+            // Date confirmée posée sur la ligne 2, puis plus rien à la date d'origine
+            Assert.Equal(1, await actions.ReporterDatesAsync(cle, new(ZoneDate.Livraison, d2, ZoneDate.Confirmee, d3)));
+            var lue2 = (await service.LireAsync(cle, l2))!;
+            Assert.Equal((d2, (DateOnly?)d3), (lue2.DateLivraison!.Value, lue2.DateConfirmee));
+            Assert.Equal(0, await actions.ReporterDatesAsync(cle, new(ZoneDate.Livraison, d1, ZoneDate.Livraison, d3)));
+        }
+        finally
+        {
+            if (cle is not null) await NettoyerAsync(cnx, cle, client, article!.Value, adtcde);
+        }
+    }
+
     // Ligne d'après un devis (NEG520 F10) : devis du client, ligne pré-remplie « à la demande », enregistrée avec son devis
     [FactDb2Ecriture]
     public async Task Ligne_d_apres_un_devis_de_bout_en_bout()

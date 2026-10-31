@@ -81,7 +81,7 @@ Questions ouvertes :
 | 🟠 | Articles avec nomenclature | NEG520 (lignes composants, DNLCOM) | Refusés aujourd'hui |
 | ⚪ | Articles libres « 999… » | CTL520 l. 804-845 | Refusés aujourd'hui |
 | ⚪ | Lignes de frais E / P, remises R | CTL520 l. 1643-1707, NEG520 SPCAVT | Refusées aujourd'hui |
-| ⚪ | Changement de date de livraison en masse | NEG520 F20 (NEG520CW) | |
+| ✅ | ~~Changement de date de livraison en masse~~ | NEG520 F19 (NEG520CW) | Fait le 31/10 : bouton « 📅 Reporter des dates » de la fiche commande ; lignes non soldées dont la date de livraison ou confirmée vaut X → Y (livraison ou confirmée), en une transaction, stock recalculé ; refusé si une ligne fait partie d'un OPR non livré (comme NEG520). La rétro-doc indiquait F20 : c'est F19 |
 | ⚪ | Import Excel (NEGIMP / NEGIMPS) | NEG520 R3, ImportCommande | |
 | ⚪ | Contrôle de la norme | NOR010 (colonnes inconnues dans la cartographie) | Non contrôlée aujourd'hui |
 | ⚪ | Paramètres de facturation automatique (F13) | DOS505 DOS50505, AB001FA | Valeurs par défaut écrites, pas de saisie |

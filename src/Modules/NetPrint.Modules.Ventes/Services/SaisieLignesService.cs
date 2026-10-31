@@ -258,11 +258,11 @@ internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISo
         // Ligne d'un ordre de préparation non livré : ni quantité, ni date, ni adresse
         if (v.OprNonLivre is { } opr && ancienne is not null)
         {
-            E(l.Quantite != ancienne.Quantite, nameof(l.Quantite), $"La ligne fait partie de l'OPR n° {opr}.");
-            E(l.DateLivraison != ancienne.DateLivraison, nameof(l.DateLivraison), $"La ligne fait partie de l'OPR n° {opr}.");
+            E(l.Quantite != ancienne.Quantite, nameof(l.Quantite), MessagesLigne.LigneDansOpr(opr));
+            E(l.DateLivraison != ancienne.DateLivraison, nameof(l.DateLivraison), MessagesLigne.LigneDansOpr(opr));
             E(l.NumeroAdresse != ancienne.NumeroAdresse || l.AdresseSiege != ancienne.AdresseSiege || l.AdresseRaisonSociale != ancienne.AdresseRaisonSociale
               || l.AdresseRue1 != ancienne.AdresseRue1 || l.AdresseVille != ancienne.AdresseVille || l.AdresseCodePostal != ancienne.AdresseCodePostal,
-                nameof(l.NumeroAdresse), $"La ligne fait partie de l'OPR n° {opr}.");
+                nameof(l.NumeroAdresse), MessagesLigne.LigneDansOpr(opr));
         }
 
         // Adresse
@@ -347,7 +347,7 @@ internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISo
         l.Statut == StatutsLigne.ALaDemande && v.AppelsExistent ? "Suppression impossible : il existe des appels de livraison."
         : l.Soldee ? "Suppression impossible : la ligne est soldée."
         : l.QuantiteLivree != 0 || l.QuantiteFacturee != 0 ? "Suppression impossible : la ligne est livrée ou facturée."
-        : v.OprNonLivre is { } opr ? $"La ligne fait partie de l'OPR n° {opr}."
+        : v.OprNonLivre is { } opr ? MessagesLigne.LigneDansOpr(opr)
         : null;
 
     public async Task SolderAsync(CleCommande commande, int numeroLigne, CancellationToken ct = default)
@@ -529,6 +529,7 @@ internal static class MessagesLigne
     public const string DepassementOrigine = "Quantité saisie supérieure au reste à appeler de la ligne d'origine";            // NEG0029
     public const string AppelEdi = "Cet appel a été créé par l'EDI : il se modifie ou se supprime dans le tableau de bord EDI.";
     public const string PasUnAppel = "Cette ligne n'est pas un appel de livraison.";
+    public static string LigneDansOpr(int opr) => $"La ligne fait partie de l'OPR n° {opr}.";                          // OPR0013
     public const string DevisInexistant = "Ce N° de Devis n'existe pas.";                                                    // DEV0024
     public const string AdresseDevisAChoisir = "Choisissez l'adresse de livraison du devis.";
     public const string ArticleAvecAppels = "Changement d'article impossible, il existe des appels de livraison.";

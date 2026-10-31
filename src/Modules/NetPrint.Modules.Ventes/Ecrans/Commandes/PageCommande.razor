@@ -31,6 +31,8 @@
             @onclick="() => OuvrirLigneAsync(0)">＋ Ajouter une ligne</button>
     <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Nouvelle ligne reprise d'un devis du client (F10 de NEG520)" : RaisonNonModifiable)"
             @onclick="() => repriseDevis = true">📄 Ligne d'après un devis</button>
+    <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Reporter la date de livraison de plusieurs lignes (F19 de NEG520)" : RaisonNonModifiable)"
+            @onclick="() => reportDates = true">📅 Reporter des dates</button>
     @if (fiche is { Entete.Soldee: true })
     {
         <button disabled="@(!fiche.Droits.Creer || fiche.Entete.NonModifiable)" title="Remettre la commande en cours (ses lignes soldées le restent)"
@@ -203,6 +205,10 @@
                   ClientArticles="@fiche.Entete.Client"
                   OnFermer="FermerLigneAsync" />
 }
+@if (reportDates && fiche is not null)
+{
+    <FenetreReportDates Commande="CleCourante" OnFermer="FermerReportDatesAsync" />
+}
 @if (repriseDevis && fiche is not null)
 {
     <FenetreRepriseDevis Commande="CleCourante" OnFermer="FermerRepriseDevisAsync" />
@@ -372,6 +378,15 @@
 
     // Nouvel appel de livraison sur une ligne « à la demande »
     private Task OuvrirAppelAsync(int origine) => OuvrirLigneAsync(0, origine);
+
+    // Report de dates en masse : la fiche est relue après un report
+    private bool reportDates;
+
+    private async Task FermerReportDatesAsync(bool reporte)
+    {
+        reportDates = false;
+        if (reporte) await ChargerAsync();
+    }
 
     // Ligne d'après un devis : la ligne pré-remplie s'ouvre comme une nouvelle ligne
     private bool repriseDevis;
