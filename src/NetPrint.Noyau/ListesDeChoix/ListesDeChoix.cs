@@ -25,7 +25,7 @@ public enum ListeChoix
 public interface IListesDeChoix
 {
     // Parent : catégorie (sous-catégorie), sorte (sous-sorte), section (opération), fournisseur (opération STR),
-    // compte client (article : articles de ce client seulement, facultatif)
+    // compte général et compte client séparés par un blanc (article : articles de ce client seulement, facultatif)
     Task<ResultatChoix> RechercherAsync(ListeChoix liste, string? recherche, string? parent = null, CancellationToken ct = default);
 }
 
@@ -59,7 +59,6 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
         int NbCodes = 1,
         string? ZoneParent = null,
         bool ParentNumerique = false,
-        bool ParentFacultatif = false,            // parent numérique absent : liste entière, sans message
         int? ColonneInactif = null);              // index de la colonne SQL qui marque une ligne inactive (≠ 0)
 
     private sealed record Requete(string Select, bool AvecSociete = true);
@@ -159,8 +158,7 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
                 FROM {b}.SPF010 a LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = a.RSOC AND c.RGEN = a.AGEN AND c.RCLI = a.ACLI
                 WHERE a.RSOC = ?
                 """),
-            ["a.AARTIC", "a.ADES", "a.ARFIMP"], null, "a.AARTIC, a.AINDIC", NbCodes: 2, ZoneParent: "a.ACLI",
-            ParentNumerique: true, ParentFacultatif: true, ColonneInactif: 5),
+            ["a.AARTIC", "a.ADES", "a.ARFIMP"], null, "a.AARTIC, a.AINDIC", NbCodes: 2, ColonneInactif: 5),
     };
 
     public async Task<ResultatChoix> RechercherAsync(ListeChoix liste, string? recherche, string? parent = null, CancellationToken ct = default)
@@ -175,7 +173,7 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
 
         if (d.RechercheObligatoire && mots.Count == 0)
             return new(d.Titre, d.Colonnes, [], true, false, "Saisissez un ou plusieurs mots puis cliquez sur Rechercher.");
-        if (d.ZoneParent is not null && d.ParentNumerique && !d.ParentFacultatif && !int.TryParse(parent, out _))
+        if (d.ZoneParent is not null && d.ParentNumerique && !int.TryParse(parent, out _))
             return new(d.Titre, d.Colonnes, [], d.RechercheObligatoire, false,
                 "Renseignez d'abord le fournisseur : les opérations de sous-traitance dépendent du fournisseur.");
 
@@ -188,10 +186,18 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
         if (requete.AvecSociete) cmd.Parameters.Valeur(u.Societe);
 
         // Liste dépendante : sous-catégories d'une catégorie, sous-sortes d'une sorte, opérations d'une section…
-        if (d.ZoneParent is not null && !string.IsNullOrWhiteSpace(parent) && (!d.ParentNumerique || int.TryParse(parent, out _)))
+        if (d.ZoneParent is not null && !string.IsNullOrWhiteSpace(parent))
         {
             sql.Append($" AND {d.ZoneParent} = ?");
             cmd.Parameters.Valeur(d.ParentNumerique ? int.Parse(parent) : parent.Trim().ToUpperInvariant());
+        }
+        // Articles d'un client : compte général et compte client (« 411100 376 ») ; sans client, tous les articles
+        if (liste == ListeChoix.Article && (parent ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries) is [var gen, var cli]
+            && int.TryParse(gen, out var compteGeneral) && int.TryParse(cli, out var compteClient))
+        {
+            sql.Append(" AND a.AGEN = ? AND a.ACLI = ?");
+            cmd.Parameters.Valeur(compteGeneral);
+            cmd.Parameters.Valeur(compteClient);
         }
         // Opérations d'une section : D100F (comme FEN_RechercheOperations)
         if (liste == ListeChoix.Operation && !string.IsNullOrWhiteSpace(parent))
