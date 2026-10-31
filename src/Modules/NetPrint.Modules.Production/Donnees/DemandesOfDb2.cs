@@ -166,15 +166,10 @@ internal sealed class DemandesOfDb2(IConfiguration config)
             if (await Executer(cnx, tx, $"DELETE FROM {b}.AB0020 WHERE RSOC = ? AND RDOSS = ? AND LADCLE = ? AND LADOSC = ? AND LACLDC = ?", ct,
                     societe, of.Numero, of.Cle, commande.Numero, commande.Cle) == 0)
                 throw new RegleMetierException($"L'OF {of.Libelle} n'est pas lié à cette commande.");
-            var reste = 0;
-            await using (var rd = await Lire(cnx, tx, $"SELECT COUNT(*) FROM {b}.AB0020 WHERE RSOC = ? AND RDOSS = ? AND LADCLE = ?", ct,
-                             societe, of.Numero, of.Cle))
-                if (await rd.ReadAsync(ct)) reste = rd.Entier(0);
-            if (reste == 0)
-                await Executer(cnx, tx, $"DELETE FROM {b}.AB001T WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", ct, societe, of.Numero, of.Cle);
+            var supprime = await SupprimerEnteteSansLienAsync(cnx, tx, b, societe, of, ct);
             await tx.CommitAsync(ct);
             validee = true;
-            return reste == 0;
+            return supprime;
         }
         finally
         {
@@ -329,6 +324,26 @@ internal sealed class DemandesOfDb2(IConfiguration config)
             if (await rd.ReadAsync(ct)) return EtatOf.AOuvrir;
         return EtatOf.Inconnu;
     }
+
+    // OF à ouvrir sans plus aucun lien : en-têtes AB001T supprimés (une seule instruction par OF, sur une connexion) ;
+    // rend ceux qui l'ont été (leur suivi du BAG est à supprimer aussi)
+    public async Task<IReadOnlyList<NumeroOf>> SupprimerSansLienAsync(int societe, IReadOnlyList<NumeroOf> ofs, CancellationToken ct)
+    {
+        var supprimes = new List<NumeroOf>();
+        await using var cnx = await OuvrirAsync(ct);
+        foreach (var of in ofs)
+            if (await SupprimerEnteteSansLienAsync(cnx, null, Bib, societe, of, ct)) supprimes.Add(of);
+        return supprimes;
+    }
+
+    // Règle commune : l'en-tête d'un OF à ouvrir disparaît quand plus aucune commande n'y est liée ; jamais celui d'un OF ouvert
+    private static async Task<bool> SupprimerEnteteSansLienAsync(OdbcConnection cnx, OdbcTransaction? tx, string b, int societe, NumeroOf of,
+        CancellationToken ct) =>
+        await Executer(cnx, tx, $"""
+            DELETE FROM {b}.AB001T T WHERE T.RSOC = ? AND T.RDOSS = ? AND T.CCDCLE = ?
+              AND NOT EXISTS (SELECT 1 FROM {b}.AB0020 L WHERE L.RSOC = T.RSOC AND L.RDOSS = T.RDOSS AND L.LADCLE = T.CCDCLE)
+              AND NOT EXISTS (SELECT 1 FROM {b}.AB001 O WHERE O.RSOC = T.RSOC AND O.RDOSS = T.RDOSS AND O.CCDCLE = T.CCDCLE)
+            """, ct, societe, of.Numero, of.Cle) > 0;
 
     // Suivi du BAG de l'OF supprimé (AB009, table non journalisée : après la validation)
     public async Task SupprimerBagAsync(int societe, NumeroOf of, CancellationToken ct)

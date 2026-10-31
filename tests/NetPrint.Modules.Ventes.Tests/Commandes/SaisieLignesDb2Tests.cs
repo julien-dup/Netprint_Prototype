@@ -49,7 +49,7 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
             sortie.WriteLine($"Commande {cle.Libelle}, article {article.Value.Article} {article.Value.Indice}");
 
             // Ligne : valeurs par défaut, compléments, avertissements acceptés
-            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur());
+            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur(), Production());
             var l = await service.NouvelleAsync(cle);
             l.Article = article.Value.Article;
             l.Indice = article.Value.Indice;
@@ -143,7 +143,7 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
             cle = await entete.CreerAsync(e);
             sortie.WriteLine($"Commande {cle.Libelle}");
 
-            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur());
+            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur(), Production());
             IAppelsLivraison appels = service;
             async Task<(int Qteo, int Qtea, int Qtec, string Sold)> Origine()
             {
@@ -258,10 +258,7 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
             BaseDeTest.Societe, BaseDeTest.CompteGeneral, BaseDeTest.CompteClient);
         var adtcde = await ValeursAsync(cnx, "SELECT ADTCDE FROM NP11F.SPF010 WHERE RSOC = ? AND AARTIC = ? AND AINDIC = ?",
             BaseDeTest.Societe, article.Value.Article, article.Value.Indice);
-        var production = new NetPrint.Modules.Production.Services.InitialisationProductionService(
-            new NetPrint.Modules.Production.Donnees.DemandesOfDb2(BaseDeTest.Configuration),
-            new NetPrint.Modules.Production.Donnees.ReferencesProductionDb2(BaseDeTest.Configuration), new Utilisateur(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<NetPrint.Modules.Production.Services.InitialisationProductionService>.Instance);
+        var production = Production();
         var lancement = new LancementCommandeService(new LancementCommandeDb2(BaseDeTest.Configuration), Consultation, production, new Utilisateur());
         var crees = new List<NumeroOf>();
         var commandes = new List<CleCommande>();
@@ -277,7 +274,7 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
             (e.Designation1, e.DateLivraison, e.Interlocuteur, e.Fabricant) = ("TEST NETPRINT SAAS LANCEMENT - A SUPPRIMER", livraison, "TEST SAAS", "LEN");
             var c = await entete.CreerAsync(e);
             commandes.Add(c);
-            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur());
+            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur(), Production());
             var l = await service.NouvelleAsync(c);
             (l.Article, l.Indice, l.Quantite, l.PrixBrut, l.PrixSaisi, l.AdresseSiege) = (article.Value.Article, article.Value.Indice, quantite, 49, true, true);
             l.DateLivraison = NextWorkingDay(DateOnly.FromDateTime(DateTime.Today.AddDays(15)));
@@ -370,6 +367,18 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
                 await lancement.SupprimerAffectationAsync(cle, stock.Of, reference);
                 Assert.Equal(2500, (await ArticleAsync()).ResteAAffecter);
             }
+
+            // Suppression d'une commande lancée : son OF à ouvrir est gardé tant qu'il sert une autre commande, puis supprimé
+            var supprimee = await CommandeAsync(500);
+            var ofSupprime = await lancement.CreerOfAutomatiqueAsync(supprimee);
+            crees.Add(ofSupprime);
+            var partage = await CommandeAsync(300);
+            await lancement.RattacherAsync(partage, ofSupprime, reference);
+            IActionsCommande actions = new SaisieLignesService(Lignes, Consultation, new Utilisateur(), production);
+            await actions.SupprimerAsync(supprimee);
+            Assert.Equal(EtatOf.AOuvrir, await production.EtatAsync(ofSupprime));
+            await actions.SupprimerAsync(partage);
+            Assert.Equal(EtatOf.Inconnu, await production.EtatAsync(ofSupprime));
         }
         finally
         {
@@ -394,6 +403,11 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
                 }
         }
     }
+
+    private static NetPrint.Modules.Production.Services.InitialisationProductionService Production() => new(
+        new NetPrint.Modules.Production.Donnees.DemandesOfDb2(BaseDeTest.Configuration),
+        new NetPrint.Modules.Production.Donnees.ReferencesProductionDb2(BaseDeTest.Configuration), new Utilisateur(),
+        Microsoft.Extensions.Logging.Abstractions.NullLogger<NetPrint.Modules.Production.Services.InitialisationProductionService>.Instance);
 
     // Article commandable du client d'essai ; avecStock : géré en stock, avec des lots en stock (de préférence)
     private static async Task<(string Article, string Indice)?> ArticleDuClientAsync(OdbcConnection cnx, bool avecStock = false)

@@ -1,3 +1,4 @@
+using NetPrint.Modules.Production.Contrats;
 using NetPrint.Modules.Ventes.Contrats;
 using NetPrint.Modules.Ventes.Donnees;
 using NetPrint.Socle;
@@ -17,7 +18,8 @@ namespace NetPrint.Modules.Ventes.Services;
 //   - non repris pour l'instant : articles libres « 999… », articles avec nomenclature (lignes composants),
 //     contrôle de la norme (NOR010), reprise de devis, import Excel.
 // =====================================================================
-internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISourceCommandes commandes, IUtilisateurCourant utilisateur)
+internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISourceCommandes commandes, IUtilisateurCourant utilisateur,
+    IInitialisationProduction production)
     : ISaisieLignesCommande, IActionsCommande
 {
     private static DateOnly Aujourdhui => DateOnly.FromDateTime(DateTime.Today);
@@ -389,7 +391,9 @@ internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISo
     {
         var (u, c) = await ContexteActionAsync(commande, d => d.Supprimer, ct);
         var articles = await donnees.ArticlesAsync(u.Societe, commande, ct);
-        await donnees.SupprimerCommandeAsync(u.Societe, u.Profil, commande, c, RefusSuppressionCommande, ct);
+        var ofs = await donnees.SupprimerCommandeAsync(u.Societe, u.Profil, commande, c, RefusSuppressionCommande, ct);
+        // OF à ouvrir devenus orphelins (DOS500S les laissait) : après la validation, la suppression de la commande étant acquise
+        if (ofs.Count > 0) await production.SupprimerOfsSansCommandeAsync(ofs, CancellationToken.None);
         await RecalculerStocksCommandeAsync(u, c, articles, ct);
     }
 

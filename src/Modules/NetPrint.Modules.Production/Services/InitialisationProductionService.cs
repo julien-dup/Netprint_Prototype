@@ -31,18 +31,36 @@ internal sealed class InitialisationProductionService(DemandesOfDb2 donnees, Ref
     public async Task SupprimerDemandeOfAsync(NumeroOf of, CommandeOrigine commande, CancellationToken ct = default)
     {
         var u = await utilisateur.ExigerAsync();
-        if (await donnees.SupprimerAsync(u.Societe, of, commande, ct))
+        if (await donnees.SupprimerAsync(u.Societe, of, commande, ct)) await SupprimerBagAsync(u.Societe, of);
+    }
+
+    public async Task SupprimerOfsSansCommandeAsync(IReadOnlyList<NumeroOf> ofs, CancellationToken ct = default)
+    {
+        // Nettoyage après coup : la commande est déjà supprimée, un échec ici est signalé sans remonter à l'écran
+        var u = await utilisateur.ExigerAsync();
+        try
         {
-            try
-            {
-                await donnees.SupprimerBagAsync(u.Societe, of, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                // Suivi du BAG orphelin : sans effet sur l'OF supprimé (AB009 non journalisée, hors transaction) ; signalé
-                Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(journal, ex,
-                    "Suivi du BAG (AB009) de l'OF {Of} non supprimé", of.Libelle);
-            }
+            foreach (var of in await donnees.SupprimerSansLienAsync(u.Societe, [.. ofs.Distinct()], ct))
+                await SupprimerBagAsync(u.Societe, of);
+        }
+        catch (Exception ex)
+        {
+            Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(journal, ex,
+                "OF à ouvrir orphelins non supprimés : {Ofs}", string.Join(", ", ofs.Select(o => o.Libelle)));
+        }
+    }
+
+    private async Task SupprimerBagAsync(int societe, NumeroOf of)
+    {
+        try
+        {
+            await donnees.SupprimerBagAsync(societe, of, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Suivi du BAG orphelin : sans effet sur l'OF supprimé (AB009 non journalisée, hors transaction) ; signalé
+            Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(journal, ex,
+                "Suivi du BAG (AB009) de l'OF {Of} non supprimé", of.Libelle);
         }
     }
 

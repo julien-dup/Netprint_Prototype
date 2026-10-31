@@ -21,6 +21,11 @@ public interface IInitialisationProduction
     // aucune commande (option 4 de NEG515)
     Task SupprimerDemandeOfAsync(NumeroOf of, CommandeOrigine commande, CancellationToken ct = default);
 
+    // Après la suppression d'une commande (et de ses liens) : OF pas encore ouverts qui ne servent plus à aucune commande
+    // supprimés avec le suivi de leur BAG (DOS500S laissait l'en-tête AB001T orphelin). Nettoyage au mieux : un échec est
+    // journalisé, sans exception (la commande, elle, est déjà supprimée)
+    Task SupprimerOfsSansCommandeAsync(IReadOnlyList<NumeroOf> ofs, CancellationToken ct = default);
+
     // Rattacher un article d'une commande à un OF pas encore ouvert (option AL de NEG515, limitée aux OF à ouvrir)
     Task AjouterAOfAsync(NumeroOf of, CommandeOrigine commande, BesoinArticle besoin, CancellationToken ct = default);
 

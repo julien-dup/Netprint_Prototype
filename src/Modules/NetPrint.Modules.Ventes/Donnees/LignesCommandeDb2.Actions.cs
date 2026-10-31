@@ -1,7 +1,9 @@
 using System.Data;
 using System.Data.Odbc;
+using NetPrint.Modules.Production.Contrats;
 using NetPrint.Modules.Ventes.Contrats;
 using NetPrint.Socle;
+using NetPrint.Socle.Donnees;
 
 namespace NetPrint.Modules.Ventes.Donnees;
 
@@ -115,10 +117,12 @@ internal sealed partial class LignesCommandeDb2
     }
 
     // Suppression (option 4, SPSUP / SPneg100) d'une commande sans BL ni facture, contrôlés dans la transaction ;
-    // tables satellites comprises (journalisées depuis le 30/10/2026)
-    public async Task SupprimerCommandeAsync(int societe, string profil, CleCommande cle, ContexteLigne c,
+    // tables satellites comprises (journalisées depuis le 30/10/2026). Rend les OF à ouvrir qui lui étaient liés :
+    // la production supprime ensuite ceux qui ne servent plus à aucune commande.
+    public async Task<IReadOnlyList<NumeroOf>> SupprimerCommandeAsync(int societe, string profil, CleCommande cle, ContexteLigne c,
         Func<bool, bool, string?> refus, CancellationToken ct)
     {
+        var ofs = new List<NumeroOf>();
         var b = Bib;
         object?[] k = [societe, cle.Numero, cle.Cle];
         await using var cnx = await OuvrirAsync(ct);
@@ -131,6 +135,12 @@ internal sealed partial class LignesCommandeDb2
                 await Executer(cnx, tx, $"UPDATE {b}.AB001 SET CCDES1 = CCDES1 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", ct, k);
                 var (bl, facture) = await PiecesAsync(cnx, tx, b, societe, cle, ct);
                 if (refus(bl, facture) is { } message) throw new RegleMetierException(message);
+                await using (var rd = await Lire(cnx, tx, $"""
+                    SELECT DISTINCT L.RDOSS, L.LADCLE FROM {b}.AB0020 L
+                    WHERE L.RSOC = ? AND L.LADOSC = ? AND L.LACLDC = ?
+                      AND EXISTS (SELECT 1 FROM {b}.AB001T T WHERE T.RSOC = L.RSOC AND T.RDOSS = L.RDOSS AND T.CCDCLE = L.LADCLE)
+                    """, ct, k))
+                    while (await rd.ReadAsync(ct)) ofs.Add(new NumeroOf(rd.Entier(0), rd.Texte(1)));
 
                 // Journal : une suppression « S » par ligne (SPneg100)
                 var maintenant = DateTime.Now;
@@ -174,6 +184,7 @@ internal sealed partial class LignesCommandeDb2
         }
 
         await AuditDossierAsync(cnx, b, societe, profil, cle, "SU");
+        return ofs;
     }
 
     // Tables satellites vidées avec la commande : (table, colonne du n° de dossier, colonne de la clé)
