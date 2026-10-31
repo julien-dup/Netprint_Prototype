@@ -32,6 +32,7 @@ public static class LogistiqueModule
         services.AddScoped<IEditionBl, EditionBlService>();             // EXP030 / EXP035P2
         services.AddScoped<SaisieBlDb2>();
         services.AddScoped<ISaisieBl, SaisieBlService>();               // EXP010, cahier des charges lot 1
+        services.AddScoped<IBlDivers, BlDiversService>();               // BL divers (EXP010 état D)
         return services;
     }
 

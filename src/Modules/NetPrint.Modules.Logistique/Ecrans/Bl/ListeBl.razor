@@ -15,6 +15,7 @@
 
 <fieldset class="barre-outils">
     <button @onclick='() => Navigation.NavigateTo("logistique/bl/nouveau")' title="Créer un BL à partir des lignes de commande d'un dossier">➕ Nouveau BL</button>
+    <button @onclick='() => Navigation.NavigateTo("logistique/bl/divers")' title="BL divers : client, dossier ou fournisseur, sans stock ni commande">➕ BL divers</button>
     <span class="espace"></span>
     <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche du BL sélectionné (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir le BL</button>
 </fieldset>

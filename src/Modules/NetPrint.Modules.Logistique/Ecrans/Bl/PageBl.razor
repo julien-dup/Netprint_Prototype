@@ -101,6 +101,10 @@
                         @if (e.ClientFacture != "") {<span class="discret"> · facturé à @e.ClientFacture</span>}
                         @if (e.NomRepresentant != "") {<span class="discret"> · @e.NomRepresentant</span>}
                     </span>
+                    @if (e.NumeroFacture == 0 && e.Etat == "D" && fiche.Elements.Count == 1)
+                    {
+                        <button type="button" title="Modifier ce BL divers" @onclick="ModifierDivers">✏ Modifier</button>
+                    }
                     @if (e.NumeroFacture == 0 && e.Etat == "C" && e.Dossier > 0)
                     {
                         <button type="button" title="Modifier cet élément (quantités, lots, en-tête)" @onclick="() => Modifier(e)">✏ Modifier</button>
@@ -176,6 +180,7 @@
     }
 
     private void Modifier(DetailElementBl e) => Navigation.NavigateTo($"logistique/bl/{Numero}/element/{e.Element}/modifier");
+    private void ModifierDivers() => Navigation.NavigateTo($"logistique/bl/{Numero}/divers");
     private void AjouterDossier() => Navigation.NavigateTo($"logistique/bl/nouveau?bl={Numero}");
 
     // Suppression d'un élément : confirmation (Échap / Annuler = non), puis liste des BL si le BL a disparu, sinon fiche relue

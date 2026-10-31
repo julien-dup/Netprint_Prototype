@@ -76,6 +76,7 @@ internal sealed class ConsultationBlDb2(IConfiguration config)
         if (c.NumeroBl is > 0) Et("e.HNOBL = ?", c.NumeroBl);
         if (c.NumeroCommande is > 0) Et("e.HNODOS = ?", c.NumeroCommande);
         if (c.CompteClient is > 0) Et("h.HCLIE = ?", c.CompteClient);
+        if (c.CompteClient is > 0 && c.CompteGeneral is not > 0) Et("h.HGENE <> 0");   // BL divers fournisseur : HGENE = 0
         if (c.CompteGeneral is > 0) Et("h.HGENE = ?", c.CompteGeneral);
         if (Texte(c.ReferenceCommande) is { } refc) Et("UPPER(e.HREFCD) LIKE ? ESCAPE '\\'", Commence(refc));
         if (c.Du is { } du) Et("h.HDEXAA * 10000 + h.HDEXMM * 100 + h.HDEXJJ >= ?", BaseDb2.AAAAMMJJ(du));

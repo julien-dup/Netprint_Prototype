@@ -74,29 +74,32 @@ internal static class ReglesSaisieBl
         return ((int)Math.Min(99_999, Math.Round(poids, MidpointRounding.AwayFromZero)), lignes.Sum(l => l.Colis + l.ColisIncomplet));
     }
 
-    // Contrôles de saisie sans base (§ 6.1, 6.2, 6.3) : erreurs bloquantes et avertissements
-    public static (List<string> Erreurs, List<string> Avertissements) Controler(SaisieBl s)
+    // Destinataire et transport (§ 6.1), communs aux BL de produit fini / négoce et aux BL divers
+    public static void ControlerExpedition(List<string> e, AdresseBl a, string typePort, string typeLivraison, int transporteur, int bareme, int palettes)
     {
-        var e = new List<string>();
-        var w = new List<string>();
-        var a = s.Adresse;
-        var enlevement = s.TypePort == "E";
-
-        if (!TypesPort.Contains(s.TypePort)) e.Add("Type de port : F franco, D dû, A avancé ou E enlèvement.");
-        if (enlevement)
+        if (!TypesPort.Contains(typePort)) e.Add("Type de port : F franco, D dû, A avancé ou E enlèvement.");
+        if (typePort == "E")
         {
             if (a.RaisonSociale == "") e.Add("Enlèvement : la raison sociale (nom du client) est obligatoire.");
         }
         else
         {
             if (a.RaisonSociale == "" || a.Rue1 == "") e.Add("Le destinataire doit avoir une raison sociale et une rue.");
-            if (!TypesLivraison.Contains(s.TypeLivraison))
+            if (!TypesLivraison.Contains(typeLivraison))
                 e.Add("Mode de livraison : M messagerie, E express, A affrètement, I international ou P multi-palettes.");
-            if (s.Transporteur <= 0) e.Add("Le transporteur est obligatoire.");
+            if (transporteur <= 0) e.Add("Le transporteur est obligatoire.");
         }
-        if (s.Bareme is < 0 or > 3) e.Add("Barème transport : 1, 2 ou 3.");
+        if (bareme is < 0 or > 3) e.Add("Barème transport : 1, 2 ou 3.");
+        if (palettes is < 0 or > 99) e.Add("Nombre de palettes : de 0 à 99.");
+    }
+
+    // Contrôles de saisie sans base (§ 6.1, 6.2, 6.3) : erreurs bloquantes et avertissements
+    public static (List<string> Erreurs, List<string> Avertissements) Controler(SaisieBl s)
+    {
+        var e = new List<string>();
+        var w = new List<string>();
+        ControlerExpedition(e, s.Adresse, s.TypePort, s.TypeLivraison, s.Transporteur, s.Bareme, s.Palettes);
         if (s.FacturationAutomatique && s.CompteClientFacture == 0) e.Add("Facturation automatique : le client facturé est obligatoire.");
-        if (s.Palettes is < 0 or > 99) e.Add("Nombre de palettes : de 0 à 99.");
 
         var articles = s.Lignes.Where(l => !l.Texte).ToList();
         if (!articles.Any(l => l.Quantite > 0)) e.Add("Au moins une ligne doit avoir une quantité.");
