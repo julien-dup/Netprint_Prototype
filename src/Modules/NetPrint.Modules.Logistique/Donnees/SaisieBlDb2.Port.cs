@@ -77,9 +77,8 @@ internal sealed partial class SaisieBlDb2
 
         var (port, nom) = await PortAsync(cnx, tx, societe, transporteur, departement, bareme, poidsTotal, ct);
         if (port is not > 0) return;
-        // N° de ligne SLIG : compteur MAX + 1 de la société, table verrouillée jusqu'à la fin de la transaction (deux validations
-        // simultanées ne prennent pas le même n°)
-        await Executer(cnx, tx, "LOCK TABLE {b}.A20005 IN EXCLUSIVE MODE ALLOW READ", ct);
+        // N° de ligne SLIG : dernier n° de la société + 1, comme EXP010 (SETLL / READPE sur A20005F2), sans verrou de table : un
+        // LOCK TABLE attendrait tout travail qui a A20005 ouvert en mise à jour (programmes RPG compris)
         var parts = ReglesSaisieBl.RepartirAuPoids(port.Value, [.. dossiers.Select(e => e.Poids)]);
         for (var i = 0; i < dossiers.Count; i++)
         {
