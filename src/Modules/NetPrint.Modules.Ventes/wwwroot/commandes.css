@@ -183,4 +183,5 @@ input.num9 { width: 110px; }
 .grille-devis tr.selectionnable { cursor: pointer; }
 .fenetre.fenetre-report-dates { width: 560px; }
 .fenetre.fenetre-facturation-auto { width: 760px; }
+.fenetre.fenetre-changement-client { width: 560px; }
 .fenetre-facturation-auto fieldset.sans-cadre { border: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }

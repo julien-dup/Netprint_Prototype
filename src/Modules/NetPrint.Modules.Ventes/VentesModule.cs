@@ -53,6 +53,8 @@ public static class VentesModule
         services.AddScoped<EtatListeCommandes>();
         services.AddScoped<ISaisieCommandes, SaisieCommandesService>();   // en-tête de commande (DOS505)
         services.AddScoped<ISourceSaisieCommandes, SaisieCommandesDb2>();
+        services.AddScoped<ChangementClientDb2>();
+        services.AddScoped<IChangementClientCommande, ChangementClientService>();   // changement de client (DOS505 F17)
         services.AddScoped<FacturationAutomatiqueDb2>();
         services.AddScoped<IFacturationAutomatique, FacturationAutomatiqueService>();   // facturation automatique (DOS505 F13)
         // Lignes (NEG520 / CTL520 / MAJ520), actions sur la commande (DOS500S), appels de livraison (option DE, NEG300NAV)

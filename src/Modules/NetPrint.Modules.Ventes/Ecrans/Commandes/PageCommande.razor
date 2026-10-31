@@ -43,6 +43,8 @@
                 @Action("📅 Reporter des dates", PeutModifier, PeutModifier ? "Reporter la date de livraison de plusieurs lignes (F19 de NEG520)" : RaisonNonModifiable,
                     () => reportDates = true)
                 @Action("🧾 Facturation automatique", true, "Paramètres de facturation automatique (F13 de DOS505)", () => facturationAuto = true)
+                @Action("👤 Changer le client", PeutModifier, PeutModifier ? "Changer le client, la date ou l'enseigne de la commande (F17 de DOS505)" : RaisonNonModifiable,
+                    () => changementClient = true)
                 <li class="separateur"></li>
                 @if (fiche.Entete.Soldee)
                 {
@@ -216,6 +218,10 @@
     <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" Initiale="ligneInitiale" CodesVente="codesVente"
                   ClientArticles="@fiche.Entete.Client"
                   OnFermer="FermerLigneAsync" />
+}
+@if (changementClient && fiche is not null)
+{
+    <FenetreChangementClient Commande="CleCourante" OnFermer="FermerChangementClientAsync" />
 }
 @if (facturationAuto && fiche is not null)
 {
@@ -397,6 +403,13 @@
 
     private bool facturationAuto;
     private bool menuActions;
+    private bool changementClient;
+
+    private async Task FermerChangementClientAsync(bool change)
+    {
+        changementClient = false;
+        if (change) await ChargerAsync();
+    }
 
     // Entrée du menu « Plus » : grisée avec sa raison si l'action n'est pas permise ; le menu se ferme au choix
     private RenderFragment Action(string libelle, bool permise, string titre, Action action, bool danger = false) =>

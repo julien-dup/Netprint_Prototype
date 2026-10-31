@@ -54,6 +54,110 @@ public class SaisieCommandesDb2Tests(ITestOutputHelper sortie)
         sortie.WriteLine(r.ToString());
     }
 
+    // Changement de client, date, enseigne (F17 de DOS505) d'une commande d'essai, passée un moment à un autre client puis supprimée.
+    // Une commande livrée et facturée du client d'essai est refusée (contrôle fait avant toute écriture).
+    [FactDb2Ecriture]
+    public async Task Changement_de_client_d_une_commande()
+    {
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var client = await LireDatesClientAsync(cnx);
+        CleCommande? cle = null;
+        try
+        {
+            var service = Service();
+            var changement = new ChangementClientService(new ChangementClientDb2(BaseDeTest.Configuration), Donnees, service,
+                new ConsultationCommandesDb2(BaseDeTest.Configuration), new Utilisateur());
+            int autreGen, autreCli;
+            await using (var cmd = new OdbcCommand("""
+                SELECT RGEN, RCLI FROM NP11F.AA0003 WHERE RSOC = ? AND RGEN = ? AND RCLI <> ? AND CDFERM = 0 AND CTAG <> '*' ORDER BY RCLI FETCH FIRST 1 ROW ONLY
+                """, cnx))
+            {
+                cmd.Parameters.AddWithValue("s", BaseDeTest.Societe);
+                cmd.Parameters.AddWithValue("g", BaseDeTest.CompteGeneral);
+                cmd.Parameters.AddWithValue("c", BaseDeTest.CompteClient);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                Assert.True(await rd.ReadAsync());
+                (autreGen, autreCli) = (Convert.ToInt32(rd.GetValue(0)), Convert.ToInt32(rd.GetValue(1)));
+            }
+
+            // Commande en cours du client d'essai qui a un BL : refus (si le jeu d'essai en a une)
+            CleCommande? avecBl = null;
+            await using (var cmd = new OdbcCommand("""
+                SELECT a.RDOSS, a.CCDCLE FROM NP11F.AB001 a WHERE a.RSOC = ? AND a.RGEN = ? AND a.RCLI = ? AND a.CCTYPC IN ('3', '4')
+                  AND a.CCTAGS = ' ' AND a.CCOP10 <> 'O' AND a.CCOP11 <> 'O'
+                  AND EXISTS (SELECT 1 FROM NP11F.EXP010 x WHERE x.RSOC = a.RSOC AND x.HGENE = a.RGEN AND x.HCLIE = a.RCLI
+                                AND x.HNODOS = a.RDOSS AND x.HCLEF = a.CCDCLE)
+                FETCH FIRST 1 ROW ONLY
+                """, cnx))
+            {
+                cmd.Parameters.AddWithValue("s", BaseDeTest.Societe);
+                cmd.Parameters.AddWithValue("g", BaseDeTest.CompteGeneral);
+                cmd.Parameters.AddWithValue("c", BaseDeTest.CompteClient);
+                await using var rd = await cmd.ExecuteReaderAsync();
+                if (await rd.ReadAsync()) avecBl = new CleCommande(Convert.ToInt32(rd.GetValue(0)), Convert.ToString(rd.GetValue(1))!.Trim());
+            }
+            if (avecBl is null) sortie.WriteLine("Aucune commande en cours avec BL pour le client d'essai : refus BL non essayé.");
+            else
+            {
+                var avant = (await service.LireAsync(avecBl))!;
+                var livree = await Assert.ThrowsAsync<SaisieInvalideException>(() => changement.ChangerAsync(avecBl,
+                    new ChangementClient { CompteGeneral = autreGen, CompteClient = autreCli, Enseigne = avant.Enseigne, DateDossier = avant.DateDossier }));
+                sortie.WriteLine($"{avecBl.Libelle} : {string.Join(" / ", livree.Erreurs.Select(x => x.Message))}");
+                Assert.Contains(livree.Erreurs, x => x.Message == MessagesChangementClient.BlExistant);
+            }
+
+            var e = await service.PreparerAsync(new DebutCommande
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, TypeCommande = "4", Enseigne = "1",
+            });
+            (e.Designation1, e.DateLivraison, e.Interlocuteur, e.Fabricant) =
+                ("TEST NETPRINT SAAS CHANGEMENT CLIENT - A SUPPRIMER", DateOnly.FromDateTime(DateTime.Today.AddDays(15)), "TEST SAAS", "LEN");
+            cle = await service.CreerAsync(e);
+            var lue = (await service.LireAsync(cle))!;
+
+            // Client inexistant (n° vérifié absent : 9999999 existe dans le jeu d'essai)
+            int inexistant;
+            await using (var cmd = new OdbcCommand("""
+                SELECT MIN(c.RCLI + 1) FROM NP11F.AA0003 c WHERE c.RSOC = ? AND c.RGEN = ?
+                  AND NOT EXISTS (SELECT 1 FROM NP11F.AA0003 d WHERE d.RSOC = c.RSOC AND d.RGEN = c.RGEN AND d.RCLI = c.RCLI + 1)
+                """, cnx))
+            {
+                cmd.Parameters.AddWithValue("s", BaseDeTest.Societe);
+                cmd.Parameters.AddWithValue("g", BaseDeTest.CompteGeneral);
+                inexistant = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            }
+            var ex = await Assert.ThrowsAsync<SaisieInvalideException>(() => changement.ChangerAsync(cle,
+                new ChangementClient { CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = inexistant, Enseigne = lue.Enseigne, DateDossier = lue.DateDossier }));
+            Assert.Equal(nameof(ChangementClient.CompteClient), Assert.Single(ex.Erreurs).Zone);
+
+            // Autre client : avertissement éventuel sur les n° d'adresse, puis changement accepté
+            var vers = new ChangementClient { CompteGeneral = autreGen, CompteClient = autreCli, Enseigne = lue.Enseigne, DateDossier = lue.DateDossier };
+            try { await changement.ChangerAsync(cle, vers); }
+            catch (SaisieInvalideException avert) when (avert.Forcable)
+            {
+                sortie.WriteLine($"Avertissement : {avert.Erreurs[0].Message}");
+                vers.AvertissementAccepte = true;
+                await changement.ChangerAsync(cle, vers);
+            }
+            Assert.Equal((autreGen, autreCli), ((await service.LireAsync(cle))!.CompteGeneral, (await service.LireAsync(cle))!.CompteClient));
+
+            // Retour au client d'essai avec une autre date
+            var date = lue.DateDossier.AddDays(-1);
+            await changement.ChangerAsync(cle, new ChangementClient
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, Enseigne = lue.Enseigne, DateDossier = date,
+                AvertissementAccepte = true,
+            });
+            var relue = (await service.LireAsync(cle))!;
+            Assert.Equal((BaseDeTest.CompteClient, date), (relue.CompteClient, relue.DateDossier));
+        }
+        finally
+        {
+            if (cle is not null) await NettoyerAsync(cnx, cle, client);
+        }
+    }
+
     // Paramètres de facturation automatique (F13 de DOS505, AB001FA) d'une commande d'essai : lecture, contrôles, écriture
     [FactDb2Ecriture]
     public async Task Parametres_de_facturation_automatique()
