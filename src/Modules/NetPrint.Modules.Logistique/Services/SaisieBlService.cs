@@ -15,11 +15,12 @@ namespace NetPrint.Modules.Logistique.Services;
 // =====================================================================
 internal sealed class SaisieBlService(SaisieBlDb2 donnees, IUtilisateurCourant utilisateur) : ISaisieBl
 {
-    public async Task<PreparationBl> PreparerAsync(int dossier, string cle, int numeroBl = 0, CancellationToken ct = default)
+    public async Task<PreparationBl> PreparerAsync(int dossier, string cle, int numeroBl = 0, bool opr = false, CancellationToken ct = default)
     {
         var u = await utilisateur.ExigerAsync();
         var (d, _) = await DossierControleAsync(u.Societe, dossier, cle, ct);
-        IReadOnlyList<LigneProposee> lignes = await donnees.LignesAsync(u.Societe, d, ct);
+        IReadOnlyList<LigneProposee> lignes = await donnees.LignesAsync(u.Societe, d, ct, opr);
+        if (opr && lignes.Count == 0) throw new RegleMetierException("Plus aucune ligne dans l'OPR.");
         if (numeroBl > 0)
         {
             var bl = await BlPourAjoutAsync(u.Societe, numeroBl, d, ct);
@@ -66,12 +67,13 @@ internal sealed class SaisieBlService(SaisieBlDb2 donnees, IUtilisateurCourant u
         return bl;
     }
 
-    public async Task<SaisieBl> OuvrirAsync(int dossier, string cle, IReadOnlyList<int> lignes, int numeroBl = 0, CancellationToken ct = default)
+    public async Task<SaisieBl> OuvrirAsync(int dossier, string cle, IReadOnlyList<int> lignes, int numeroBl = 0, bool opr = false,
+        CancellationToken ct = default)
     {
         var u = await utilisateur.ExigerAsync();
         var (d, p) = await DossierControleAsync(u.Societe, dossier, cle, ct);
-        var proposees = await donnees.LignesAsync(u.Societe, d, ct);
-        var choisies = proposees.Where(l => lignes.Contains(l.NumeroLigne)).ToList();
+        var proposees = await donnees.LignesAsync(u.Societe, d, ct, opr);
+        IReadOnlyList<LigneProposee> choisies = proposees.Where(l => lignes.Contains(l.NumeroLigne)).ToList();
         if (ReglesSaisieBl.ControlerSelection(choisies) is { } refus) throw new RegleMetierException(refus);
         var premiere = choisies[0];
         if (await donnees.QualiteClientAsync(u.Societe, premiere.CompteGeneralFacture, premiere.CompteClientFacture, ct) is "4" or "5")
@@ -79,6 +81,9 @@ internal sealed class SaisieBlService(SaisieBlDb2 donnees, IUtilisateurCourant u
 
         var s = Nouvelle(d, p);
         s.Adresse = premiere.Adresse;
+        // Transporteur des OPR s'ils sont d'accord
+        if (opr && s.TypePort != "E" && choisies.Select(l => l.Transporteur).Where(x => x > 0).Distinct().ToList() is [var transporteur])
+            s.Transporteur = transporteur;
         (s.CompteGeneralFacture, s.CompteClientFacture) = (premiere.CompteGeneralFacture, premiere.CompteClientFacture);
         if (numeroBl > 0)
         {
@@ -99,7 +104,7 @@ internal sealed class SaisieBlService(SaisieBlDb2 donnees, IUtilisateurCourant u
             var ligne = new LigneSaisieBl
             {
                 NumeroLigneCommande = l.NumeroLigne, CodeLigne = codeLigne, Article = l.Article, Indice = l.Indice, Designation = l.Designation,
-                Quantite = l.Reste, Reste = l.Reste,
+                Quantite = l.AProposer, Reste = l.Reste,
             };
             Completer(ligne, article, p);
             ReglesSaisieBl.Coliser(ligne);

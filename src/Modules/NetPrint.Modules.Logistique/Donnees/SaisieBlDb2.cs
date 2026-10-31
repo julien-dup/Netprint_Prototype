@@ -132,37 +132,60 @@ internal sealed partial class SaisieBlDb2(IConfiguration config)
     }
 
     // Lignes de commande non soldées du dossier, avec adresse (A500F n° DNLIGA, sinon adresse de la ligne, sinon client),
-    // client facturé (ligne, sinon dossier AB001.CGENF/CCLIF, sinon client du dossier) et ordre de préparation traité non livré
-    public async Task<IReadOnlyList<LigneProposee>> LignesAsync(int societe, DossierBl d, CancellationToken ct)
+    // client facturé (ligne, sinon dossier AB001.CGENF/CCLIF, sinon client du dossier) et ordre de préparation traité non livré.
+    // Source OPR : seulement les lignes d'OPR traitées et non livrées (OPR015.ODSTAT = '3', ODLIVR <> 'O'), regroupées par ligne de
+    // commande (quantité de l'OPR, première date de livraison, transporteur), triées par date et adresse.
+    public async Task<IReadOnlyList<LigneProposee>> LignesAsync(int societe, DossierBl d, CancellationToken ct, bool opr = false)
     {
         await using var cnx = await OuvrirAsync(ct);
-        await using var rd = await Lire(cnx, """
+        // Ordres de préparation traités non livrés de chaque ligne, lus en une fois
+        var oprs = new Dictionary<int, List<(int Opr, int Quantite, int Date, int Transporteur)>>();
+        await using (var rd = await Lire(cnx, """
+            SELECT ODDLIG, ODNUM, ODQTEA, ODDTLV, ODTRS FROM {b}.OPR015
+            WHERE RSOC = ? AND ODNCDE = ? AND ODNCLE = ? AND ODSTAT = '3' AND ODLIVR <> 'O' ORDER BY ODDLIG, ODNUM
+            """, ct, societe, d.Dossier, d.Cle))
+            while (await rd.ReadAsync(ct))
+            {
+                if (!oprs.TryGetValue(rd.Entier(0), out var l)) oprs[rd.Entier(0)] = l = [];
+                l.Add((rd.Entier(1), rd.Entier(2), rd.Entier(3), rd.Entier(4)));
+            }
+
+        await using var lecture = await Lire(cnx, """
             SELECT n.DNNLIG, n.DNART, n.DNIND, n.DNDESA, n.DNQTEC, n.DNQTEL, n.DNSTAT, n.DNLIGA,
                    COALESCE(a.ALFJ, n.DNFJ), COALESCE(a.ALRS, n.DNRS), COALESCE(a.ALRUE1, n.DNRUE1), COALESCE(a.ALRUE2, n.DNRUE2),
                    COALESCE(a.ALPOST, n.DNPOST), COALESCE(a.ALVILL, n.DNVILL), COALESCE(a.ALDEP, ''), COALESCE(a.ALPAY, n.DNPAY),
-                   n.DNGENF, n.DNCLIF,
-                   (SELECT MIN(o.ODNUM) FROM {b}.OPR015 o WHERE o.RSOC = n.RSOC AND o.ODNCDE = n.RDOSS AND o.ODNCLE = n.DNDCLE
-                     AND o.ODDLIG = n.DNNLIG AND o.ODSTAT = '3' AND o.ODLIVR <> 'O'),
-                   n.DNDLIV
+                   n.DNGENF, n.DNCLIF, n.DNDLIV, COALESCE(s.ASTK, ''), COALESCE(s.AOPT1, '')
             FROM {b}.NEG100 n
             LEFT OUTER JOIN {b}.A500F a ON a.RSOC = n.RSOC AND a.RGEN = ? AND a.RCLI = ? AND a.ALNLIG = n.DNLIGA AND n.DNLIGA <> 0
+            LEFT OUTER JOIN {b}.SPF010 s ON s.RSOC = n.RSOC AND s.AARTIC = n.DNART AND s.AINDIC = n.DNIND
             WHERE n.RSOC = ? AND n.RDOSS = ? AND n.DNDCLE = ? AND n.DNSOLD <> 'O' AND n.DNART <> ' '
             ORDER BY n.DNNLIG
             """, ct, d.CompteGeneral, d.CompteClient, societe, d.Dossier, d.Cle);
         var lignes = new List<LigneProposee>();
-        while (await rd.ReadAsync(ct))
+        while (await lecture.ReadAsync(ct))
         {
-            var adresse = new AdresseBl(rd.Entier(7), rd.Texte(8), rd.Texte(9), rd.Texte(10), rd.Texte(11), rd.Texte(12), rd.Texte(13),
-                rd.Texte(14), rd.Texte(15));
+            var no = lecture.Entier(0);
+            var deLaLigne = oprs.GetValueOrDefault(no) ?? [];
+            if (opr && deLaLigne.Count == 0) continue;
+            var adresse = new AdresseBl(lecture.Entier(7), lecture.Texte(8), lecture.Texte(9), lecture.Texte(10), lecture.Texte(11),
+                lecture.Texte(12), lecture.Texte(13), lecture.Texte(14), lecture.Texte(15));
             if (adresse.RaisonSociale == "") adresse = d.AdresseClient;
-            var (gen, cli) = rd.Entier(17) != 0 ? (rd.Entier(16), rd.Entier(17))
+            var (gen, cli) = lecture.Entier(17) != 0 ? (lecture.Entier(16), lecture.Entier(17))
                 : d.CompteClientFactureClient != 0 ? (d.CompteGeneralFactureClient, d.CompteClientFactureClient)
                 : (d.CompteGeneral, d.CompteClient);
-            lignes.Add(new LigneProposee(rd.Entier(0), rd.Texte(1), rd.Texte(2), rd.Texte(3), rd.Entier(4), rd.Entier(5),
-                Math.Max(0, rd.Entier(4) - rd.Entier(5)), rd.Texte(6) == "3", adresse, gen, cli, rd.Nul(18) ? null : rd.Entier(18),
-                BaseDb2.DateAAAAMMJJ(rd.Entier(19))));
+            var reste = Math.Max(0, lecture.Entier(4) - lecture.Entier(5));
+            int? premier = deLaLigne.Count > 0 ? deLaLigne[0].Opr : null;
+            // Source OPR : quantité de l'OPR plafonnée au reste, première date de livraison, transporteur s'ils sont d'accord
+            var transporteurs = deLaLigne.Select(o => o.Transporteur).Where(x => x > 0).Distinct().ToList();
+            lignes.Add(new LigneProposee(no, lecture.Texte(1), lecture.Texte(2), lecture.Texte(3), lecture.Entier(4), lecture.Entier(5), reste,
+                lecture.Texte(6) == "3", adresse, gen, cli, premier,
+                opr ? BaseDb2.DateAAAAMMJJ(deLaLigne.Min(o => o.Date)) : BaseDb2.DateAAAAMMJJ(lecture.Entier(18)),
+                opr ? Math.Min(reste, deLaLigne.Sum(o => o.Quantite)) : reste,
+                opr && transporteurs.Count == 1 ? transporteurs[0] : 0,
+                opr && lecture.Texte(19) == "N" && lecture.Texte(20) == "N",
+                [.. deLaLigne.Select(o => o.Opr)]));
         }
-        return lignes;
+        return opr ? [.. lignes.OrderBy(l => l.DateLivraison).ThenBy(l => l.Adresse.Libelle)] : lignes;
     }
 
     // Lignes de commande choisies : code ligne, article (SPF010) et textes de la ligne (NEG100T)

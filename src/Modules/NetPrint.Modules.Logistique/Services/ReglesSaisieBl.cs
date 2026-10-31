@@ -34,11 +34,21 @@ internal static class ReglesSaisieBl
 
     // Lignes cochées à l'ouverture : les lignes normales (pas à la demande) si elles vont toutes au même destinataire et au même
     // client facturé (même règle que la sélection), sinon aucune
-    public static IReadOnlyList<int> LignesCocheesParDefaut(IReadOnlyList<LigneProposee> lignes)
+    // Source OPR : toutes les lignes si elles vont au même destinataire, au même client facturé et à la même date, sinon aucune
+    public static IReadOnlyList<int> LignesCocheesParDefaut(IReadOnlyList<LigneProposee> lignes, bool opr = false)
     {
-        var normales = lignes.Where(l => !l.ADemande).ToList();
+        var normales = opr ? [.. lignes] : lignes.Where(l => !l.ADemande).ToList();
+        if (opr && normales.Select(l => l.DateLivraison).Distinct().Count() > 1) return [];
         return normales.Count > 0 && ControlerSelection(normales) is null ? [.. normales.Select(l => l.NumeroLigne)] : [];
     }
+
+    // Source OPR (§ 4.2 bis) : en cochant une ligne, les articles ni stockés ni imprimables qui partagent un de ses OPR sont
+    // cochés d'office (même destinataire, même client facturé) ; l'utilisateur peut ensuite les décocher
+    public static IReadOnlyList<int> LignesDOffice(IReadOnlyList<LigneProposee> proposees, LigneProposee cochee) =>
+        [.. proposees.Where(l => l.DOffice && l != cochee && l.Adresse.MemeDestinataire(cochee.Adresse)
+                && (l.CompteGeneralFacture, l.CompteClientFacture) == (cochee.CompteGeneralFacture, cochee.CompteClientFacture)
+                && (l.Oprs ?? []).Intersect(cochee.Oprs ?? []).Any())
+            .Select(l => l.NumeroLigne)];
 
     // Colisage (§ 6.2) : colis = quantité ÷ emballage, mécompte = reste, colis incomplet = 1 s'il y a un reste ; « S » sans
     // conditionnement : tout à 0

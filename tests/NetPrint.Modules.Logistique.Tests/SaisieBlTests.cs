@@ -49,6 +49,22 @@ public class SaisieBlTests(ITestOutputHelper sortie)
     }
 
     [Fact]
+    public void Source_OPR_cochage_et_lignes_d_office()
+    {
+        var l1 = Proposee(1) with { Opr = 10, DateLivraison = new DateOnly(2024, 1, 11) };
+        var l2 = Proposee(2) with { Opr = 10, DateLivraison = new DateOnly(2024, 1, 11), ADemande = true };
+        Assert.Equal([1, 2], ReglesSaisieBl.LignesCocheesParDefaut([l1, l2], opr: true));   // même destinataire, même date : toutes
+        Assert.Empty(ReglesSaisieBl.LignesCocheesParDefaut([l1, l2 with { DateLivraison = new DateOnly(2024, 1, 12) }], opr: true));
+
+        // Cocher la ligne 1 (OPR 10 et 12) coche les articles d'office de ces OPR, au même destinataire seulement
+        var cochee = l1 with { Oprs = [10, 12] };
+        var doffice = Proposee(3) with { Opr = 12, Oprs = [12], DOffice = true };
+        var autreOpr = Proposee(4) with { Opr = 11, Oprs = [11], DOffice = true };
+        var ailleurs = Proposee(5, Clarins with { Ville = "PARIS" }) with { Opr = 10, Oprs = [10], DOffice = true };
+        Assert.Equal([3], ReglesSaisieBl.LignesDOffice([cochee, l2, doffice, autreOpr, ailleurs], cochee));
+    }
+
+    [Fact]
     public void Colisage_poids_et_totaux()
     {
         var l = Ligne();
@@ -203,6 +219,19 @@ public class SaisieBlTests(ITestOutputHelper sortie)
         foreach (var l in p.Lignes)
             sortie.WriteLine($"{l.NumeroLigne} {l.Article} reste {l.Reste} {(l.ADemande ? "à la demande" : "")} {l.Adresse.Libelle} fact. {l.CompteClientFacture}");
         Assert.Contains(p.Lignes, l => l.ADemande);
+    }
+
+    // Source OPR : dossier d'essai 68682/9 (client 411100 20), deux lignes dans deux OPR de dates différentes ; lecture seule
+    [FactDb2]
+    public async Task Lignes_d_ordres_de_preparation()
+    {
+        var p = await Service().PreparerAsync(68682, "9", opr: true);
+        foreach (var l in p.Lignes) sortie.WriteLine($"{l.NumeroLigne} {l.Article} OPR {l.Opr} qté {l.AProposer} le {l.DateLivraison:dd/MM/yyyy}");
+        Assert.All(p.Lignes, l => Assert.NotNull(l.Opr));
+        Assert.Empty(ReglesSaisieBl.LignesCocheesParDefaut(p.Lignes, opr: true));
+        var premiere = p.Lignes[0];
+        var s = await Service().OuvrirAsync(68682, "9", [premiere.NumeroLigne], opr: true);
+        Assert.Equal(premiere.AProposer, s.Lignes.First(l => !l.Texte && l.NumeroLigneCommande == premiere.NumeroLigne).Quantite);
     }
 
     // Création d'un BL sur la ligne 4 du dossier d'essai 69320/9 (PQA002, lot 693201), daté dans la période de stock ouverte,

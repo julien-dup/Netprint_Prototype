@@ -9,6 +9,7 @@
    3. fin : n° de BL attribué, fiche, impression, nouveau BL sur le dossier.
    ===================================================================== *@
 @inject ISaisieBl Saisies
+@inject EtatListeBl Etat
 @inject IEditionBl Edition
 @inject NavigationManager Navigation
 @inject Dialogues Dialogues
@@ -70,6 +71,13 @@
                     <BoutonRecherche Liste="ListeChoix.Dossier" Titre="Rechercher un dossier" OnChoix="ChoisirDossier" />
                 </div>
             </div>
+            <div class="champ">
+                <span>Lignes à livrer</span>
+                <div class="ligne-champs choix-source">
+                    <label class="champ-case"><input type="radio" name="source" checked="@(!Etat.SourceOpr)" @onchange="() => ChoisirSource(false)" /> Lignes de commande</label>
+                    <label class="champ-case"><input type="radio" name="source" checked="@Etat.SourceOpr" @onchange="() => ChoisirSource(true)" /> Ordres de préparation</label>
+                </div>
+            </div>
             <div class="boutons-criteres">
                 <button type="submit" class="bouton-principal" disabled="@occupe">Afficher les lignes à livrer</button>
             </div>
@@ -86,7 +94,7 @@
                 <table class="grille grille-fiche">
                     <thead>
                         <tr><th></th><th>Ligne</th><th>Article</th><th>Désignation</th><th class="nombre">Commandé</th><th class="nombre">Livré</th>
-                            <th class="nombre">Reste</th><th>Livraison</th><th>Adresse</th><th>Facturé à</th><th>OPR</th></tr>
+                            <th class="nombre">Reste</th>@if (sourceOpr) {<th class="nombre">Qté OPR</th>}<th>Livraison</th><th>Adresse</th><th>Facturé à</th><th>OPR</th></tr>
                     </thead>
                     <tbody>
                         @foreach (var l in p.Lignes)
@@ -99,6 +107,7 @@
                                 <td class="nombre">@l.Commande.ToString("N0")</td>
                                 <td class="nombre">@l.Livre.ToString("N0")</td>
                                 <td class="nombre"><b>@l.Reste.ToString("N0")</b></td>
+                                @if (sourceOpr) {<td class="nombre">@l.AProposer.ToString("N0")@(l.DOffice ? " ⓘ" : "")</td>}
                                 <td>@l.DateLivraison?.ToString("dd/MM/yyyy")</td>
                                 <td>@(l.Adresse.Numero > 0 ? $"n° {l.Adresse.Numero} · " : "")@l.Adresse.Libelle</td>
                                 <td>@l.CompteGeneralFacture @l.CompteClientFacture</td>
@@ -107,7 +116,8 @@
                         }
                     </tbody>
                 </table>
-                <p class="legende"><span class="ligne-a-la-demande">En rouge</span> : ligne à la demande (contrat), non cochée par défaut.</p>
+                <p class="legende"><span class="ligne-a-la-demande">En rouge</span> : ligne à la demande (contrat), non cochée par défaut.
+                    @if (sourceOpr) {<span> · ⓘ article ni stocké ni imprimable, ajouté d'office avec les autres lignes de son OPR.</span>}</p>
             </section>
         }
     }
@@ -338,6 +348,7 @@
     }
 
     private int? dossier;
+    private bool sourceOpr;   // source des lignes affichées (le dernier choix est gardé pour la session : EtatListeBl)
     private string cle = "";
     private PreparationBl? preparation;
     private readonly HashSet<int> choisies = [];
@@ -363,27 +374,40 @@
         if (dossier is not > 0) { Notifications.Erreur("Saisissez un n° de dossier."); return; }
         await Executer(async () =>
         {
-            preparation = await Saisies.PreparerAsync(dossier.Value, cle, Ajout);
+            sourceOpr = Etat.SourceOpr;
+            preparation = await Saisies.PreparerAsync(dossier.Value, cle, Ajout, sourceOpr);
             choisies.Clear();
-            choisies.UnionWith(NetPrint.Modules.Logistique.Services.ReglesSaisieBl.LignesCocheesParDefaut(preparation.Lignes));
+            choisies.UnionWith(NetPrint.Modules.Logistique.Services.ReglesSaisieBl.LignesCocheesParDefaut(preparation.Lignes, sourceOpr));
         });
     }
 
+    // Cocher une ligne d'OPR coche aussi les articles ni stockés ni imprimables de ses OPR
     private void Basculer(LigneProposee l)
     {
-        if (!choisies.Remove(l.NumeroLigne)) choisies.Add(l.NumeroLigne);
+        if (choisies.Remove(l.NumeroLigne)) return;
+        choisies.Add(l.NumeroLigne);
+        if (sourceOpr && preparation is not null)
+            choisies.UnionWith(NetPrint.Modules.Logistique.Services.ReglesSaisieBl.LignesDOffice(preparation.Lignes, l));
+    }
+
+    // Changement de source : les lignes affichées ne correspondent plus, elles sont effacées
+    private void ChoisirSource(bool opr)
+    {
+        Etat.SourceOpr = opr;
+        preparation = null;
+        choisies.Clear();
     }
 
     private async Task OuvrirAsync()
     {
         var p = preparation!;
         var opr = p.Lignes.Where(l => choisies.Contains(l.NumeroLigne) && l.Opr is not null).ToList();
-        if (opr.Count > 0 && !await Dialogues.ConfirmerAsync(
+        if (!sourceOpr && opr.Count > 0 && !await Dialogues.ConfirmerAsync(
                 string.Join("\n", opr.Select(l => $"La ligne {l.NumeroLigne} fait partie de l'OPR n° {l.Opr}.")) + "\nLa livrer hors OPR ?",
                 "Lignes d'ordre de préparation", "Livrer")) return;
         await Executer(async () =>
         {
-            saisie = await Saisies.OuvrirAsync(p.Dossier, p.Cle, [.. choisies.Order()], Ajout);
+            saisie = await Saisies.OuvrirAsync(p.Dossier, p.Cle, [.. choisies.Order()], Ajout, sourceOpr);
             textePied = string.Join(Environment.NewLine, saisie.TextePied);
             controle = null;
             ligneLots = null;

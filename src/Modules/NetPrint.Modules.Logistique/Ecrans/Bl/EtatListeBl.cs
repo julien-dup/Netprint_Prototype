@@ -12,4 +12,7 @@ public sealed class EtatListeBl
     public string Tri { get; set; } = "";
     public bool TriDescendant { get; set; }
     public (int Bl, int Element)? Selection { get; set; }
+
+    // Saisie d'un BL : dernière source de lignes choisie (lignes de commande ou ordres de préparation)
+    public bool SourceOpr { get; set; }
 }

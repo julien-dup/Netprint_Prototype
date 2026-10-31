@@ -7,12 +7,14 @@ namespace NetPrint.Modules.Logistique.Contrats;
 // =====================================================================
 public interface ISaisieBl
 {
-    // Contrôles du dossier (C1 à C6) et lignes de commande restant à livrer ; ajout à un BL existant (numeroBl) : contrôles C7
-    // et seulement les lignes qui vont au destinataire et au client facturé du BL
-    Task<PreparationBl> PreparerAsync(int dossier, string cle, int numeroBl = 0, CancellationToken ct = default);
+    // Contrôles du dossier (C1 à C6) et lignes restant à livrer : lignes de commande, ou lignes d'ordres de préparation traités
+    // et non livrés (source « OPR », regroupées par ligne de commande) ; ajout à un BL existant (numeroBl) : contrôles C7 et
+    // seulement les lignes qui vont au destinataire et au client facturé du BL
+    Task<PreparationBl> PreparerAsync(int dossier, string cle, int numeroBl = 0, bool opr = false, CancellationToken ct = default);
 
-    // Saisie initialisée à partir des lignes de commande choisies (même adresse, même client facturé) ; en ajout, en-tête du BL
-    Task<SaisieBl> OuvrirAsync(int dossier, string cle, IReadOnlyList<int> lignes, int numeroBl = 0, CancellationToken ct = default);
+    // Saisie initialisée à partir des lignes choisies (n° de lignes de commande ; même adresse, même client facturé) ; en ajout,
+    // en-tête du BL. Source OPR : quantité (plafonnée au reste) et transporteur de l'OPR.
+    Task<SaisieBl> OuvrirAsync(int dossier, string cle, IReadOnlyList<int> lignes, int numeroBl = 0, bool opr = false, CancellationToken ct = default);
 
     // Saisie d'un élément enregistré, pour le modifier (cahier des charges § 9)
     Task<SaisieBl> OuvrirElementAsync(int numeroBl, int element, CancellationToken ct = default);
@@ -43,9 +45,13 @@ public sealed record AdresseBl(
         Numero == a.Numero && RaisonSociale == a.RaisonSociale && CodePostal == a.CodePostal && Ville == a.Ville;
 }
 
+// AProposer : quantité proposée (reste à livrer, ou quantité de l'OPR) ; Transporteur : celui de l'OPR (0 sinon) ;
+// DOffice : source OPR, article ni stocké ni imprimable coché d'office avec les autres lignes de ses OPR ; Oprs : tous les OPR
+// traités non livrés de la ligne (Opr = le premier)
 public sealed record LigneProposee(
     int NumeroLigne, string Article, string Indice, string Designation, int Commande, int Livre, int Reste, bool ADemande,
-    AdresseBl Adresse, int CompteGeneralFacture, int CompteClientFacture, int? Opr, DateOnly? DateLivraison);
+    AdresseBl Adresse, int CompteGeneralFacture, int CompteClientFacture, int? Opr, DateOnly? DateLivraison,
+    int AProposer = 0, int Transporteur = 0, bool DOffice = false, IReadOnlyList<int>? Oprs = null);
 
 public sealed record PreparationBl(
     int Dossier, string Cle, string TypeDossier, string Designation, int CompteGeneral, int CompteClient, string NomClient,
