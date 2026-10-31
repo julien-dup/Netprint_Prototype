@@ -21,7 +21,8 @@ internal sealed class EditionBlService(EditionBlDb2 donnees, ISocietes societes,
         var u = await utilisateur.ExigerAsync();
         var lues = await LireAsync(u, numeroBl, ct);
         var societe = await societes.LireIdentiteAsync(u.Societe, lues.Entete.Enseigne, DocumentBl.TypeLogo, ct);
-        return DocumentsPdf.Generer($"BL {numeroBl}.pdf", new DocumentBl(BonLivraison.Construire(lues), societe, apercu));
+        // Rendu hors du fil de l'écran (comme l'ARC)
+        return await Task.Run(() => DocumentsPdf.Generer($"BL {numeroBl}.pdf", new DocumentBl(BonLivraison.Construire(lues), societe, apercu)), ct);
     }
 
     public async Task MarquerEditeAsync(int numeroBl, CancellationToken ct = default)
@@ -31,6 +32,9 @@ internal sealed class EditionBlService(EditionBlDb2 donnees, ISocietes societes,
             throw new RegleMetierException("Vous ne voyez qu'une partie de ce BL : il n'est pas marqué édité.");
         await donnees.MarquerEditeAsync(u.Societe, numeroBl, DateOnly.FromDateTime(DateTime.Today), ct);
     }
+
+    public async Task<bool> CompletAsync(int numeroBl, CancellationToken ct = default) =>
+        !(await LireAsync(await utilisateur.ExigerAsync(), numeroBl, ct)).Partiel;
 
     private async Task<DonneesEditionBl> LireAsync(UtilisateurConnecte u, int numeroBl, CancellationToken ct) =>
         await donnees.LireAsync(u.Societe, u.Profil, numeroBl, ct)

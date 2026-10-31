@@ -39,6 +39,7 @@ public static class LogistiqueModule
         services.AddScoped<Ecrans.Bl.EtatListeBl>();                    // critères et liste conservés pendant la session
         services.AddScoped<EditionBlDb2>();
         services.AddScoped<IEditionBl, EditionBlService>();             // EXP030 / EXP035P2
+        services.AddScoped<IEnvoiBl, EnvoiBlService>();                 // EXP010S option EE (envoi par e-mail)
         services.AddScoped<SaisieBlDb2>();
         services.AddScoped<ISaisieBl, SaisieBlService>();               // EXP010, cahier des charges lot 1
         services.AddScoped<IBlDivers, BlDiversService>();               // BL divers (EXP010 état D)
@@ -69,6 +70,19 @@ public static class LogistiqueModule
             {
                 return Results.Text($"Édition du BL impossible : {ex.Message}", "text/plain; charset=utf-8",
                     statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // PDF d'un BL tel qu'il a été envoyé (journal ENV100) : GET /api/logistique/bl/165139/envois/12/pdf
+        api.MapGet("/bl/{numero:int}/envois/{id:long}/pdf", async (int numero, long id, HttpContext http, IEnvoiBl envoi, CancellationToken ct) =>
+        {
+            try
+            {
+                return await envoi.PdfEnvoyeAsync(numero, id, ct) is { } pdf ? DocumentsPdf.Reponse(http, pdf) : Results.NotFound();
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
             }
         });
 

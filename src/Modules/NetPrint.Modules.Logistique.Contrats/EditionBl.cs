@@ -10,4 +10,7 @@ public interface IEditionBl
 
     // Marque « édité » d'EXP035P2 : EXP009.HEDBL = 'N' et date d'édition. Refusée si le profil ne voit pas tout le BL.
     Task MarquerEditeAsync(int numeroBl, CancellationToken ct = default);
+
+    // Le profil voit-il tout le BL ? (un représentant limité n'en voit que ses éléments, sans les totaux : ni marque, ni envoi)
+    Task<bool> CompletAsync(int numeroBl, CancellationToken ct = default);
 }

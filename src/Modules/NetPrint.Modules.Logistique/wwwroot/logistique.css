@@ -48,3 +48,12 @@
 .grille-livraisons td { white-space: nowrap; }
 .grille-livraisons td:nth-child(6) { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 .stock-court { color: var(--danger); font-weight: 600; }
+
+/* Envoi d'un BL par e-mail */
+.fenetre.fenetre-envoi { width: min(620px, 94vw); }
+.fenetre-envoi .corps-fenetre { display: flex; flex-direction: column; gap: 10px; }
+.fenetre-envoi h3 { margin: 6px 0 0; font-size: 0.95em; }
+.fenetre-envoi .liste-cases { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+.fenetre-envoi .champ-case { align-self: flex-start; min-height: 0; }
+.tableau-envois { border-collapse: collapse; font-size: 0.88em; }
+.tableau-envois td { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--bordure, #e3e3e3); vertical-align: top; }

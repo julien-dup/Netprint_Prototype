@@ -1,0 +1,171 @@
+@* =====================================================================
+   Envoi d'un BL par e-mail (EXP010S option EE) : brouillon Outlook (.eml, pièce jointe comprise, l'utilisateur relit et
+   envoie) ou envoi direct par le serveur de la société. Destinataires : contacts « bon de livraison » du client (PRT051F),
+   le premier coché en destinataire, les autres en copie, comme pour l'ARC. Historique des envois du BL (journal ENV100).
+   ===================================================================== *@
+@using NetPrint.Noyau.Messagerie
+@inject IEnvoiBl Envoi
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+@inject Microsoft.JSInterop.IJSRuntime JS
+
+<div class="voile" @onclick="Fermer">
+    <div class="fenetre fenetre-envoi" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+        <div class="titre-fenetre">✉ Envoi du BL @Numero · @Client</div>
+        <div class="corps-fenetre">
+            @if (options is null)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else
+            {
+                @if (options.Contacts.Count == 0)
+                {
+                    <p class="aide">Aucun contact pour les BL sur la fiche du client : saisissez les adresses.</p>
+                }
+                <div class="liste-cases">
+                    @foreach (var contact in options.Contacts)
+                    {
+                        <label class="champ-case">
+                            <input type="checkbox" checked="@coches.Contains(contact.Email)" @onchange="e => Basculer(contact.Email, e)" />
+                            <span>@contact.Nom <span class="discret">&lt;@contact.Email&gt;</span>@if (contact.ParDefaut) {<span class="badge">par défaut</span>}</span>
+                        </label>
+                    }
+                </div>
+                <label class="champ large"><span>Autres adresses (séparées par « ; »)</span><input @bind="autres" @bind:event="oninput" /></label>
+                <p class="aide">
+                    @if (Destinataires.Count == 0)
+                    {
+                        <span>Sans destinataire, le message s'ouvre à compléter.</span>
+                    }
+                    else
+                    {
+                        <span>À : <b>@Destinataires[0]</b>@if (Destinataires.Count > 1) {<span> · copie : @string.Join(", ", Destinataires.Skip(1))</span>}</span>
+                    }
+                    « Préparer » ouvre le message dans Outlook, à relire et envoyer ; « Envoyer » le fait partir tout de suite par le
+                    serveur de la société@(options.Expediteur != "" ? $" (expéditeur {options.Expediteur})" : "") et marque le BL édité.
+                </p>
+                @if (options.Redirection is { } test)
+                {
+                    <p class="avertissement-saisie">Envoi de test : les messages partent vers @test, pas vers les destinataires ci-dessus.</p>
+                }
+                @if (options.Historique.Count > 0)
+                {
+                    <h3>Envois précédents</h3>
+                    <table class="tableau-envois">
+                        <tbody>
+                            @foreach (var h in options.Historique)
+                            {
+                                <tr>
+                                    <td>@h.Date.ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td>@h.Profil</td>
+                                    <td>@Canal(h.Canal)</td>
+                                    <td class="@(h.Statut == StatutsEnvoi.Echec ? "message-erreur" : "")" title="@h.Erreur">@Statut(h.Statut)</td>
+                                    <td>
+                                        @h.Destinataires
+                                        @if (h.Copies != "") {<span class="discret"> · copie : @h.Copies</span>}
+                                        @if (h.Redirection != "") {<span class="discret"> · reçu par @h.Redirection (test)</span>}
+                                    </td>
+                                    <td>
+                                        @if (h.AvecPdf)
+                                        {
+                                            <a href="@($"api/logistique/bl/{Numero}/envois/{h.Id}/pdf")" target="_blank" rel="noopener" title="PDF tel qu'il a été envoyé">📄</a>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="espace"></span>
+            <button type="button" @onclick="Fermer">Fermer</button>
+            @if (options is not null)
+            {
+                <button type="button" disabled="@enCours" title="Brouillon de message (.eml) à ouvrir dans Outlook" @onclick="PreparerAsync">✉ Préparer (Outlook)</button>
+                <button type="button" class="bouton-principal" disabled="@(!options.MessagerieDisponible || Destinataires.Count == 0 || enCours)"
+                        title="@(options.MessagerieDisponible ? "Envoyer tout de suite par le serveur de messagerie de la société" : options.RaisonIndisponible)"
+                        @onclick="EnvoyerAsync">@(enCours ? "Un instant…" : "📤 Envoyer")</button>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int Numero { get; set; }
+    [Parameter] public string Client { get; set; } = "";
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private OptionsEnvoiBl? options;
+    private readonly HashSet<string> coches = new(StringComparer.OrdinalIgnoreCase);
+    private string autres = "";
+    private bool enCours;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            options = await Envoi.OptionsAsync(Numero);
+            coches.UnionWith(options.Contacts.Where(c => c.Propose).Select(c => c.Email));
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Préparation de l'envoi impossible : {ex.Message}");
+            await OnFermer.InvokeAsync();
+        }
+    }
+
+    // Contacts dans l'ordre de la fiche (le défaut en premier), puis adresses saisies ; mêmes règles que le service
+    private List<string> Destinataires => NetPrint.Modules.Logistique.Services.EnvoiBlService.Adresses(
+        (options?.Contacts.Where(c => coches.Contains(c.Email)).Select(c => c.Email) ?? []).Append(autres));
+
+    private async Task EnvoyerAsync()
+    {
+        var d = Destinataires;
+        var question = $"Envoyer le BL {Numero} à {d[0]}" + (d.Count > 1 ? $" (copie : {string.Join(", ", d.Skip(1))})" : "") + " ?";
+        enCours = true;   // dès la question : un double clic n'ouvre pas deux confirmations
+        try
+        {
+            if (!await Dialogues.ConfirmerAsync(question, "Envoi du BL", "Envoyer")) return;
+            await Envoi.EnvoyerAsync(Numero, d.Take(1).ToList(), d.Skip(1).ToList());
+            Notifications.Succes(options?.Redirection is { } test ? $"Message de test envoyé à {test}." : $"BL {Numero} envoyé à {d[0]}.");
+            await OnFermer.InvokeAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Envoi impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    // Brouillon produit ici (erreurs affichées dans l'application), puis téléchargé : le navigateur l'ouvre dans Outlook
+    private async Task PreparerAsync()
+    {
+        enCours = true;
+        try
+        {
+            var d = Destinataires;
+            var eml = await Envoi.PreparerMessageAsync(Numero, d.Take(1).ToList(), d.Skip(1).ToList());
+            await JS.TelechargerAsync(eml.Nom, NetPrint.Socle.Documents.MessageBrouillon.TypeEml, eml.Contenu);
+            Notifications.Succes("Message préparé : ouvrez-le dans Outlook pour le relire et l'envoyer.");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Préparation du message impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    private void Basculer(string email, ChangeEventArgs e)
+    {
+        if (e.Value is true) coches.Add(email);
+        else coches.Remove(email);
+    }
+
+    private static string Canal(string c) => c == CanauxEnvoi.Smtp ? "Envoi direct" : "Outlook";
+
+    private static string Statut(string s) => s switch
+    {
+        StatutsEnvoi.Envoye => "Envoyé", StatutsEnvoi.Test => "Test", StatutsEnvoi.Echec => "Échec", _ => "Préparé",
+    };
+
+    private Task Fermer() => enCours ? Task.CompletedTask : OnFermer.InvokeAsync();   // pas pendant un envoi
+}

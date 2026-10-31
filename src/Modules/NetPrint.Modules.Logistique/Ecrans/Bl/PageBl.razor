@@ -2,7 +2,7 @@
 @* =====================================================================
    Fiche d'un bon de livraison (lecture seule) : destinataire, transport et totaux (EXP009), éléments = dossiers livrés
    (EXP010) avec leur facturation, lignes (EXP015) et lots / emplacements (EXP016), texte de pied (EXP012).
-   Remplace la visualisation EXP525 et le détail de ConsultationBL. Aperçu et impression du BL en PDF (EXP035P2).
+   Remplace la visualisation EXP525 et le détail de ConsultationBL. Aperçu et impression du BL en PDF (EXP035P2), envoi par e-mail (EXP010S option EE).
    ===================================================================== *@
 @inject IConsultationBl Consultation
 @inject IEditionBl Edition
@@ -27,8 +27,14 @@
            title="Aperçu du BL en PDF, sans le marquer édité">👁 Aperçu</a>
         <a class="bouton-ancre" href="@($"api/logistique/bl/{Numero}/pdf")" target="_blank" rel="noopener" @onclick="MarquerEdite"
            title="BL en PDF à imprimer ou envoyer ; le BL est marqué édité">🖨 Imprimer</a>
+        <button title="Envoyer le BL en PDF par e-mail (contacts « bon de livraison » du client)" @onclick="() => envoi = true">✉ Envoyer</button>
     }
 </fieldset>
+
+@if (envoi && fiche is not null)
+{
+    <FenetreEnvoiBl Numero="Numero" Client="@fiche.Entete.NomClient" OnFermer="() => envoi = false" />
+}
 
 <div class="contenu contenu-detail fiche-bl">
     @if (chargement)
@@ -160,11 +166,13 @@
     private FicheBl? fiche;
     private bool chargement = true;
     private int lecture;
+    private bool envoi;
 
     protected override async Task OnParametersSetAsync()
     {
         var n = ++lecture;
         chargement = true;
+        envoi = false;   // autre BL : la fenêtre d'envoi du précédent se ferme
         FicheBl? lue = null;
         try
         {

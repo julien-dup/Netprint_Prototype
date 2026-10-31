@@ -60,6 +60,10 @@ public class EditionArcDb2Tests(ITestOutputHelper sortie)
             Task.FromResult<IReadOnlyList<EnvoiJournalise>>([]);
         public Task<(string Nom, byte[] Contenu)?> LirePdfAsync(int societe, long id, string type, int dossier, string cle,
             CancellationToken ct = default) => Task.FromResult<(string, byte[])?>(null);
+        public Task<IReadOnlyList<EnvoiJournalise>> LireDocumentAsync(int societe, string type, int document, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<EnvoiJournalise>>([]);
+        public Task<(string Nom, byte[] Contenu)?> LirePdfDocumentAsync(int societe, long id, string type, int document,
+            CancellationToken ct = default) => Task.FromResult<(string, byte[])?>(null);
     }
 
     private sealed class Utilisateurs : NetPrint.Noyau.Utilisateurs.IUtilisateurs
