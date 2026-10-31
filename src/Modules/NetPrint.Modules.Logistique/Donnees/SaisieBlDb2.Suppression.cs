@@ -47,7 +47,7 @@ internal sealed partial class SaisieBlDb2
     // annule tout ce que l'élément avait mis à jour (commande, OPR, dossier, stock, palettes) et supprime ses lignes ; le BL
     // entier disparaît avec son dernier élément (pré-BL remis « non basculé »), sinon ses totaux sont recalculés et son texte
     // de pied conservé. Après la validation : recalcul du stock (STOREVNAV) et audit « SU ». Rend true si le BL a disparu.
-    public async Task<bool> SupprimerElementAsync(int societe, string profil, ElementEnregistre el, CancellationToken ct)
+    public async Task<bool> SupprimerElementAsync(int societe, string profil, ElementEnregistre el, bool calculPort, CancellationToken ct)
     {
         profil = profil.ToUpperInvariant();
         await using var cnx = await OuvrirAsync(ct);
@@ -71,6 +71,7 @@ internal sealed partial class SaisieBlDb2
                         while (await rd.ReadAsync(ct)) recalculs.Add((rd.Texte(0), rd.Entier(1), rd.Texte(2), rd.Texte(3)));
                     await AnnulerElementAsync(cnx, tx, societe, el, ct);
                     blSupprime = await SupprimerLignesElementAsync(cnx, tx, societe, el, ct);
+                    if (!blSupprime) await ImputerPortAsync(cnx, tx, societe, el.NumeroBl, calculPort, ct);   // port des dossiers restants
                     await tx.CommitAsync(ct);
                     valide = true;
                 }

@@ -104,6 +104,7 @@ internal sealed partial class SaisieBlDb2
                     await EcrireLignesAsync(cnx, tx, societe, profil, numero, element, bl, ct);
                     await MettreAJourCommandeAsync(cnx, tx, societe, profil, numero, bl, ct, soldeAvant);
                     await RecalculerTotauxAsync(cnx, tx, societe, numero, ct);
+                    await ImputerPortAsync(cnx, tx, societe, numero, bl.Parametres.CalculPort, ct);
                     await tx.CommitAsync(ct);
                     valide = true;
                 }

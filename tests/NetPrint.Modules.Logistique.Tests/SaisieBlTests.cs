@@ -151,6 +151,24 @@ public class SaisieBlTests(ITestOutputHelper sortie)
     }
 
     [Fact]
+    public void Port_tranche_tarif_et_repartition()
+    {
+        int[] tranches = [9, 19, 29, 100, 9999, 0];
+        Assert.Equal(1, ReglesSaisieBl.Tranche(5, tranches));
+        Assert.Equal(2, ReglesSaisieBl.Tranche(10, tranches));
+        Assert.Equal(4, ReglesSaisieBl.Tranche(100, tranches));
+        Assert.Equal(0, ReglesSaisieBl.Tranche(150_000, tranches));   // plafonné à 99 999, au-delà de la dernière tranche
+
+        Assert.Equal(560.40m, ReglesSaisieBl.Port(10, new TarifPort(555, 10, 0, "F"), 1, 5.40m));    // forfait + timbre
+        Assert.Equal(232.50m, ReglesSaisieBl.Port(250, new TarifPort(93, 0, 0, "C"), 1, 0));         // aux 100 kg
+        Assert.Equal(25.00m, ReglesSaisieBl.Port(250, new TarifPort(93, 100, 0, "T"), 2, 0));        // barème 2, à la tonne
+        Assert.Equal(0, ReglesSaisieBl.Port(250, new TarifPort(93, 0, 0, "K"), 2, 5));               // prix nul : pas de port
+
+        Assert.Equal([33.33m, 66.67m], ReglesSaisieBl.RepartirAuPoids(100, [1, 2]));
+        Assert.Equal([50m, 50m], ReglesSaisieBl.RepartirAuPoids(100, [0, 0]));
+    }
+
+    [Fact]
     public void Textes_de_la_ligne_de_commande_par_trois()
     {
         var textes = ReglesSaisieBl.LignesDeTexte(["a", "b", "c", "d"]).ToList();
@@ -214,6 +232,9 @@ public class SaisieBlTests(ITestOutputHelper sortie)
         {
             numero = await service.ValiderAsync(s);
             sortie.WriteLine($"BL {numero}");
+            sortie.WriteLine($"Port contrôlé : {controle.Port}");
+            Assert.Equal(controle.Port is > 0 ? 1 : 0,
+                await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.A20005 WHERE RSOC = 8 AND RDOSS = 69320 AND S5DCLE = '9' AND S5NOBL = ?", numero));
             Assert.Equal(1, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP009 WHERE RSOC = 8 AND HNOBL = ?", numero));
             Assert.Equal(1, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP010 WHERE RSOC = 8 AND HNOBL = ? AND HNODOS = 69320", numero));
             Assert.Equal(1500, await CompterAsync(cnx, "SELECT SUM(DQTE) FROM NP11F.EXP015 WHERE RSOC = 8 AND DNBL = ?", numero));
@@ -263,7 +284,10 @@ public class SaisieBlTests(ITestOutputHelper sortie)
             Assert.Equal((complete.Commande, "O"), (complete.Livre, complete.Solde));
 
             // Suppression du second élément : le BL reste, ses totaux sont recalculés
+            var imputations = controle.Port is > 0 ? 1 : 0;   // un même dossier sur deux éléments : une seule imputation
+            Assert.Equal(imputations, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.A20005 WHERE RSOC = 8 AND RDOSS = 69320 AND S5DCLE = '9' AND S5NOBL = ?", numero));
             Assert.False(await service.SupprimerAsync(numero, 2));
+            Assert.Equal(imputations, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.A20005 WHERE RSOC = 8 AND RDOSS = 69320 AND S5DCLE = '9' AND S5NOBL = ?", numero));   // port des dossiers restants recalculé
             Assert.Equal(avant.Livre + 1800, (await LigneCommandeAsync(cnx)).Livre);
 
             // Suppression du BL (dernier élément) : tout ce que le BL avait mis à jour est rétabli
@@ -271,6 +295,7 @@ public class SaisieBlTests(ITestOutputHelper sortie)
             Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP009 WHERE RSOC = 8 AND HNOBL = ?", numero));
             Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP015 WHERE RSOC = 8 AND DNBL = ?", numero));
             Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.A700F WHERE RSOC = 8 AND MVBL = ?", numero));
+            Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.A20005 WHERE RSOC = 8 AND S5NOBL = ?", numero));
             Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.PRTLCK WHERE PLPROF = 'NP11'"));
             Assert.Equal(avant, await LigneCommandeAsync(cnx) with { Solde = avant.Solde });
             Assert.Equal(positions[0].Stock, await CompterAsync(cnx, Emplacement, positions[0].Lot, positions[0].Emplacement));
@@ -325,7 +350,7 @@ public class SaisieBlTests(ITestOutputHelper sortie)
             foreach (var v in valeurs) cmd.Parameters.AddWithValue("", v);
             await cmd.ExecuteNonQueryAsync();
         }
-        foreach (var (table, colonne) in new[] { ("A700F", "MVBL"), ("EXP016", "DNBL"), ("EXP015", "DNBL"), ("EXP012", "HNOBL"),
+        foreach (var (table, colonne) in new[] { ("A20005", "S5NOBL"), ("A700F", "MVBL"), ("EXP016", "DNBL"), ("EXP015", "DNBL"), ("EXP012", "HNOBL"),
                      ("EXP010", "HNOBL"), ("EXP009", "HNOBL"), ("EVE200", "AMBL") })
             await Executer($"DELETE FROM NP11F.{table} WHERE RSOC = 8 AND {colonne} = ?", numero);
         await Executer("UPDATE NP11F.NEG100 SET DNQTEL = ?, DNQTER = ?, DNSOLD = ? WHERE RSOC = 8 AND RDOSS = 69320 AND DNDCLE = '9' AND DNNLIG = 4",

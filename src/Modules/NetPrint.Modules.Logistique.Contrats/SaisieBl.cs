@@ -136,7 +136,8 @@ public sealed class SaisieBl
 // Reste à livrer diminué entre l'ouverture et la validation : avertissement à confirmer (cahier des charges § 9.2)
 public sealed class DepassementResteException(string message) : Exception(message);
 
-public sealed record ControleBl(IReadOnlyList<string> Erreurs, IReadOnlyList<string> Avertissements, int Poids, int Colis)
+// Port : coût du transport de l'élément (port franco calculé, AA0007.SOP09 = 2), null si non calculé
+public sealed record ControleBl(IReadOnlyList<string> Erreurs, IReadOnlyList<string> Avertissements, int Poids, int Colis, decimal? Port = null)
 {
     public bool Valide => Erreurs.Count == 0;
 }

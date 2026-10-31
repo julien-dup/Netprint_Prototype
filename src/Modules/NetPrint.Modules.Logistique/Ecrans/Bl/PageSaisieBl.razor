@@ -284,7 +284,8 @@
                     <h3>Totaux</h3>
                     @if (controle is { } c)
                     {
-                        <p>Poids <b>@c.Poids kg</b> · colis <b>@c.Colis</b> · palettes <b>@s.Palettes</b></p>
+                        <p>Poids <b>@c.Poids kg</b> · colis <b>@c.Colis</b> · palettes <b>@s.Palettes</b>
+                            @if (c.Port is { } port) {<span> · port du BL <b>@port.ToString("N2") €</b></span>}</p>
                         @foreach (var e in c.Erreurs) {<p class="erreur-saisie">⛔ @e</p>}
                         @foreach (var a in c.Avertissements) {<p class="avertissement">⚠ @a</p>}
                         @if (c.Valide) {<p class="ok">✓ Saisie prête à être validée.</p>}

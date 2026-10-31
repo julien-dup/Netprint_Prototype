@@ -5,6 +5,9 @@ namespace NetPrint.Modules.Logistique.Services;
 // =====================================================================
 // Règles de la saisie d'un BL (cahier des charges lot 1, § 4.3, 6 et 7) : fonctions pures, testées sans base.
 // =====================================================================
+// Tarif du port (B400F) : prix des barèmes 1 à 3, unité de prix K au kg, C aux 100 kg, T à la tonne, F forfait
+internal sealed record TarifPort(decimal Bareme1, decimal Bareme2, decimal Bareme3, string Unite);
+
 internal static class ReglesSaisieBl
 {
     public const int QuantiteMaximum = 9_999_999;
@@ -147,6 +150,39 @@ internal static class ReglesSaisieBl
         var p = disponibles[0];
         if (p.Stock <= 0) return;
         l.Prises.Add(new PriseLot { Depot = p.Depot, Lot = p.Lot, Emplacement = p.Emplacement, Quantite = Math.Min(l.Quantite, p.Stock) });
+    }
+
+    // ---------- Port (§ 7, SPCPOR d'EXP010) ----------
+
+    // Tranche de poids : n° (1 à 20) de la première tranche B300F ≥ poids (plafonné à 99 999), 0 si aucune
+    public static int Tranche(int poids, IReadOnlyList<int> tranches)
+    {
+        var p = Math.Min(poids, 99_999);
+        for (var i = 0; i < tranches.Count; i++)
+            if (tranches[i] >= p && tranches[i] > 0) return i + 1;
+        return 0;
+    }
+
+    // Port = poids ÷ unité de prix (arrondi à 6 décimales) × prix du barème (arrondi au centime) + frais de timbre ; prix nul :
+    // pas de port. Barème autre que 1, 2, 3 : barème 1 (comme le RPG ; le cahier des charges disait « port 0 »).
+    public static decimal Port(int poids, TarifPort tarif, int bareme, decimal timbre)
+    {
+        var prix = bareme switch { 2 => tarif.Bareme2, 3 => tarif.Bareme3, _ => tarif.Bareme1 };
+        if (prix == 0) return 0;
+        decimal unite = tarif.Unite switch { "C" => 100, "T" => 1000, "F" => poids, _ => 1 };
+        if (unite == 0) unite = 1;
+        var quantite = Math.Round(poids / unite, 6, MidpointRounding.AwayFromZero);
+        return Math.Round(quantite * prix, 2, MidpointRounding.AwayFromZero) + timbre;
+    }
+
+    // Répartition d'un coût entre les éléments au poids (au centime, le reste sur le dernier) ; poids nuls : parts égales
+    public static IReadOnlyList<decimal> RepartirAuPoids(decimal total, IReadOnlyList<int> poids)
+    {
+        if (poids.Count == 0) return [];
+        var somme = poids.Sum();
+        var parts = poids.Select(p => Math.Round(somme == 0 ? total / poids.Count : total * p / somme, 2, MidpointRounding.AwayFromZero)).ToList();
+        parts[^1] += total - parts.Sum();
+        return parts;
     }
 
     // Textes d'une ligne de commande (NEG100T) en lignes de texte du BL, par trois (DDES, DDES2, DDES3)

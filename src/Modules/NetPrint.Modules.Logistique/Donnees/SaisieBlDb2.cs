@@ -15,7 +15,7 @@ namespace NetPrint.Modules.Logistique.Donnees;
 internal sealed record ParametresBl(
     int DepotPrincipal, string StockNegoce, string StockP1, string StockP2, string StockP3, string StockSemiFini,
     string TypeLivraisonDefaut, string EditionBl, string EditionEtiquettes, string EditionPalettes, bool PoidsPalettes, int PoidsPalette,
-    string EmplacementExpedition, bool NumerotationParEnseigne)
+    string EmplacementExpedition, bool NumerotationParEnseigne, bool CalculPort = false)
 {
     // Type de stock d'un article (SPF010.ATYPEA / ATYFAC)
     public string TypeStockArticle(string typeArticle, string typeFacturation) => typeArticle switch
@@ -67,7 +67,7 @@ internal sealed partial class SaisieBlDb2(IConfiguration config)
         await using var rd = await Lire(cnx, """
             SELECT COALESCE(s.PSDEPP, 1), COALESCE(s.PSTSNE, ''), COALESCE(s.PSTSP1, ''), COALESCE(s.PSTSP2, ''), COALESCE(s.PSTSP3, ''),
                    COALESCE(s.PSTSSF, ''), COALESCE(x.FETYPL, ''), COALESCE(x.FEBLED, ''), COALESCE(x.FEECED, ''), COALESCE(x.FEEPED, ''),
-                   COALESCE(x.FEOP05, ''), COALESCE(x.FPDSP, 0), COALESCE(x.FEEMPE, ''), c.SOP03, c.SOP17
+                   COALESCE(x.FEOP05, ''), COALESCE(x.FPDSP, 0), COALESCE(x.FEEMPE, ''), c.SOP03, c.SOP17, c.SOP09
             FROM {b}.AA0007 c
             LEFT OUTER JOIN {b}.STO005 s ON s.RSOC = c.RSOC
             LEFT OUTER JOIN {b}.EXP005 x ON x.RSOC = c.RSOC
@@ -76,7 +76,7 @@ internal sealed partial class SaisieBlDb2(IConfiguration config)
         if (!await rd.ReadAsync(ct)) throw new InvalidOperationException($"Société {societe} absente d'AA0007.");
         return new ParametresBl(rd.Entier(0) == 0 ? 1 : rd.Entier(0), rd.Texte(1), rd.Texte(2), rd.Texte(3), rd.Texte(4), rd.Texte(5),
             rd.Texte(6), rd.Texte(7), rd.Texte(8), rd.Texte(9), rd.Texte(10) == "O", rd.Entier(11), rd.Texte(12),
-            rd.Texte(13) == "O" && rd.Texte(14) == "O");
+            rd.Texte(13) == "O" && rd.Texte(14) == "O", rd.Texte(15) == "2");
     }
 
     public async Task<DossierBl?> DossierAsync(int societe, int dossier, string cle, CancellationToken ct)

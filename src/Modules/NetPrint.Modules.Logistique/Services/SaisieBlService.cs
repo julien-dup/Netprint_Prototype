@@ -272,7 +272,15 @@ internal sealed class SaisieBlService(SaisieBlDb2 donnees, IUtilisateurCourant u
             }
 
         var (poids, colis) = ReglesSaisieBl.Totaux(s, p.PoidsPalettes, p.PoidsPalette);
-        return (d, p, new ControleBl(erreurs, avertissements, poids, colis));
+        // Port franco calculé sur le poids de tout le BL (autres dossiers compris), réparti au poids entre eux à la validation
+        decimal? port = null;
+        if (p.CalculPort && s.TypePort == "F")
+        {
+            var poidsBl = poids + (s.NumeroBl > 0 ? await donnees.PoidsAutresElementsAsync(societe, s.NumeroBl, s.Element, ct) : 0);
+            port = await donnees.PortAsync(societe, s.Transporteur, s.Adresse.Departement, s.Bareme, poidsBl, ct);
+            if (port is null) avertissements.Add("Port franco non calculé : transporteur, tranche de poids ou tarif du département manquant.");
+        }
+        return (d, p, new ControleBl(erreurs, avertissements, poids, colis, port));
     }
 
     // Suppression d'un élément (cahier des charges § 10.1) : ni facturé, ni retourné ; BL client ou divers ; dossier ni
@@ -294,7 +302,7 @@ internal sealed class SaisieBlService(SaisieBlDb2 donnees, IUtilisateurCourant u
         foreach (var typeStock in el.TypesStock)
             if (await donnees.InventaireEnCoursAsync(u.Societe, typeStock, DateOnly.FromDateTime(DateTime.Today), ct))
                 throw new RegleMetierException("Création ou modification de BL impossible, inventaire en cours.");
-        return await donnees.SupprimerElementAsync(u.Societe, u.Profil, el, ct);
+        return await donnees.SupprimerElementAsync(u.Societe, u.Profil, el, (await donnees.ParametresAsync(u.Societe, ct)).CalculPort, ct);
     }
 
     public async Task<int> ValiderAsync(SaisieBl saisie, bool depassementAccepte = false, CancellationToken ct = default)
