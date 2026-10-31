@@ -200,6 +200,7 @@
 @if (ligneOuverte is { } numeroLigne && fiche is not null)
 {
     <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" Initiale="ligneInitiale" CodesVente="codesVente"
+                  ClientArticles="@fiche.Entete.Client"
                   OnFermer="FermerLigneAsync" />
 }
 @if (repriseDevis && fiche is not null)

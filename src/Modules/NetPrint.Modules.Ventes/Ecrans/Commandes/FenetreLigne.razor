@@ -50,10 +50,14 @@
                                     }
                                 </select>
                             </label>
-                            <label class="champ @Classe(nameof(l.Article))">
+                            <div class="champ @Classe(nameof(l.Article))">
                                 <span>Article</span>
-                                <input class="court" maxlength="15" @bind="l.Article" @bind:after="CompleterAsync" autofocus="@(NumeroLigne == 0 && !Appel)" disabled="@Appel" />
-                            </label>
+                                <div class="ligne-champs">
+                                    <input class="court" maxlength="15" @bind="l.Article" @bind:after="CompleterAsync" autofocus="@(NumeroLigne == 0 && !Appel)" disabled="@Appel" />
+                                    <BoutonRecherche Liste="ListeChoix.Article" Parent="@ClientArticles" Titre="Rechercher un article du client" Disabled="@Appel"
+                                                     OnChoix="ChoisirArticleAsync" />
+                                </div>
+                            </div>
                             <label class="champ">
                                 <span>Indice</span>
                                 <input class="code" maxlength="2" @bind="l.Indice" @bind:after="CompleterAsync" disabled="@Appel" />
@@ -241,6 +245,8 @@
     [Parameter] public int NumeroLigne { get; set; }
     // Nouvel appel de livraison sur cette ligne « à la demande » (NumeroLigne = 0)
     [Parameter] public int LigneOrigine { get; set; }
+    // Client de la commande (« 411100 376 ») : la recherche d'article (F4) propose ses articles
+    [Parameter] public string? ClientArticles { get; set; }
     // Nouvelle ligne déjà pré-remplie (reprise d'un devis)
     [Parameter] public LigneSaisie? Initiale { get; set; }
     [Parameter] public IReadOnlyList<CodeLibelle> CodesVente { get; set; } = [];
@@ -283,6 +289,14 @@
             Notifications.Erreur($"Ouverture de la ligne impossible : {ex.Message}");
             await OnFermer.InvokeAsync(null);
         }
+    }
+
+    // Article choisi dans la recherche (F4) : article et indice, puis la ligne est complétée
+    private async Task ChoisirArticleAsync(LigneChoix choix)
+    {
+        if (l is null) return;
+        (l.Article, l.Indice) = (choix.Codes[0], choix.Codes.Count > 1 ? choix.Codes[1] : "");
+        await CompleterAsync();
     }
 
     // Article, quantité, unité, remise : la ligne est complétée (valeurs de l'article, prix proposé, montant)

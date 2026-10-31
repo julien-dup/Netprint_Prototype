@@ -92,8 +92,8 @@ Questions ouvertes :
 | ⚪ | Événements : édition de la liste (F21, EVE301P) et autres objets (article, modèle, commandes fournisseur, ligne de commande) | EVE300 | Codes ART, MOD, CDES, CDEP, CDEM, CDCL, BAG, MAQ à brancher avec leurs écrans ; l'accès à l'objet est vérifié par l'écran appelant |
 | ⛔ | ~~Copie / transfert de reliquat d'une ligne vers une autre commande (NEG510 F14)~~ | — | Abandonné (David, 30/10) |
 | ⚪ | Transformation d'un dossier de fabrication en commande | DOS500S option TR | RAUCLEF absent des sources |
-| ⚪ | Création depuis une proforma | DOS505 R20 | Doit passer par le même service que la saisie |
-| ⚪ | Recherche d'article (F4) dans la saisie de ligne | — | Pas de liste « Article » dans le Noyau (`IListesDeChoix`) |
+| ✅ | ~~Création depuis une proforma~~ | DOS505 R20 | Abandonnée (décision de David du 31/10) |
+| ✅ | ~~Recherche d'article (F4) dans la saisie de ligne~~ | FEN_RecArticle | Fait le 31/10 : bouton « … » et F4 de la zone Article, articles du client de la commande (liste « Article » du Noyau, branche `noyau/liste-articles`) |
 
 ### 1.3 Techniques
 
@@ -115,7 +115,7 @@ Questions ouvertes :
 |---|---|---|
 | 🔴 | Connexion IBM i impossible sur le poste de David | `BaseDb2.VerifierProfilAsync` reconstruit la chaîne ODBC : « Missing system name ». Contourné en mode démo |
 | 🟠 | Fonctions ODBC (`Commande`, `Lire`, `Executer`) recopiées dans chaque classe `Donnees` | À regrouper dans `BaseDb2` |
-| 🟠 | Liste de choix « Article » | Manque dans `IListesDeChoix` |
+| ✅ | ~~Liste de choix « Article »~~ | Ajoutée à `IListesDeChoix` (branche `noyau/liste-articles`, demande de fusion dédiée) : code, désignation, référence imprimée ; parent facultatif = « compte général compte client » |
 | 🟠 | Service Compteurs (n° de dossier, GETDOSSIER) | Cible du cadrage : attribution atomique |
 | 🟠 | Qualité client (CQUACL) | Règle transverse devis / commande / BL : à porter dans le Noyau |
 | ✅ | ~~Éditions PDF~~ | Socle `Documents` (QuestPDF, page standard, aperçu, formats) et Noyau `ISocietes.LireIdentiteAsync` (en-tête, mentions légales, logo) : à réutiliser pour l'édition du devis (`docs/editions-pdf.md`) |
