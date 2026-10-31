@@ -39,3 +39,14 @@ public sealed class FactDb2EcritureAttribute : FactAttribute
             Skip = "Test d'écriture dans NP11F : lancer avec NETPRINT_TESTS_ECRITURE=1.";
     }
 }
+
+// Culture de l'application (Program.cs de NetPrint.Web) : les messages formatent les nombres en français, quel que soit
+// le poste qui lance les tests (la vérification automatique GitHub tourne sous Linux, en culture invariante)
+internal static class CultureDesTests
+{
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void Initialiser() =>
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.DefaultThreadCurrentUICulture =
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.CurrentUICulture =
+                new System.Globalization.CultureInfo("fr-FR");
+}
