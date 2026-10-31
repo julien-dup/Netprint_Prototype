@@ -4,17 +4,19 @@ using NetPrint.Modules.Logistique.Donnees;
 namespace NetPrint.Modules.Logistique.Services;
 
 // =====================================================================
-// Règles de l'édition du BL (EXP035P2, présentation « double BL » AA0003.CENVBL = '1', la seule en usage) : données lues →
-// modèle du document. Fonctions pures, testées sans base ni PDF.
+// Règles de l'édition du BL (EXP035P2) : données lues → modèle du document. Fonctions pures, testées sans base ni PDF.
+// Présentation choisie par la fiche client (AA0003.CENVBL) : '1' (défaut) lignes par élément ; '2' « PRINTOR » lignes de
+// tout le BL regroupées par article, avec la commande du client sur chaque ligne. BL revendeur (EXP009.HREV = 'O') : le
+// client revendeur est l'expéditeur, sans logo ni identité de la société, ni représentant ni « notre n° CEE ».
 // ÉCARTS voulus (docs/points-en-attente.md) :
 //  - BL non chiffré, comme toutes les variantes RPG ;
 //  - quantité en unités de conditionnement seulement si elle tombe juste (le RPG perdait le reste de la division) ;
-//  - pas de traduction des libellés (PRT008/PRT009), de BL revendeur (HREV), de présentation PRINTOR (CENVBL = '2'),
-//    de code-barres des lots ni de fiche sous-références (EXP035P4) : aucun usage relevé depuis 2024 ;
+//  - pas de traduction des libellés (PRT008/PRT009), de code-barres des lots ni de fiche sous-références (EXP035P4) ;
 //  - les options (logo, adresse du client, mention) ne « collent » plus d'un BL à l'autre (indicateurs RPG non remis à zéro).
 // =====================================================================
+// Expediteur : lignes du bloc expéditeur d'un BL revendeur (à la place de la société), sinon null
 internal sealed record ModeleBl(
-    int Numero, bool Retour, DateOnly? Date, string Representant, string RefFournisseur, IReadOnlyList<string> Destinataire,
+    IReadOnlyList<string>? Expediteur, int Numero, bool Retour, DateOnly? Date, string Representant, string RefFournisseur, IReadOnlyList<string> Destinataire,
     IReadOnlyList<string> Observations, IReadOnlyList<(string Libelle, string Valeur)> Transport, IReadOnlyList<string> Introduction,
     IReadOnlyList<GroupeBl> Groupes, IReadOnlyList<string> TextesPied, int PoidsTotal, int ColisTotal, int PalettesTotal);
 
@@ -42,24 +44,34 @@ internal static class BonLivraison
         if (e.Transporteur != "")
             transport.Add(("Transporteur", string.Join(" · ", new[] { e.Transporteur, e.TransporteurVille.Trim(),
                 e.TransporteurTelephone == "" ? "" : $"Tél. {e.TransporteurTelephone}" }.Where(x => x != ""))));
-        if (e.RefExportSociete != "") transport.Add(("Notre n° CEE", e.RefExportSociete));
+        if (e.RefExportSociete != "" && !e.Revendeur) transport.Add(("Notre n° CEE", e.RefExportSociete));
         if (e.RegimeClient == "C" && e.RefExportClient != "") transport.Add(("Votre n° CEE", e.RefExportClient));
 
         // Adresse du client donneur d'ordre (EXP005.FEOPT2) pour un BL client ou vierge, puis la mention du BL
         var introduction = new List<string>();
-        if (e.AdresseClientEnTete && premier is { Etat: "C" or "V" } && e.ClientNom != "")
+        if (e.AdresseClientEnTete && !e.Revendeur && premier is { Etat: "C" or "V" } && e.ClientNom != "")
         {
             introduction.Add($"Commande du client : {e.ClientNom}");
             introduction.AddRange(new[] { e.ClientRue1, e.ClientRue2, $"{e.ClientCodePostal} {e.ClientVille}".Trim() }.Where(x => x != ""));
         }
         if (e.Mention != "") introduction.Add(e.Mention);
 
-        var groupes = d.Elements.Select(el => Groupe(d, el)).ToList();
+        // PRINTOR : les produits fabriqués gardent leur ligne, le reste du BL est regroupé par article
+        var groupes = e.Presentation == "2"
+            ? [.. d.Elements.Where(el => el.TypeBl == 1).Select(el => Groupe(d, el)), .. GroupesParArticle(d)]
+            : d.Elements.Select(el => Groupe(d, el)).ToList();
+
+        // Revendeur : son adresse comme expéditeur, sauf pour un BL de sous-traitance (EXP035P2 garde alors le logo)
+        IReadOnlyList<string>? expediteur = e.Revendeur && premier?.Etat != "S"
+            ? new[] { e.ClientNom, e.ClientRue1, e.ClientRue2, $"{e.ClientCodePostal} {e.ClientVille}".Trim(),
+                    e.ClientTelephone == "" ? "" : $"Tél. {e.ClientTelephone}", e.ClientFax == "" ? "" : $"Fax {e.ClientFax}", e.ClientEmail }
+                .Where(x => x != "").ToList()
+            : null;
 
         // Retour et représentant : ceux du premier élément, comme EXP035P2. Totaux d'EXP009 (non recalculés), sauf sur un BL
         // partiel (représentant limité) où ils ne correspondraient pas aux lignes imprimées.
-        return new ModeleBl(e.NumeroBl, premier?.Etat == "R", e.DateExpedition,
-            premier is { Representant: not 0 } r ? $"{r.Representant} {r.NomRepresentant}".Trim() : "",
+        return new ModeleBl(expediteur, e.NumeroBl, premier?.Etat == "R", e.DateExpedition,
+            premier is { Representant: not 0 } r && !e.Revendeur ? $"{r.Representant} {r.NomRepresentant}".Trim() : "",
             e.RefFournisseur, destinataire, e.Observations.Where(x => x != "").ToList(), transport, introduction, groupes,
             d.TextesPied, d.Partiel ? 0 : e.PoidsTotal, d.Partiel ? 0 : e.ColisTotal, d.Partiel ? 0 : e.PalettesTotal);
     }
@@ -67,7 +79,7 @@ internal static class BonLivraison
     private static GroupeBl Groupe(DonneesEditionBl d, ElementEditionBl el)
     {
         var lignes = d.Lignes.Where(l => l.Element == el.Numero).ToList();
-        var normes = Normes(d, el.EnseigneCommande, el.NormeCommande);
+        var normes = d.Entete.Revendeur ? [] : Normes(d, el.EnseigneCommande, el.NormeCommande);
         var dossier = el.Dossier == 0 ? "" : $"{el.Dossier:00000}/{el.Cle}";
         var textes = new List<string>();
         if (el.Etat == "S") textes.Add($"Fournisseur n° {d.Entete.CompteClient}");
@@ -92,26 +104,81 @@ internal static class BonLivraison
         return new GroupeBl(titre, [.. lignes.Where(l => l.Article == "" || l.Imprimee).Select(l => Ligne(d, el, l))], textes);
     }
 
+    // Présentation PRINTOR (Sppres2) : toutes les lignes du BL triées par article, indice, appel, commande ; un titre par
+    // article (référence et référence client), mentions de norme en fin d'article. Les lignes de texte ne sont imprimées
+    // que sur un retour, comme le RPG.
+    private static IEnumerable<GroupeBl> GroupesParArticle(DonneesEditionBl d)
+    {
+        var elements = d.Elements.Where(el => el.TypeBl != 1).ToDictionary(el => el.Numero);
+        var lignes = d.Lignes.Where(l => elements.ContainsKey(l.Element))
+            .Where(l => l.Article == "" ? elements[l.Element].Etat == "R" : l.Imprimee)
+            .OrderBy(l => l.Article, StringComparer.Ordinal).ThenBy(l => l.Indice, StringComparer.Ordinal)
+            .ThenBy(l => l.Appel, StringComparer.Ordinal).ThenBy(l => elements[l.Element].Dossier).ThenBy(l => elements[l.Element].Cle);
+        foreach (var article in lignes.GroupBy(l => (l.Article, l.Indice)))
+        {
+            var premiere = article.First();
+            var titre = "";
+            if (premiere.Article != "")
+            {
+                var (reference, complement) = References(d, premiere);
+                titre = complement == "" ? reference : $"{reference} · {complement}";
+            }
+            var imprimees = article.Select(l =>
+            {
+                var el = elements[l.Element];
+                if (l.Article == "") return new LigneImprimeeBl("", [], "", l.Designations, "", [], "", []);
+                var commande = (el.RefCommandeClient, el.DateCommandeClient) switch
+                {
+                    ("", null) => "",
+                    ("", { } dc) => $"Cde du {dc.ToString("dd/MM/yyyy", Fr)}",
+                    (var rc, null) => $"V/cde : {rc}",
+                    (var rc, { } dc) => $"V/cde : {rc} du {dc.ToString("dd/MM/yyyy", Fr)}",
+                };
+                commande = (commande == "" ? "" : commande + " - ") + $"N/cde {el.Dossier}/{el.Cle}";
+                var details = new List<string> { commande };
+                details.AddRange(Appel(l));
+                details.AddRange(el.TextesTechniques);
+                if (d.Entete.ImprimerLots) details.AddRange(Lots(d.Lots.Where(x => x.Element == l.Element && x.Ligne == l.Ligne), l.UniteLots));
+                var (quantite, uc) = Quantite(l.Quantite, l.QuantiteEnUc, l.EmballageArticle, Emballage(l.TypeEmballage, "UC"));
+                return new LigneImprimeeBl("", [], quantite, [.. uc == "" ? Array.Empty<string>() : [uc], .. l.Designations],
+                    EtatLivraison(l.EtatLivraison), ColisLigne(l), Poids(l), details);
+            }).ToList();
+            var normes = article.Where(l => l.Norme != "")
+                .SelectMany(l => Normes(d, elements[l.Element].EnseigneCommande, l.Norme)).Distinct().ToList();
+            yield return new GroupeBl(titre, imprimees, normes);
+        }
+    }
+
+    // Référence imprimée d'un article et son complément : code article et référence du client (EXP005.FEDART), n° de marché
+    private static (string Reference, string Complement) References(DonneesEditionBl d, LigneEditionBl l)
+    {
+        var article = l.Indice == "" ? l.Article : $"{l.Article}/{l.Indice}";
+        var refClient = l.RefClient != "" ? l.RefClient : l.RefImprime;
+        var marche = l.NumeroMarche == "" ? "" : $" - {l.NumeroMarche}";
+        return d.Entete.ReferenceClientDabord && refClient != ""
+            ? (refClient, $"N/Réf. : {article}{marche}")
+            : (article, refClient == "" ? marche.TrimStart(' ', '-') : $"V/Réf. : {refClient}{marche}");
+    }
+
+    private static IEnumerable<string> Appel(LigneEditionBl l)
+    {
+        if (l.Appel != "")
+            yield return $"N° d'appel : {l.Appel}" + (l.DateAppel is { } da ? $" du {da.ToString("dd/MM/yyyy", Fr)}" : "");
+    }
+
     private static LigneImprimeeBl Ligne(DonneesEditionBl d, ElementEditionBl el, LigneEditionBl l)
     {
         // Ligne de texte (sans article) : désignations seules
         if (l.Article == "") return new LigneImprimeeBl("", [], "", l.Designations, "", [], "", []);
 
-        var article = l.Indice == "" ? l.Article : $"{l.Article}/{l.Indice}";
-        var refClient = l.RefClient != "" ? l.RefClient : l.RefImprime;
-        var marche = l.NumeroMarche == "" ? "" : $" - {l.NumeroMarche}";
-        var (reference, complement) = d.Entete.ReferenceClientDabord && refClient != ""
-            ? (refClient, $"N/Réf. : {article}{marche}")
-            : (article, refClient == "" ? marche.TrimStart(' ', '-') : $"V/Réf. : {refClient}{marche}");
+        var (reference, complement) = References(d, l);
 
         var (quantite, uc) = Quantite(l.Quantite, l.QuantiteEnUc, l.EmballageArticle, Emballage(l.TypeEmballage, "UC"));
         var designations = new List<string>();
         if (uc != "") designations.Add(uc);
         designations.AddRange(l.Designations);
 
-        var details = new List<string>();
-        if (l.Appel != "")
-            details.Add($"N° d'appel : {l.Appel}" + (l.DateAppel is { } da ? $" du {da.ToString("dd/MM/yyyy", Fr)}" : ""));
+        var details = new List<string>(Appel(l));
         if (d.Entete.ImprimerLots) details.AddRange(Lots(d.Lots.Where(x => x.Element == l.Element && x.Ligne == l.Ligne), l.UniteLots));
         details.AddRange(Normes(d, el.EnseigneCommande, l.Norme));
 

@@ -17,11 +17,12 @@ public class EditionBlTests(ITestOutputHelper sortie)
     private static EnteteEditionBl Entete(bool adresseClient = false, bool refClientDabord = false, string regime = "F") => new(
         165139, "", new DateOnly(2023, 11, 10), "CLARINS", "12 AVENUE DE LA PORTE", "", "95000", "PONTOISE", "", ["", "Quai 3", ""],
         "F", "", "M", "TRANSPORTS X", "95000 PONTOISE", "0102030405", "MENTION", 34, 5, 1, 376,
-        "CLARINS SIEGE", "4 RUE BERTEAUX", "", "75008", "PARIS", "FOUR12", "FR123", regime, "FR999", true, adresseClient, refClientDabord);
+        "CLARINS SIEGE", "4 RUE BERTEAUX", "", "75008", "PARIS", "FOUR12", "FR123", regime, "FR999", true, adresseClient, refClientDabord,
+        false, "1", "0102", "0103", "achats@clarins.test");
 
     private static ElementEditionBl Element(int numero = 1, string etat = "C", int type = 2, string norme = "", IReadOnlyList<string>? textes = null) => new(
         numero, etat, type, 12345, "A", 5000, "T", 12, "IMP1", "PO-77", new DateOnly(2023, 10, 2), 10, 500, "C", 0, 0, "Q", 28, "DUPONT",
-        false, 0, "1", norme, textes ?? []);
+        false, 0, "1", norme, textes ?? [], "PO-77", new DateOnly(2023, 10, 1));
 
     private static LigneEditionBl Ligne(int ligne = 1, string article = "ART1", bool imprimee = true, string refClient = "",
         int quantite = 5000, bool enUc = false, int emballage = 0, string appel = "", string norme = "") => new(
@@ -97,6 +98,44 @@ public class EditionBlTests(ITestOutputHelper sortie)
         var l = BonLivraison.Construire(Donnees(lignes: [Ligne(quantite: quantite, enUc: enUc, emballage: emballage)])).Groupes[0].Lignes[0];
         Assert.Equal(attendue, l.Quantite);
         Assert.Equal(uc, l.Designations.Count > 1 ? l.Designations[0] : "");
+    }
+
+    [Fact]
+    public void BL_revendeur_expediteur_sans_societe_ni_representant()
+    {
+        var m = BonLivraison.Construire(Donnees(Entete(adresseClient: true) with { Revendeur = true },
+            elements: [Element(type: 1, norme: "FSC")], normes: new() { [("1", "FSC")] = ["Certifié FSC"] }));
+        Assert.Equal(["CLARINS SIEGE", "4 RUE BERTEAUX", "75008 PARIS", "Tél. 0102", "Fax 0103", "achats@clarins.test"], m.Expediteur);
+        Assert.Equal("", m.Representant);
+        Assert.DoesNotContain(m.Transport, t => t.Libelle == "Notre n° CEE");
+        Assert.Equal(["MENTION"], m.Introduction);                 // pas d'adresse du client donneur d'ordre
+        Assert.Empty(m.Groupes[0].Lignes[0].Details);              // pas de mention de norme
+
+        // Sous-traitance : la société reste l'expéditeur
+        Assert.Null(BonLivraison.Construire(Donnees(Entete() with { Revendeur = true }, [Element(etat: "S")])).Expediteur);
+        Assert.Null(BonLivraison.Construire(Donnees()).Expediteur);
+    }
+
+    [Fact]
+    public void Presentation_PRINTOR_par_article()
+    {
+        var e2 = Element(2) with { Dossier = 12300, Cle = "B", RefCommandeClient = "", DateCommandeClient = null };
+        var lignes = new[]
+        {
+            Ligne(1, article: "ZZZ", appel: "A2"),
+            Ligne(2, article: "AAA", refClient: "CLA-1", appel: "A9", norme: "FSC"),
+            Ligne(1, article: "AAA", refClient: "CLA-1", appel: "A1") with { Element = 2 },
+            Ligne(3, article: "") ,                                 // texte d'un BL client : non imprimé
+        };
+        var m = BonLivraison.Construire(Donnees(Entete() with { Presentation = "2" }, [Element(), e2], lignes,
+            normes: new() { [("1", "FSC")] = ["Certifié FSC"] }));
+        Assert.Equal(["AAA/01 · V/Réf. : CLA-1", "ZZZ/01 · V/Réf. : IMP1"], m.Groupes.Select(g => g.Titre));
+        var aaa = m.Groupes[0];
+        Assert.Equal(2, aaa.Lignes.Count);
+        Assert.Equal(["N/cde 12300/B", "N° d'appel : A1 du 01/11/2023"], aaa.Lignes[0].Details);     // appel A1 avant A9
+        Assert.Equal("V/cde : PO-77 du 01/10/2023 - N/cde 12345/A", aaa.Lignes[1].Details[0]);
+        Assert.All(aaa.Lignes, l => Assert.Equal("", l.Reference));
+        Assert.Equal(["Certifié FSC"], aaa.Textes);                                                   // normes en fin d'article
     }
 
     [Fact]

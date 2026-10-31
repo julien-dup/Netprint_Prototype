@@ -16,14 +16,15 @@ internal sealed record EnteteEditionBl(
     int PoidsTotal, int ColisTotal, int PalettesTotal, int CompteClient,
     string ClientNom, string ClientRue1, string ClientRue2, string ClientCodePostal, string ClientVille,
     string RefFournisseur, string RefExportClient, string RegimeClient, string RefExportSociete,
-    bool ImprimerLots, bool AdresseClientEnTete, bool ReferenceClientDabord);
+    bool ImprimerLots, bool AdresseClientEnTete, bool ReferenceClientDabord,
+    bool Revendeur, string Presentation, string ClientTelephone, string ClientFax, string ClientEmail);
 
 // Élément (EXP010) et sa commande (AB001) ; normes et textes techniques déjà lus
 internal sealed record ElementEditionBl(
     int Numero, string Etat, int TypeBl, int Dossier, string Cle, int QuantiteLivree, string EtatLivraison, int Poids,
     string RefImprime, string RefCommande, DateOnly? DateCommande, int NbUc1, int QteUc1, string Uc1, int NbUc2, int QteUc2, string Uc2,
     int Representant, string NomRepresentant, bool QuantiteEnUc, int EmballageCommande, string EnseigneCommande,
-    string NormeCommande, IReadOnlyList<string> TextesTechniques);
+    string NormeCommande, IReadOnlyList<string> TextesTechniques, string RefCommandeClient, DateOnly? DateCommandeClient);
 
 // Ligne (EXP015), article (SPF010, SPF022), ligne de commande (NEG100)
 internal sealed record LigneEditionBl(
@@ -64,7 +65,8 @@ internal sealed class EditionBlDb2(IConfiguration config)
                    COALESCE((SELECT MIN(s.SRFEXP) FROM {b}.AA0007 s WHERE s.RSOC = h.RSOC), ''),
                    COALESCE((SELECT MIN(x.FEOPT1) FROM {b}.EXP005 x WHERE x.RSOC = h.RSOC), ''),
                    COALESCE((SELECT MIN(x.FEOPT2) FROM {b}.EXP005 x WHERE x.RSOC = h.RSOC), ''),
-                   COALESCE((SELECT MIN(x.FEDART) FROM {b}.EXP005 x WHERE x.RSOC = h.RSOC), '')
+                   COALESCE((SELECT MIN(x.FEDART) FROM {b}.EXP005 x WHERE x.RSOC = h.RSOC), ''),
+                   h.HREV, COALESCE(c.CENVBL, ''), COALESCE(c.CTELEP, ''), COALESCE(c.CTELEC, ''), COALESCE(c.CEMAIL, '')
             FROM {b}.EXP009 h
             LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = h.RSOC AND c.RGEN = h.HGENE AND c.RCLI = h.HCLIE
             LEFT OUTER JOIN {b}.B200F t ON t.RSOC = h.RSOC AND t.RTRANS = h.HTRAN
@@ -77,7 +79,8 @@ internal sealed class EditionBlDb2(IConfiguration config)
                 [rd.Texte(11), rd.Texte(12), rd.Texte(13)], rd.Texte(14), rd.Texte(15), rd.Texte(16),
                 rd.Texte(17), rd.Texte(18), rd.Texte(19), rd.Texte(20), rd.Entier(21), rd.Entier(22), rd.Entier(23), rd.Entier(24),
                 rd.Texte(25), rd.Texte(26), rd.Texte(27), rd.Texte(28), rd.Texte(29), rd.Texte(30), rd.Texte(31), rd.Texte(32),
-                rd.Texte(33), rd.Texte(34) != "N", rd.Texte(35) == "O", rd.Texte(36) == "2");
+                rd.Texte(33), rd.Texte(34) != "N", rd.Texte(35) == "O", rd.Texte(36) == "2",
+                rd.Texte(37) == "O", rd.Texte(38), rd.Texte(39), rd.Texte(40), rd.Texte(41));
         }
 
         // Textes techniques de la commande imprimés sur le BL (AB0011.CCIBL = 'O')
@@ -97,7 +100,8 @@ internal sealed class EditionBlDb2(IConfiguration config)
             SELECT e.HNUM, e.HETABL, e.HTYPBL, e.HNODOS, e.HCLEF, e.HQTELI, e.HETALI, e.HPDST, e.HREFIM, e.HREFCD,
                    e.HDCDEA, e.HDCDEM, e.HDCDEJ, e.HNUC1, e.HQTUC1, e.HUCDT1, e.HNUC2, e.HQTUC2, e.HREP,
                    COALESCE((SELECT MIN(r.INOMEX) FROM {b}.B000F r WHERE r.RSOC = e.RSOC AND r.RREPR = e.HREP AND r.ITAG <> '*' AND e.HREP <> 0), ''),
-                   COALESCE(a.CCOPT5, ''), COALESCE(a.CCEMBP, 0), COALESCE(a.CCENSE, ''), COALESCE(a.CCNORM, ''), e.HUCDT2
+                   COALESCE(a.CCOPT5, ''), COALESCE(a.CCEMBP, 0), COALESCE(a.CCENSE, ''), COALESCE(a.CCNORM, ''), e.HUCDT2,
+                   COALESCE(a.CCREFC, ''), COALESCE(a.CCDENA, 0), COALESCE(a.CCDENM, 0), COALESCE(a.CCDENJ, 0)
             FROM {b}.EXP010 e
             LEFT OUTER JOIN {b}.AB001 a ON a.RSOC = e.RSOC AND a.RDOSS = e.HNODOS AND a.CCDCLE = e.HCLEF
             WHERE e.RSOC = ? AND e.HNOBL = ? ORDER BY e.HNUM
@@ -113,7 +117,8 @@ internal sealed class EditionBlDb2(IConfiguration config)
                     rd.Entier(7), rd.Texte(8), rd.Texte(9), BaseDb2.Date(rd.Entier(10), rd.Entier(11), rd.Entier(12)),
                     rd.Entier(13), rd.Entier(14), rd.Texte(15), rd.Entier(16), rd.Entier(17), rd.Texte(24), rd.Entier(18), rd.Texte(19),
                     rd.Texte(20) == "O", rd.Entier(21), rd.Texte(22), rd.Texte(23),
-                    textes.GetValueOrDefault((rd.Entier(3), rd.Texte(4))) ?? []));
+                    textes.GetValueOrDefault((rd.Entier(3), rd.Texte(4))) ?? [],
+                    rd.Texte(25), BaseDb2.Date(rd.Entier(26), rd.Entier(27), rd.Entier(28))));
             }
 
         if (representant is not null && liste.Count == 0) return null;

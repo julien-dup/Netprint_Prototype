@@ -27,10 +27,24 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
         page.Footer().Element(Pied);
     });
 
+    // BL revendeur : ni logo ni identité de la société, le revendeur est l'expéditeur
+    private IdentiteSociete? Emetteur => m.Expediteur is null ? societe : null;
+
     private void Entete(IContainer c) => c.Row(ligne =>
     {
         ligne.RelativeItem().Column(col =>
         {
+            if (m.Expediteur is { } expediteur)
+            {
+                col.Item().Text("Expéditeur").FontSize(7.5f).FontColor(Couleurs.Discret);
+                var premiere = true;
+                foreach (var l in expediteur)
+                {
+                    col.Item().Text(l).FontSize(premiere ? 11 : 8).Gras(premiere);
+                    premiere = false;
+                }
+                return;
+            }
             if (societe?.Logo is { } logo) col.Item().MaxHeight(48).MaxWidth(170).Image(logo).FitArea();
             if (societe is not null)
             {
@@ -198,7 +212,7 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
 
     private void Pied(IContainer c) => c.BorderTop(0.5f).BorderColor(Couleurs.Trait).PaddingTop(4).Row(r =>
     {
-        r.RelativeItem().Text(societe is null ? "" : $"{societe.RaisonSociale} · {societe.MentionsLegales}".Trim(' ', '·'))
+        r.RelativeItem().Text(Emetteur is not { } s ? "" : $"{s.RaisonSociale} · {s.MentionsLegales}".Trim(' ', '·'))
             .FontSize(7).FontColor(Couleurs.Discret);
         r.ConstantItem(170).AlignRight().Text(t =>
         {
