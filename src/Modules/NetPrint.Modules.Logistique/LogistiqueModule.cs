@@ -60,6 +60,7 @@ public static class LogistiqueModule
         services.AddScoped<Ecrans.Livraisons.EtatLivraisons>();
         services.AddScoped<OprDb2>();
         services.AddScoped<IOpr, OprService>();                             // WinDev OPR (ordres de préparation)
+        services.AddScoped<IEditionOpr, EditionOprService>();               // OPR150
         services.AddScoped<Ecrans.Opr.EtatListeOpr>();
         return services;
     }
@@ -96,6 +97,23 @@ public static class LogistiqueModule
             catch (RegleMetierException ex)
             {
                 return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+        });
+
+        // OPR en PDF, sans écriture : GET /api/logistique/opr/65980/pdf?ajouts=1 (seulement les lignes jamais éditées)
+        api.MapGet("/opr/{numero:int}/pdf", async (int numero, int? ajouts, HttpContext http, IEditionOpr edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.EditerAsync(numero, ajouts == 1, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Édition de l'OPR impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
             }
         });
 

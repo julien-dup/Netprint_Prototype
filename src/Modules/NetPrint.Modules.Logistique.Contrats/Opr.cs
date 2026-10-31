@@ -26,7 +26,7 @@ public interface IOpr
     Task SupprimerElementAsync(int numeroOpr, int dossier, string cle, CancellationToken ct = default);
 }
 
-public sealed record DroitsOpr(bool Acces, bool Creer, bool Modifier, bool Supprimer);
+public sealed record DroitsOpr(bool Acces, bool Creer, bool Modifier, bool Supprimer, bool Editer = true);
 
 public static class EtatsOpr
 {
@@ -101,3 +101,16 @@ public sealed record ModificationOpr(int Numero, IReadOnlyList<string> Textes, I
 public sealed record LigneModifieeOpr(
     int NumeroLigne, bool Supprimer, DateOnly DatePrevue, int Quantite, int Transporteur, bool Imperatif, bool Mecompte, bool ASolder,
     bool Prelevement, bool Acompte, string Observation);
+
+// Édition d'un OPR en PDF (reprise d'OPR150) : tout l'OPR ou seulement les lignes jamais éditées ; produire le PDF n'écrit
+// rien, l'impression demandée marque ensuite les lignes éditées
+public interface IEditionOpr
+{
+    Task<NetPrint.Socle.Documents.DocumentGenere> EditerAsync(int numeroOpr, bool ajoutsSeulement, CancellationToken ct = default);
+
+    // Tout l'OPR imprimé : toutes ses lignes marquées éditées (comme OPR150)
+    Task MarquerEditeAsync(int numeroOpr, CancellationToken ct = default);
+
+    // Seulement les lignes jamais éditées : PDF produit, puis exactement ces lignes marquées éditées
+    Task<NetPrint.Socle.Documents.DocumentGenere> ImprimerAjoutsAsync(int numeroOpr, CancellationToken ct = default);
+}

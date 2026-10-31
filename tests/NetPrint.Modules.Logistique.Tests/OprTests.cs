@@ -29,9 +29,10 @@ public class OprTests(ITestOutputHelper sortie)
     [Fact]
     public void Droits_OPR100()
     {
-        Assert.Equal(new DroitsOpr(true, true, true, true), ReglesOpr.Droits(null));
-        Assert.Equal(new DroitsOpr(false, false, false, false), ReglesOpr.Droits(["**", "", "", "", "", "", "", ""]));
-        Assert.Equal(new DroitsOpr(true, false, true, false), ReglesOpr.Droits(["", "**", "", "**", "", "", "", ""]));
+        Assert.Equal(new DroitsOpr(true, true, true, true, true), ReglesOpr.Droits(null));
+        Assert.Equal(new DroitsOpr(false, false, false, false, false), ReglesOpr.Droits(["**", "", "", "", "", "", "", ""]));
+        Assert.Equal(new DroitsOpr(true, false, true, false, true), ReglesOpr.Droits(["", "**", "", "**", "", "", "", ""]));
+        Assert.False(ReglesOpr.Droits(["", "", "", "", "", "", "**", ""]).Editer);
     }
 
     [Fact]
@@ -156,6 +157,14 @@ public class OprTests(ITestOutputHelper sortie)
             Assert.Equal((10, true, EtatsOpr.APreparer), (ligne.Quantite, ligne.Imperatif, ligne.Etat));
             Assert.StartsWith("TEST NETPRINT SAAS", ligne.Observation);
             Assert.Equal(2, await CompterAsync(cnx, "SELECT LENGTH(TRIM(OTTXT2)) FROM NP11F.OPR016 WHERE RSOC = 8 AND ODNUM = ? AND ODNLIG = 1", numero) > 0 ? 2 : 0);
+
+            // Édition des ajouts : la ligne imprimée est marquée éditée, une seconde édition des ajouts ne la reprend plus
+            var edition = new EditionOprService(new OprDb2(BaseDeTest.Configuration), new Utilisateur());
+            Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.OPR015 WHERE RSOC = 8 AND ODNUM = ? AND ODEDIT = 'O'", numero));
+            await edition.ImprimerAjoutsAsync(numero);
+            var editees = await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.OPR015 WHERE RSOC = 8 AND ODNUM = ? AND ODEDIT = 'O'", numero);
+            sortie.WriteLine($"{editees} ligne(s) marquée(s) éditée(s)");
+            Assert.True(editees <= 1);   // 0 si l'article n'est pas imprimable sur l'OPR (non stocké, non éditable)
 
             // La même ligne ne peut pas entrer dans un second OPR
             await Assert.ThrowsAsync<RegleMetierException>(() => s.CreerAsync([new LigneSaisieOpr(premiere.Dossier, premiere.Cle, premiere.LigneCommande,

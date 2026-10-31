@@ -6,6 +6,8 @@
    ===================================================================== *@
 @using NetPrint.Modules.Logistique.Ecrans.Opr
 @inject IOpr Oprs
+@inject IEditionOpr Edition
+@inject Microsoft.JSInterop.IJSRuntime JS
 @inject NavigationManager Navigation
 @inject Dialogues Dialogues
 @inject Notifications Notifications
@@ -15,6 +17,14 @@
 
 <fieldset class="barre-outils">
     <button @onclick='() => Navigation.NavigateTo("logistique/opr")'>← Liste des OPR</button>
+    @if (fiche is not null && droits.Editer)
+    {
+        @* PDF dans un onglet (OPR150) ; « Imprimer » marque les lignes éditées, l'aperçu n'écrit rien *@
+        <a class="bouton-ancre" href="@($"api/logistique/opr/{Numero}/pdf")" target="_blank" rel="noopener" title="Aperçu de l'OPR en PDF, sans le marquer édité">👁 Aperçu</a>
+        <a class="bouton-ancre" href="@($"api/logistique/opr/{Numero}/pdf")" target="_blank" rel="noopener" @onclick="MarquerEditeAsync"
+           title="OPR en PDF à imprimer ; ses lignes sont marquées éditées">🖨 Imprimer</a>
+        <button disabled="@occupe" title="Seulement les lignes ajoutées depuis la dernière impression (PDF téléchargé)" @onclick="ImprimerAjoutsAsync">🖨 Imprimer les ajouts</button>
+    }
     @if (fiche is not null && fiche.Etat != EtatsOpr.Livre)
     {
         <button disabled="@(!droits.Creer)" title="Ajouter des lignes de commande du même client, à la même adresse"
@@ -182,6 +192,28 @@
         }
         catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
         catch (Exception ex) { Notifications.Erreur($"Enregistrement impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    // « Imprimer » : le lien ouvre le PDF (sans écriture) ; le clic marque les lignes éditées, comme OPR150 après impression
+    private async Task MarquerEditeAsync()
+    {
+        try { await Edition.MarquerEditeAsync(Numero); }
+        catch (RegleMetierException ex) { Notifications.Info(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"L'OPR n'a pas pu être marqué édité : {ex.Message}"); }
+    }
+
+    // Les ajouts : le PDF est produit avant de marquer les lignes (sinon il serait vide), puis téléchargé
+    private async Task ImprimerAjoutsAsync()
+    {
+        occupe = true;
+        try
+        {
+            var pdf = await Edition.ImprimerAjoutsAsync(Numero);
+            await JS.TelechargerAsync(pdf.Nom, NetPrint.Socle.Documents.DocumentGenere.TypePdf, pdf.Contenu);
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Édition impossible : {ex.Message}"); }
         finally { occupe = false; }
     }
 

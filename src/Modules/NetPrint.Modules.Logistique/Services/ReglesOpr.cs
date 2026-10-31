@@ -15,13 +15,13 @@ internal static class ReglesOpr
     public const int LongueurTexte = 40;
     private const string Interdit = "**";
 
-    // PRT000P1 OPR100 : AOPT01 total, 02 création, 03 modification, 04 suppression ; aucun paramétrage = tout permis
+    // PRT000P1 OPR100 : AOPT01 total, 02 création, 03 modification, 04 suppression, 07 édition ; aucun paramétrage = tout permis
     public static DroitsOpr Droits(IReadOnlyList<string>? options)
     {
-        if (options is null) return new DroitsOpr(true, true, true, true);
-        if (options.ElementAtOrDefault(0) == Interdit) return new DroitsOpr(false, false, false, false);
+        if (options is null) return new DroitsOpr(true, true, true, true, true);
+        if (options.ElementAtOrDefault(0) == Interdit) return new DroitsOpr(false, false, false, false, false);
         return new DroitsOpr(true, options.ElementAtOrDefault(1) != Interdit, options.ElementAtOrDefault(2) != Interdit,
-            options.ElementAtOrDefault(3) != Interdit);
+            options.ElementAtOrDefault(3) != Interdit, options.ElementAtOrDefault(6) != Interdit);
     }
 
     // Contrôles d'une création ou d'un ajout ; reference : OPR auquel on ajoute (même client, adresse, sous-traitance ; même
