@@ -19,12 +19,13 @@ public enum ListeChoix
 {
     Client, Prospect, Profil, Categorie, SousCategorie, Fabricant, Representant, Norme, Dossier,
     Papier, Sorte, SousSorte, Coloris, MachineTirage, Section, Operation, Matiere, Fournisseur,
-    OperationSousTraitance, MotifEchec,
+    OperationSousTraitance, MotifEchec, Article,
 }
 
 public interface IListesDeChoix
 {
-    // Parent : catégorie (sous-catégorie), sorte (sous-sorte), section (opération), fournisseur (opération STR)
+    // Parent : catégorie (sous-catégorie), sorte (sous-sorte), section (opération), fournisseur (opération STR),
+    // compte client (article : articles de ce client seulement, facultatif)
     Task<ResultatChoix> RechercherAsync(ListeChoix liste, string? recherche, string? parent = null, CancellationToken ct = default);
 }
 
@@ -58,6 +59,7 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
         int NbCodes = 1,
         string? ZoneParent = null,
         bool ParentNumerique = false,
+        bool ParentFacultatif = false,            // parent numérique absent : liste entière, sans message
         int? ColonneInactif = null);              // index de la colonne SQL qui marque une ligne inactive (≠ 0)
 
     private sealed record Requete(string Select, bool AvecSociete = true);
@@ -149,6 +151,16 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
             [new("Opération", true), new("Libellé"), new("Prix fixe", true), new("Prix prop.", true), new("Qté prop.", true)],
             false, b => new($"SELECT ROPE, HLIB, HPRFIX, HPRPRO, HQTEPR FROM {b}.AZ00F WHERE RSOC = ? AND HTAG <> '*'"),
             ["HLIB"], "ROPE", "ROPE", ZoneParent: "RFOURN", ParentNumerique: true),
+        // Articles (FEN_RecArticle) : code, désignation ou référence imprimée ; remplacés ou clôturés (AREMPL C / O) en rouge
+        [ListeChoix.Article] = new("Choix d'un article",
+            [new("Article"), new("Indice"), new("Désignation"), new("Réf. imprimée"), new("Client")],
+            true, b => new($"""
+                SELECT a.AARTIC, a.AINDIC, a.ADES, a.ARFIMP, c.CMODIR, CASE WHEN a.AREMPL IN ('C', 'O') THEN 1 ELSE 0 END
+                FROM {b}.SPF010 a LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = a.RSOC AND c.RGEN = a.AGEN AND c.RCLI = a.ACLI
+                WHERE a.RSOC = ?
+                """),
+            ["a.AARTIC", "a.ADES", "a.ARFIMP"], null, "a.AARTIC, a.AINDIC", NbCodes: 2, ZoneParent: "a.ACLI",
+            ParentNumerique: true, ParentFacultatif: true, ColonneInactif: 5),
     };
 
     public async Task<ResultatChoix> RechercherAsync(ListeChoix liste, string? recherche, string? parent = null, CancellationToken ct = default)
@@ -163,7 +175,7 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
 
         if (d.RechercheObligatoire && mots.Count == 0)
             return new(d.Titre, d.Colonnes, [], true, false, "Saisissez un ou plusieurs mots puis cliquez sur Rechercher.");
-        if (d.ZoneParent is not null && d.ParentNumerique && !int.TryParse(parent, out _))
+        if (d.ZoneParent is not null && d.ParentNumerique && !d.ParentFacultatif && !int.TryParse(parent, out _))
             return new(d.Titre, d.Colonnes, [], d.RechercheObligatoire, false,
                 "Renseignez d'abord le fournisseur : les opérations de sous-traitance dépendent du fournisseur.");
 
@@ -176,7 +188,7 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
         if (requete.AvecSociete) cmd.Parameters.Valeur(u.Societe);
 
         // Liste dépendante : sous-catégories d'une catégorie, sous-sortes d'une sorte, opérations d'une section…
-        if (d.ZoneParent is not null && !string.IsNullOrWhiteSpace(parent))
+        if (d.ZoneParent is not null && !string.IsNullOrWhiteSpace(parent) && (!d.ParentNumerique || int.TryParse(parent, out _)))
         {
             sql.Append($" AND {d.ZoneParent} = ?");
             cmd.Parameters.Valeur(d.ParentNumerique ? int.Parse(parent) : parent.Trim().ToUpperInvariant());
