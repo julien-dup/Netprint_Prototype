@@ -123,7 +123,7 @@
                                 <td>@c.Adresse.RaisonSociale <div class="discret">@c.Adresse.CodePostal @c.Adresse.Ville</div></td>
                                 <td class="nombre"><input type="number" class="num7" min="1" @bind="l.Quantite" /></td>
                                 <td><input type="date" disabled="@(NumeroOpr > 0)" @bind="l.Date" /></td>
-                                <td><input type="number" class="num3" min="0" title="@c.NomTransporteur" @bind="l.Transporteur" /></td>
+                                <td><input type="number" class="num3" min="0" title="@(c.TransporteurClient > 0 ? $"Transporteur du client : {c.TransporteurClient} {c.NomTransporteur}" : "")" @bind="l.Transporteur" /></td>
                                 <td class="options-opr">
                                     <label title="Impératif"><input type="checkbox" @bind="l.Imperatif" />I</label>
                                     <label title="Mécompte"><input type="checkbox" @bind="l.Mecompte" />M</label>
@@ -151,7 +151,7 @@
         public bool Cochee { get; set; }
         public int Quantite { get; set; } = candidate.Reste;
         public DateOnly? Date { get; set; } = candidate.DateLivraison;
-        public int Transporteur { get; set; } = candidate.TransporteurClient;
+        public int Transporteur { get; set; }   // 0 par défaut, comme le WinDev (décision de David, 31/10)
         public bool Imperatif { get; set; }
         public bool Mecompte { get; set; }
         public bool ASolder { get; set; }
