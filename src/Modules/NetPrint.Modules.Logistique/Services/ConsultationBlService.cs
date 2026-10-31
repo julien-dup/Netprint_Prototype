@@ -7,6 +7,8 @@ namespace NetPrint.Modules.Logistique.Services;
 
 // =====================================================================
 // Consultation des BL (ConsultationBL / EXP010S) : société de la session, représentant limité appliqué côté serveur.
+// Droits : EXP010S ne contrôle pas PRT000P1 pour consulter (accès par le menu) ; seule l'option FA (facturer) vérifie
+// le programme FAC080, AOPT02 — à reprendre avec la facturation.
 // ÉCART : EXP010S laissait aussi un « manager » voir les BL de son équipe ; ici, seul le représentant limité est filtré.
 // Dans la fiche, un représentant limité ne voit que les éléments de ses dossiers.
 // =====================================================================
