@@ -30,6 +30,8 @@ public static class LogistiqueModule
         services.AddScoped<Ecrans.Bl.EtatListeBl>();                    // critères et liste conservés pendant la session
         services.AddScoped<EditionBlDb2>();
         services.AddScoped<IEditionBl, EditionBlService>();             // EXP030 / EXP035P2
+        services.AddScoped<SaisieBlDb2>();
+        services.AddScoped<ISaisieBl, SaisieBlService>();               // EXP010, cahier des charges lot 1
         return services;
     }
 

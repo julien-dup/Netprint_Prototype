@@ -63,7 +63,7 @@ de conformité (EXP045), colisage (EXP046), envoi (EnvoideBL : Outlook), factura
 |---|---|---|
 | L1 ✅ | **Consultation des BL** : liste multicritère, fiche d'un BL (éléments, lignes, lots), BL facturés / facturables / retours, documents | ConsultationBL, EXP010S (consultation), EXP525 |
 | L2 ✅ | **Édition du BL** en PDF natif (+ certificat de conformité, colisage plus tard) | EXP030 / EXP035P2 |
-| L3 | **Saisie des BL produit fini / négoce** selon le cahier des charges lot 1 : création à partir des lignes de commande ou d'un OPR, ajout d'un dossier, modification, suppression, répartition dépôt / lot / emplacement, port, en une transaction | EXP010, `FEN_CreationBL` d'OPR |
+| L3 🔶 | **Saisie des BL produit fini / négoce** selon le cahier des charges lot 1 : création à partir des lignes de commande ou d'un OPR, ajout d'un dossier, modification, suppression, répartition dépôt / lot / emplacement, port, en une transaction | EXP010, `FEN_CreationBL` d'OPR |
 | L4 | **BL divers** | EXP010 (BL divers) |
 | L5 | **Livraisons à effectuer** + **état des préparations** (EXP078) en PDF, avec « Créer le BL » sur les lignes choisies | LivraisonsAEffectuer, EXP078 |
 | L6 | **Envoi des BL** (Outlook / SMTP, journal ENV100 comme les ARC) et **retours** | EnvoideBL, `FEN_RetourBLSaisie` |

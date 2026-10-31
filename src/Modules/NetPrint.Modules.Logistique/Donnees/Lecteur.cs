@@ -7,9 +7,14 @@ namespace NetPrint.Modules.Logistique.Donnees;
 // Lecteur d'une requête paramétrée qui libère aussi sa commande (chaîne vide passée en blanc, comme les zones CHAR)
 internal sealed class Lecteur(OdbcCommand commande, DbDataReader lecteur) : IAsyncDisposable
 {
-    public static async Task<Lecteur> ExecuterAsync(OdbcConnection cnx, string sql, CancellationToken ct, params object?[] valeurs)
+    public static Task<Lecteur> ExecuterAsync(OdbcConnection cnx, string sql, CancellationToken ct, params object?[] valeurs) =>
+        ExecuterAsync(cnx, null, sql, ct, valeurs);
+
+    public static async Task<Lecteur> ExecuterAsync(OdbcConnection cnx, OdbcTransaction? tx, string sql, CancellationToken ct,
+        params object?[] valeurs)
     {
         var cmd = cnx.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = sql;
         try
         {
@@ -27,6 +32,7 @@ internal sealed class Lecteur(OdbcCommand commande, DbDataReader lecteur) : IAsy
     public string Texte(int i) => lecteur.Texte(i);
     public int Entier(int i) => lecteur.Entier(i);
     public decimal Nombre(int i) => lecteur.Nombre(i);
+    public bool Nul(int i) => lecteur.IsDBNull(i);
 
     public async ValueTask DisposeAsync()
     {
