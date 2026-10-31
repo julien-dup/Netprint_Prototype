@@ -1,0 +1,238 @@
+@page "/logistique/bl"
+@* =====================================================================
+   Bons de livraison — reprise de ConsultationBL (WinDev) et de la liste EXP010S (5250), en lecture seule.
+   Une ligne par élément de BL (un dossier livré) ; les plus récents d'abord. Rien n'est chargé à l'ouverture ;
+   une recherche sans critère demande confirmation (charte).
+   ===================================================================== *@
+@inject IConsultationBl Consultation
+@inject EtatListeBl Etat
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Bons de livraison · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <span class="espace"></span>
+    <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche du BL sélectionné (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir le BL</button>
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="RechercherAsync">
+    <label class="champ"><span>N° BL</span><input type="number" class="num6" @bind="C.NumeroBl" /></label>
+    <label class="champ"><span>N° commande</span><input type="number" class="num6" @bind="C.NumeroCommande" /></label>
+    <div class="champ">
+        <span>Client</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
+            <input type="number" class="num7" title="Compte client (auxiliaire)" @bind="C.CompteClient" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+        </div>
+    </div>
+    <label class="champ"><span>Réf. cde client</span><input class="court" placeholder="Commence par" @bind="C.ReferenceCommande" /></label>
+    <label class="champ"><span>Expédié du</span><input type="date" @bind="C.Du" /></label>
+    <label class="champ"><span>au</span><input type="date" @bind="C.Au" /></label>
+    <label class="champ">
+        <span>Facturation</span>
+        <select @bind="C.Facturation">
+            <option value="@FiltreFacturation.Tous">Tous les BL</option>
+            <option value="@FiltreFacturation.NonFactures">Non facturés</option>
+            <option value="@FiltreFacturation.Factures">Facturés</option>
+            <option value="@FiltreFacturation.NonFacturables">Non facturables</option>
+        </select>
+    </label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@chargement">🔍 Rechercher</button>
+        <button type="button" class="bouton-gomme" title="Réinitialiser tous les critères" @onclick="Effacer">
+            <img src="gomme.png" alt="" /> Effacer
+        </button>
+        <button type="button" class="bouton-lien" @onclick="() => Etat.PlusDeCriteres = !Etat.PlusDeCriteres">
+            @(Etat.PlusDeCriteres ? "▴ Moins de critères" : "▾ Plus de critères")
+        </button>
+    </div>
+    @if (Etat.PlusDeCriteres)
+    {
+        <div class="groupe-criteres">
+            <span class="titre-groupe">BL</span>
+            <label class="champ"><span>Article</span><input class="court" placeholder="* pour compléter" title="ABC* commence par, *ABC finit par, *ABC* contient" @bind="C.Article" /></label>
+            <label class="champ"><span>N° facture</span><input type="number" class="num6" @bind="C.NumeroFacture" /></label>
+            <label class="champ"><span>Transporteur</span><input type="number" class="num3" @bind="C.Transporteur" /></label>
+            <label class="champ"><span>Ville</span><input class="court" placeholder="Commence par" @bind="C.Ville" /></label>
+            <label class="champ"><span>Créé par</span><input class="court" maxlength="10" @bind="C.Profil" /></label>
+        </div>
+        <div class="groupe-criteres">
+            <span class="titre-groupe">Types</span>
+            <label class="champ champ-case"><input type="checkbox" @bind="C.Clients" /><span>Clients</span></label>
+            <label class="champ champ-case"><input type="checkbox" @bind="C.Divers" /><span>Divers</span></label>
+            <label class="champ champ-case"><input type="checkbox" @bind="C.SousTraitances" /><span>Sous-traitance</span></label>
+            <label class="champ champ-case"><input type="checkbox" @bind="C.Retours" /><span>Retours</span></label>
+        </div>
+    }
+</form>
+
+<div class="contenu">
+    <section class="zone-liste">
+        <div class="ligne-infos">
+        <p class="compteur">
+            @if (Etat.Resultat is not { } r)
+            {
+                <span>Saisissez au moins un critère puis cliquez sur Rechercher.</span>
+            }
+            else
+            {
+                <strong>@r.Lignes.Select(e => e.NumeroBl).Distinct().Count().ToString("N0")</strong>
+                <span> BL</span>
+                <span class="separateur-compteur">·</span>
+                <strong>@r.Lignes.Count.ToString("N0")</strong>
+                <span> élément@(r.Lignes.Count > 1 ? "s" : "")</span>
+                @if (r.Tronque)
+                {
+                    <span class="avertissement"> (seuls les @LimitesRecherche.Maximum.ToString("N0") plus récents sont chargés : affinez la recherche)</span>
+                }
+            }
+            @if (chargement)
+            {
+                <span class="chargement"> Chargement…</span>
+            }
+        </p>
+        </div>
+        @if (Etat.Resultat is { Lignes.Count: > 0 })
+        {
+            <div class="zone-defilement-liste">
+                <table class="grille grille-bl">
+                    <thead>
+                        <tr>
+                            @Titre("bl", "BL") @Titre("date", "Expédié le") @Titre("type", "Type") @Titre("client", "Client")
+                            @Titre("commande", "Commande") @Titre("refcde", "Réf. cde")
+                            @Titre("qte", "Quantité", nombre: true) @Titre("colis", "Colis", nombre: true) @Titre("pal", "Pal.", nombre: true)
+                            @Titre("poids", "Poids", nombre: true) @Titre("ville", "Livré à") @Titre("transport", "Transporteur")
+                            @Titre("facture", "Facture") @Titre("profil", "Créé par")
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in Tries)
+                        {
+                            <tr class="@Classe(e)" @onclick="() => Etat.Selection = (e.NumeroBl, e.Element)" @ondblclick="() => Ouvrir(e)">
+                                <td class="nombre"><b>@e.Libelle</b></td>
+                                <td>@e.DateExpedition?.ToString("dd/MM/yyyy")</td>
+                                <td><span class="badge badge-bl-@e.Etat.ToLowerInvariant()">@EtatsBl.Libelle(e.Etat)</span></td>
+                                <td title="@($"{e.CompteGeneral} {e.CompteClient}")">@(e.MotDirecteur != "" ? e.MotDirecteur : e.NomClient)
+                                    @if (e.ClientFacture != "") {<span class="discret" title="Client facturé"> → @e.ClientFacture</span>}</td>
+                                <td>@(e.Dossier > 0 ? $"{e.Dossier}/{e.CleDossier}" : "")</td>
+                                <td>@e.ReferenceCommande</td>
+                                <td class="nombre">@Entier(e.Quantite)</td>
+                                <td class="nombre">@Entier(e.Colis)</td>
+                                <td class="nombre">@Entier(e.Palettes)</td>
+                                <td class="nombre">@Entier(e.Poids)</td>
+                                <td>@e.CodePostal @e.Ville</td>
+                                <td>@e.Transporteur</td>
+                                <td>@(e.Facture ? $"{e.NumeroFacture} du {e.DateFacture:dd/MM/yyyy}" : e.Facturable ? "à facturer" : "non facturable")</td>
+                                <td>@e.Profil</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private CriteresBl C => Etat.Criteres;
+    private bool chargement;
+
+    private ElementBl? Selection => Etat.Resultat?.Lignes.FirstOrDefault(e => (e.NumeroBl, e.Element) == Etat.Selection);
+
+    private async Task RechercherAsync()
+    {
+        if (chargement) return;
+        if (C.AucunCritere && !await Dialogues.ConfirmerAsync("Rechercher tous les BL de la société (les plus récents d'abord) ?",
+                "Recherche sans critère", "Rechercher")) return;
+        chargement = true;
+        try
+        {
+            Etat.Resultat = await Consultation.RechercherAsync(C);
+            Etat.Selection = null;
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Recherche impossible : {ex.Message}");
+        }
+        finally
+        {
+            chargement = false;
+        }
+    }
+
+    private void Effacer()
+    {
+        Etat.Criteres = new();
+        Etat.Resultat = null;
+        Etat.Selection = null;
+    }
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        if (l.Codes.Count < 2) return;
+        (C.CompteGeneral, C.CompteClient) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+    }
+
+    private void Ouvrir(ElementBl? e)
+    {
+        if (e is null) return;
+        Etat.Selection = (e.NumeroBl, e.Element);
+        Navigation.NavigateTo($"logistique/bl/{e.NumeroBl}");
+    }
+
+    // ---------- Tri par clic sur les titres (tri en mémoire sur la liste chargée) ----------
+    private IEnumerable<ElementBl> Tries
+    {
+        get
+        {
+            var l = Etat.Resultat?.Lignes ?? [];
+            Func<ElementBl, object?>? cle = Etat.Tri switch
+            {
+                "bl" => e => e.NumeroBl * 1000 + e.Element,
+                "date" => e => e.DateExpedition,
+                "type" => e => e.Etat,
+                "client" => e => e.MotDirecteur != "" ? e.MotDirecteur : e.NomClient,
+                "commande" => e => e.Dossier,
+                "refcde" => e => e.ReferenceCommande,
+                "qte" => e => e.Quantite,
+                "colis" => e => e.Colis,
+                "pal" => e => e.Palettes,
+                "poids" => e => e.Poids,
+                "ville" => e => e.Ville,
+                "transport" => e => e.Transporteur,
+                "facture" => e => e.NumeroFacture,
+                "profil" => e => e.Profil,
+                _ => null,
+            };
+            if (cle is null) return l;
+            return Etat.TriDescendant ? l.OrderByDescending(cle) : l.OrderBy(cle);
+        }
+    }
+
+    private void Trier(string colonne)
+    {
+        if (Etat.Tri != colonne) (Etat.Tri, Etat.TriDescendant) = (colonne, false);
+        else if (!Etat.TriDescendant) Etat.TriDescendant = true;
+        else (Etat.Tri, Etat.TriDescendant) = ("", false);
+    }
+
+    private RenderFragment Titre(string colonne, string libelle, bool nombre = false) => __builder =>
+    {
+        <th class="@(nombre ? "nombre" : "") triable" @onclick="() => Trier(colonne)">
+            @libelle<span class="sens-tri">@(Etat.Tri != colonne ? "" : Etat.TriDescendant ? " ▼" : " ▲")</span>
+        </th>
+    };
+
+    private string Classe(ElementBl e) =>
+        ((e.NumeroBl, e.Element) == Etat.Selection ? "selection " : "") + (e.Etat == EtatsBl.Retour ? "bl-retour" : e.Etat is EtatsBl.Divers or EtatsBl.SousTraitance ? "bl-divers" : "");
+
+    private static string Entier(int v) => v == 0 ? "" : v.ToString("N0");
+}

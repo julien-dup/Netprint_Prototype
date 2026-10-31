@@ -1,0 +1,28 @@
+/* Module Logistique : bons de livraison */
+.zone-defilement-liste { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--bord); border-radius: var(--rayon); background: var(--surface); }
+.grille-bl td { white-space: nowrap; }
+.grille-bl th.triable { cursor: pointer; user-select: none; }
+.grille-bl .sens-tri { color: var(--accent); }
+.grille-bl tr.bl-retour td { color: var(--danger); }
+.grille-bl tr.bl-divers td { color: #1d4ed8; }
+.compteur .avertissement { color: var(--orange); }
+.discret { color: var(--texte-3); font-weight: normal; }
+.champ-case { flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; min-height: 32px; }
+.badge-bl-c { background: #e0f2fe; color: #075985; }
+.badge-bl-d, .badge-bl-s { background: #ede9fe; color: #5b21b6; }
+.badge-bl-r { background: var(--danger-clair); color: var(--danger); }
+.badge-bl-v { background: var(--jaune-clair); color: #854d0e; }
+
+.fiche-bl { overflow: auto; }
+.titre-fiche { display: flex; align-items: baseline; gap: 10px; }
+.type-fiche { font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--texte-3); }
+.numero-fiche { font-size: 20px; }
+.cartes-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.cartes-info .info { border: 1px solid var(--bord); border-radius: var(--rayon); padding: 8px 12px; }
+.cartes-info .info h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-3); }
+.cartes-info .info p { margin: 2px 0; }
+.titre-element { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.titre-element .espace { flex: 1; }
+.grille-fiche td { white-space: nowrap; }
+.grille-fiche tr.ligne-texte td { color: var(--texte-2); font-style: italic; }
+.texte-pied { white-space: pre-line; margin: 0; }

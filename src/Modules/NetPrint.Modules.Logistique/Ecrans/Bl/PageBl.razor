@@ -1,0 +1,164 @@
+@page "/logistique/bl/{Numero:int}"
+@* =====================================================================
+   Fiche d'un bon de livraison (lecture seule) : destinataire, transport et totaux (EXP009), éléments = dossiers livrés
+   (EXP010) avec leur facturation, lignes (EXP015) et lots / emplacements (EXP016), texte de pied (EXP012).
+   Remplace la visualisation EXP525 et le détail de ConsultationBL.
+   ===================================================================== *@
+@inject IConsultationBl Consultation
+@inject NavigationManager Navigation
+@inject Notifications Notifications
+
+<PageTitle>BL @Numero · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo("logistique/bl")' title="Retour à la liste des BL">← Liste des BL</button>
+</fieldset>
+
+<div class="contenu contenu-detail fiche-bl">
+    @if (chargement)
+    {
+        <p class="chargement">Chargement…</p>
+    }
+    else if (fiche is null)
+    {
+        <p>Ce BL n'existe pas ou ne vous est pas accessible.</p>
+    }
+    else
+    {
+        var h = fiche.Entete;
+        <section class="carte entete-bl">
+            <div class="titre-fiche">
+                <span class="type-fiche">BON DE LIVRAISON</span> <b class="numero-fiche">@h.NumeroBl</b>
+                @if (h.SousTraitance) {<span class="badge">sous-traitance</span>}
+            </div>
+            <div class="cartes-info">
+                <div class="info">
+                    <h3>Livraison</h3>
+                    <p><b>@h.RaisonSociale</b>@if (h.NumeroAdresse > 0) {<span class="discret"> (adresse n° @h.NumeroAdresse)</span>}</p>
+                    <p>@h.Rue1</p>
+                    @if (h.Rue2 != "") {<p>@h.Rue2</p>}
+                    <p>@h.CodePostal @h.Ville @h.Pays</p>
+                </div>
+                <div class="info">
+                    <h3>Client</h3>
+                    <p><b>@h.NomClient</b> <span class="discret">@h.CompteGeneral @h.CompteClient</span></p>
+                    <p>Expédié le <b>@h.DateExpedition?.ToString("dd/MM/yyyy")</b></p>
+                    @if (h.Enseigne != "") {<p>Enseigne @h.Enseigne</p>}
+                    <p class="discret">Créé par @h.Profil</p>
+                </div>
+                <div class="info">
+                    <h3>Transport</h3>
+                    <p>@(h.Transporteur != "" ? h.Transporteur : "—")</p>
+                    <p>Livraison @h.TypeLivraison · port @h.TypePort</p>
+                    @if (h.Recepisse > 0) {<p>Récépissé @h.Recepisse</p>}
+                    <p><b>@h.Colis.ToString("N0")</b> colis · <b>@h.Palettes</b> palette@(h.Palettes > 1 ? "s" : "") · <b>@h.Poids.ToString("N0")</b> kg</p>
+                </div>
+                @if (h.Observations.Count > 0 || h.Mention != "")
+                {
+                    <div class="info">
+                        <h3>Observations</h3>
+                        @foreach (var o in h.Observations) {<p>@o</p>}
+                        @if (h.Mention != "") {<p class="discret">Mention : @h.Mention</p>}
+                    </div>
+                }
+            </div>
+        </section>
+
+        @foreach (var e in fiche.Elements)
+        {
+            <section class="carte element-bl">
+                <div class="titre-element">
+                    <span class="badge badge-bl-@e.Etat.ToLowerInvariant()">@EtatsBl.Libelle(e.Etat)</span>
+                    @if (fiche.Elements.Count > 1) {<b>Élément @e.Element</b>}
+                    @if (e.Dossier > 0)
+                    {
+                        <a href="@($"ventes/commandes/{e.Dossier}/{e.CleDossier}")" title="Ouvrir la commande">Commande @e.Dossier/@e.CleDossier</a>
+                        <span>@e.DesignationDossier</span>
+                    }
+                    @if (e.ReferenceCommande != "") {<span class="discret">réf. @e.ReferenceCommande@(e.DateCommande is { } dc ? $" du {dc:dd/MM/yyyy}" : "")</span>}
+                    <span class="espace"></span>
+                    @if (e.BlOrigine > 0) {<span>Retour du BL <a href="@($"logistique/bl/{e.BlOrigine}")">@e.BlOrigine@(e.ElementOrigine > 1 ? $"/{e.ElementOrigine}" : "")</a></span>}
+                    <span class="facturation-element">
+                        @if (e.NumeroFacture > 0) {<span>Facture <b>@e.NumeroFacture</b> du @e.DateFacture?.ToString("dd/MM/yyyy")</span>}
+                        else if (e.Facturable) {<span>À facturer@(e.FacturationAutomatique ? " (automatique)" : "")</span>}
+                        else {<span class="discret">Non facturable</span>}
+                        @if (e.ClientFacture != "") {<span class="discret"> · facturé à @e.ClientFacture</span>}
+                        @if (e.NomRepresentant != "") {<span class="discret"> · @e.NomRepresentant</span>}
+                    </span>
+                </div>
+                <table class="grille grille-fiche">
+                    <thead><tr><th class="nombre">L.</th><th>Article</th><th>Désignation</th><th class="nombre">Quantité</th><th class="nombre">Colis</th>
+                        <th>Livraison</th><th>Lots / emplacements</th><th class="nombre">Ligne cde</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in e.Lignes)
+                        {
+                            @if (l.Texte)
+                            {
+                                <tr class="ligne-texte"><td></td><td></td><td colspan="6">@l.Designation</td></tr>
+                            }
+                            else
+                            {
+                                <tr>
+                                    <td class="nombre">@l.Ligne</td>
+                                    <td><b>@l.Article</b>@(l.Indice != "" ? $" {l.Indice}" : "")</td>
+                                    <td>@l.Designation</td>
+                                    <td class="nombre">@l.Quantite.ToString("N0")</td>
+                                    <td class="nombre">@(l.Colis > 0 ? l.Colis.ToString("N0") : "")</td>
+                                    <td>@EtatLivraison(l.EtatLivraison)</td>
+                                    <td>@string.Join(" · ", l.Lots.Select(x => $"{x.Lot}{(x.Emplacement != "" ? " " + x.Emplacement : "")} : {x.Quantite:N0}"))</td>
+                                    <td class="nombre">@(l.LigneCommande > 0 ? l.LigneCommande : "")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+
+        @if (fiche.TextePied.Count > 0)
+        {
+            <section class="carte">
+                <h3>Texte de pied</h3>
+                <p class="texte-pied">@string.Join("\n", fiche.TextePied)</p>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+
+    private FicheBl? fiche;
+    private bool chargement = true;
+    private int lecture;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var n = ++lecture;
+        chargement = true;
+        FicheBl? lue = null;
+        try
+        {
+            lue = await Consultation.LireAsync(Numero);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture du BL impossible : {ex.Message}");
+        }
+        if (n != lecture) return;
+        fiche = lue;
+        chargement = false;
+    }
+
+    // État de livraison d'une ligne (EXP015.DETALI)
+    private static string EtatLivraison(string e) => e switch
+    {
+        "T" => "Totalité",
+        "S" => "Solde",
+        "A" => "Acompte",
+        "E" => "Suite",
+        "R" => "Retour",
+        _ => "",
+    };
+}

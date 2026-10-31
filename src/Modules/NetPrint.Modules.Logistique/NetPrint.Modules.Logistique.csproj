@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- Module Stocks et logistique, volet livraisons : bons de livraison (EXP009 / EXP010 / EXP015 / EXP016), puis saisie
+       des BL, livraisons à effectuer, OPR, pré-BL (docs/logistique-analyse.md).
+       Dépendances autorisées : ses Contrats, le Noyau, le Socle, Web.Commun, et les Contrats des autres modules.
+       JAMAIS un autre module directement (vérifié par NetPrint.Architecture.Tests). -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NetPrint.Modules.Logistique.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetPrint.Modules.Logistique.Contrats\NetPrint.Modules.Logistique.Contrats.csproj" />
+    <ProjectReference Include="..\..\NetPrint.Noyau\NetPrint.Noyau.csproj" />
+    <ProjectReference Include="..\..\NetPrint.Web.Commun\NetPrint.Web.Commun.csproj" />
+  </ItemGroup>
+
+</Project>

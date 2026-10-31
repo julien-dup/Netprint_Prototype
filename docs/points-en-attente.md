@@ -137,6 +137,9 @@ Questions ouvertes :
 |---|---|---|
 | 🔴 | Appels de livraison depuis le navigateur logistique et le tableau de bord EDI | Le moteur existe : `IAppelsLivraison` (Ventes.Contrats), canaux `Navigateur` / `Edi`. Remplace TNEG100N + NEG300NAV (C/V/S/A) : un seul appel, contrôles et avertissements explicites (plus de chaîne FRCCTR). L'EDI écrit EDI105 après la création ; une modification EDI devient `EnregistrerAsync` (plus de suppression / recréation) |
 | ⚪ | BL, ordres de préparation (OPR) | Lus dans la fiche commande ; une ligne d'un OPR non livré n'est plus modifiable |
+| 🔴 | **Module Logistique — bons de livraison** (en cours) | Vue d'ensemble et découpage L1 à L8 : `docs/logistique-analyse.md` ; cahier des charges de la saisie des BL validé le 15/10 (`D:\docs\Netprint\BL-bons-de-livraison\note-analyse-bl-lot1-windev.md`), valable pour le SaaS (David, 31/10). L1 fait (31/10) : consultation des BL (liste multicritère, fiche avec éléments, lignes, lots), module `NetPrint.Modules.Logistique` |
+| 🟠 | Consultation des BL : écarts | Représentant limité filtré sur le représentant de l'élément (EXP010S laissait aussi un manager voir son équipe) ; indicateur « BL édité » non affiché (EXP035P2 remet HEDBL à 'N' après impression) ; à venir : documents (EXPDOC), liens facture / ARC, colonnes et filtres par préférence |
+| ⚪ | Web services PHP (ArticleGRA, CFP, GRAPPG, StockArticle) | Sources et `.md` copiés par David dans `D:\docs\Netprint\web services` : à lire pour L7 (OPR) et L8 (pré-BL) |
 
 ## 5. Organisation
 
