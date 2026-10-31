@@ -1,5 +1,6 @@
 using System.Data.Odbc;
 using Microsoft.Extensions.Configuration;
+using NetPrint.Modules.Logistique.Services;
 using NetPrint.Socle.Donnees;
 
 namespace NetPrint.Modules.Logistique.Donnees;
@@ -17,7 +18,8 @@ internal sealed record EnteteEditionBl(
     string ClientNom, string ClientRue1, string ClientRue2, string ClientCodePostal, string ClientVille,
     string RefFournisseur, string RefExportClient, string RegimeClient, string RefExportSociete,
     bool ImprimerLots, bool AdresseClientEnTete, bool ReferenceClientDabord,
-    bool Revendeur, string Presentation, string ClientTelephone, string ClientFax, string ClientEmail);
+    bool Revendeur, string Presentation, string ClientTelephone, string ClientFax, string ClientEmail,
+    string Langue, bool CodeBarreClient, bool CodesBarresSociete, bool DateFabSurLots);
 
 // Élément (EXP010) et sa commande (AB001) ; normes et textes techniques déjà lus
 internal sealed record ElementEditionBl(
@@ -31,15 +33,18 @@ internal sealed record LigneEditionBl(
     int Element, int Ligne, string Article, string Indice, int Quantite, IReadOnlyList<string> Designations, string EtatLivraison,
     decimal PoidsColis, int Colis, int EmballagePar, int ColisMecompte, int ExemplairesMecompte, string TypeEmballage,
     bool Imprimee, bool QuantiteEnUc, int EmballageArticle, string RefImprime, string RefClient, string NumeroMarche,
-    string UniteLots, string Appel, DateOnly? DateAppel, string Norme);
+    string UniteLots, string Appel, DateOnly? DateAppel, string Norme, bool CodeBarreArticle = false);
 
-// Lot (EXP016) et lot fournisseur (AL00F.PLLOTI)
-internal sealed record LotEditionBl(int Element, int Ligne, string Lot, int Quantite, string LotFournisseur);
+// Lot (EXP016), lot fournisseur (AL00F.PLLOTI) ; pour un lot « n° de dossier + clé » : quantité fabriquée du dossier
+// (somme d'AB0020.LAQTEC) et date de sortie de fabrication (DOS010)
+internal sealed record LotEditionBl(int Element, int Ligne, string Lot, int Quantite, string LotFournisseur,
+    int? QuantiteFabriquee = null, DateOnly? SortieFabrication = null);
 
 // Partiel : représentant limité, des éléments d'autres représentants sont écartés
 internal sealed record DonneesEditionBl(
     bool Partiel, EnteteEditionBl Entete, IReadOnlyList<ElementEditionBl> Elements, IReadOnlyList<LigneEditionBl> Lignes,
-    IReadOnlyList<LotEditionBl> Lots, IReadOnlyList<string> TextesPied, IReadOnlyDictionary<(string Enseigne, string Code), IReadOnlyList<string>> Normes);
+    IReadOnlyList<LotEditionBl> Lots, IReadOnlyList<string> TextesPied, IReadOnlyDictionary<(string Enseigne, string Code), IReadOnlyList<string>> Normes,
+    LibellesBl Libelles);
 
 internal sealed class EditionBlDb2(IConfiguration config)
 {
@@ -66,7 +71,8 @@ internal sealed class EditionBlDb2(IConfiguration config)
                    COALESCE((SELECT MIN(x.FEOPT1) FROM {b}.EXP005 x WHERE x.RSOC = h.RSOC), ''),
                    COALESCE((SELECT MIN(x.FEOPT2) FROM {b}.EXP005 x WHERE x.RSOC = h.RSOC), ''),
                    COALESCE((SELECT MIN(x.FEDART) FROM {b}.EXP005 x WHERE x.RSOC = h.RSOC), ''),
-                   h.HREV, COALESCE(c.CENVBL, ''), COALESCE(c.CTELEP, ''), COALESCE(c.CTELEC, ''), COALESCE(c.CEMAIL, '')
+                   h.HREV, COALESCE(c.CENVBL, ''), COALESCE(c.CTELEP, ''), COALESCE(c.CTELEC, ''), COALESCE(c.CEMAIL, ''),
+                   COALESCE(c.CDOP10, ''), COALESCE(c.CDCABB, ''), COALESCE(c.CDOP11, '')
             FROM {b}.EXP009 h
             LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = h.RSOC AND c.RGEN = h.HGENE AND c.RCLI = h.HCLIE
             LEFT OUTER JOIN {b}.B200F t ON t.RSOC = h.RSOC AND t.RTRANS = h.HTRAN
@@ -80,7 +86,8 @@ internal sealed class EditionBlDb2(IConfiguration config)
                 rd.Texte(17), rd.Texte(18), rd.Texte(19), rd.Texte(20), rd.Entier(21), rd.Entier(22), rd.Entier(23), rd.Entier(24),
                 rd.Texte(25), rd.Texte(26), rd.Texte(27), rd.Texte(28), rd.Texte(29), rd.Texte(30), rd.Texte(31), rd.Texte(32),
                 rd.Texte(33), rd.Texte(34) != "N", rd.Texte(35) == "O", rd.Texte(36) == "2",
-                rd.Texte(37) == "O", rd.Texte(38), rd.Texte(39), rd.Texte(40), rd.Texte(41));
+                rd.Texte(37) == "O", rd.Texte(38), rd.Texte(39), rd.Texte(40), rd.Texte(41),
+                rd.Texte(42), rd.Texte(43) == "O", rd.Texte(34) == "O", rd.Texte(44) == "O");
         }
 
         // Textes techniques de la commande imprimés sur le BL (AB0011.CCIBL = 'O')
@@ -135,7 +142,7 @@ internal sealed class EditionBlDb2(IConfiguration config)
                    COALESCE(s.ANOMARC, ''),
                    CASE WHEN (SELECT MIN(u.TNUM) FROM {b}.AA00083 u WHERE u.RSOC = l.RSOC AND u.RTABLE = 'UV' AND u.RARG = s.AUNITE
                               AND u.TTAG <> '*') = 1 THEN s.AUNITE ELSE '' END,
-                   COALESCE(n.DNAPPE, ''), COALESCE(n.DNDTAC, 0), COALESCE(n.DNNORM, '')
+                   COALESCE(n.DNAPPE, ''), COALESCE(n.DNDTAC, 0), COALESCE(n.DNNORM, ''), COALESCE(s.ACABBL, '')
             FROM {b}.EXP015 l
             JOIN {b}.EXP009 h ON h.RSOC = l.RSOC AND h.HNOBL = l.DNBL
             JOIN {b}.EXP010 e ON e.RSOC = l.RSOC AND e.HNOBL = l.DNBL AND e.HNUM = l.DNUM
@@ -150,21 +157,38 @@ internal sealed class EditionBlDb2(IConfiguration config)
                     new[] { rd.Texte(5), rd.Texte(6), rd.Texte(7) }.Where(x => x != "").ToList(), rd.Texte(8), rd.Nombre(9),
                     rd.Entier(10), rd.Entier(11), rd.Entier(12), rd.Entier(13), rd.Texte(14),
                     rd.Texte(15) != "N", rd.Texte(16) == "O", rd.Entier(17), rd.Texte(18), rd.Texte(19), rd.Texte(20), rd.Texte(21),
-                    rd.Texte(22), BaseDb2.DateAAAAMMJJ(rd.Entier(23)), rd.Texte(24)));
+                    rd.Texte(22), BaseDb2.DateAAAAMMJJ(rd.Entier(23)), rd.Texte(24), rd.Texte(25) == "O"));
 
-        // Lot fournisseur : AL00F, type de stock à blanc, premier dépôt (comme la clé partielle d'AL00L4)
+        // Lot fournisseur : AL00F, type de stock à blanc, premier dépôt (comme la clé partielle d'AL00L4).
+        // Lot « n° de dossier (5 chiffres) + clé » de l'article : quantité fabriquée pour la commande (AB0020, clé AB0020L2
+        // d'EXP035P2), lue seulement si un code-barres peut être imprimé ; date de sortie de fabrication (DOS010L3), seulement
+        // si le client la demande.
+        var codesBarres = entete.CodesBarresSociete && (entete.CodeBarreClient || lignes.Any(l => l.CodeBarreArticle));
+        var quantiteFab = codesBarres ? """
+            (SELECT SUM(a.LAQTEC) FROM {b}.AB0020 a WHERE a.RSOC = t.RSOC AND a.LAART = l.DART AND a.LAIND = l.DIND
+              AND DIGITS(a.RDOSS) = SUBSTR(t.DNLOT, 1, 5) AND a.LADCLE = SUBSTR(t.DNLOT, 6, 1)
+              AND a.LADOSC = e.HNODOS AND a.LACLDC = e.HCLEF)
+            """ : "CAST(NULL AS DECIMAL(11, 0))";
+        var sortieFab = entete.DateFabSurLots ? """
+            (SELECT f.SFDSAA * 10000 + f.SFDSMM * 100 + f.SFDSJJ FROM {b}.DOS010 f WHERE f.RSOC = t.RSOC
+              AND DIGITS(f.SFNDOS) = SUBSTR(t.DNLOT, 1, 5) AND f.SFCLEF = SUBSTR(t.DNLOT, 6, 1) AND f.SFART = l.DART AND f.SFIND = l.DIND
+             ORDER BY f.SFNFAB FETCH FIRST 1 ROW ONLY)
+            """ : "CAST(NULL AS DECIMAL(8, 0))";
         var lots = new List<LotEditionBl>();
-        await using (var rd = await Lire(cnx, """
+        await using (var rd = await Lire(cnx, $$"""
             SELECT t.DNUM, t.DNLIG, t.DNLOT, t.DNQTPL,
                    COALESCE((SELECT MIN(f.PLLOTI) FROM {b}.AL00F f WHERE f.RSOC = t.RSOC AND f.PLTSTO = ' ' AND f.PLREF = l.DART
-                             AND f.PLIND = l.DIND AND f.PLLOT = t.DNLOT), '')
+                             AND f.PLIND = l.DIND AND f.PLLOT = t.DNLOT), ''),
+                   {{quantiteFab}}, {{sortieFab}}
             FROM {b}.EXP016 t
             JOIN {b}.EXP015 l ON l.RSOC = t.RSOC AND l.DNBL = t.DNBL AND l.DNUM = t.DNUM AND l.DNLIG = t.DNLIG
+            JOIN {b}.EXP010 e ON e.RSOC = t.RSOC AND e.HNOBL = t.DNBL AND e.HNUM = t.DNUM
             WHERE t.RSOC = ? AND t.DNBL = ? ORDER BY t.DNUM, t.DNLIG, t.DNLOT, t.DNEMP
             """, ct, societe, numeroBl))
             while (await rd.ReadAsync(ct))
                 if (visibles.Contains(rd.Entier(0)))
-                    lots.Add(new LotEditionBl(rd.Entier(0), rd.Entier(1), rd.Texte(2), rd.Entier(3), rd.Texte(4)));
+                    lots.Add(new LotEditionBl(rd.Entier(0), rd.Entier(1), rd.Texte(2), rd.Entier(3), rd.Texte(4),
+                        rd.Texte(5) == "" ? null : rd.Entier(5), BaseDb2.DateAAAAMMJJ(rd.Entier(6))));
 
         var pied = new List<string>();
         await using (var rd = await Lire(cnx, "SELECT HTTXT FROM {b}.EXP012 WHERE RSOC = ? AND HNOBL = ? ORDER BY HTNLIG", ct, societe, numeroBl))
@@ -186,7 +210,23 @@ internal sealed class EditionBlDb2(IConfiguration config)
                 """, ct, societe, ens, code, date))
                 normes[(ens, code)] = await rd.ReadAsync(ct) ? Enumerable.Range(0, 4).Select(rd.Texte).Where(x => x != "").ToList() : [];
 
-        return new DonneesEditionBl(ecartes, entete, liste, lignes, lots, pied, normes);
+        // Libellés dans la langue du client (PRT008 programme « BL », listes PRT009)
+        var libelles = LibellesBl.EnFrancais;
+        if (entete.Langue != "")
+        {
+            var traductions = new List<string>();
+            var colonnes = string.Join(", ", Enumerable.Range(1, 50).Select(i => $"TRADUC{i}"));
+            await using (var rd = await Lire(cnx, $"SELECT {colonnes} FROM {{b}}.PRT008 WHERE MLANGUE = ? AND MPGM = 'BL'", ct, entete.Langue))
+                if (await rd.ReadAsync(ct)) traductions.AddRange(Enumerable.Range(0, 50).Select(rd.Texte));
+            var listes = new Dictionary<(int, string), string>();
+            await using (var rd = await Lire(cnx, """
+                SELECT Y2LSNO, Y2EXVL, Y2CNTX FROM {b}.PRT009 WHERE LLANGUE = ? AND Y2LSNO IN (28, 30, 31, 32)
+                """, ct, entete.Langue))
+                while (await rd.ReadAsync(ct)) listes[(rd.Entier(0), rd.Texte(1))] = rd.Texte(2);
+            libelles = LibellesBl.Pour(traductions, listes);
+        }
+
+        return new DonneesEditionBl(ecartes, entete, liste, lignes, lots, pied, normes, libelles);
     }
 
     // Marque « édité » d'EXP035P2 (seule écriture de l'édition) : HEDBL = 'N' et date d'édition

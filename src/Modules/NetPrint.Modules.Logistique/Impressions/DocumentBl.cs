@@ -17,7 +17,7 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
     // Logos des éditions WinDev propres au BL : LogoBl<soc>…
     public const string TypeLogo = "Bl";
 
-    private string Titre => m.Retour ? "Retour de marchandises" : "Bon de livraison";
+    private string Titre => m.Retour ? m.L.TitreRetour : m.L.Titre;
 
     public void Compose(IDocumentContainer conteneur) => conteneur.Page(page =>
     {
@@ -36,7 +36,7 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
         {
             if (m.Expediteur is { } expediteur)
             {
-                col.Item().Text("Expéditeur").FontSize(7.5f).FontColor(Couleurs.Discret);
+                col.Item().Text(m.L.Expediteur).FontSize(7.5f).FontColor(Couleurs.Discret);
                 var premiere = true;
                 foreach (var l in expediteur)
                 {
@@ -60,11 +60,11 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
         {
             col.Item().AlignRight().Text(Titre.ToUpperInvariant()).Bold().FontSize(11).FontColor(Couleurs.Accent);
             col.Item().AlignRight().Text($"N° {m.Numero}").Bold().FontSize(16);
-            if (m.Date is { } d) col.Item().AlignRight().Text($"Expédié le {DateLongue(d)}").FontColor(Couleurs.Discret);
+            if (m.Date is { } d) col.Item().AlignRight().Text($"{m.L.ExpedieLe} {m.L.DateLongue(d)}").FontColor(Couleurs.Discret);
             col.Item().AlignRight().Text(t =>
             {
                 t.DefaultTextStyle(s => s.FontSize(8).FontColor(Couleurs.Discret));
-                t.Span("Page ");
+                t.Span($"{m.L.Page} ");
                 t.CurrentPageNumber();
                 t.Span(" / ");
                 t.TotalPages();
@@ -88,13 +88,13 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
                     t.Cell().PaddingBottom(2).Text(valeur);
                 }
                 foreach (var (libelle, valeur) in m.Transport) Info(libelle, valeur);
-                if (m.RefFournisseur != "") Info("Réf. fournisseur", m.RefFournisseur);
-                if (m.Representant != "") Info("Représentant", m.Representant);
+                if (m.RefFournisseur != "") Info(m.L.RefFournisseur, m.RefFournisseur);
+                if (m.Representant != "") Info(m.L.Representant, m.Representant);
             });
             ligne.ConstantItem(14);
             ligne.ConstantItem(230).Border(0.6f).BorderColor(Couleurs.Trait).Padding(10).Column(adr =>
             {
-                adr.Item().PaddingBottom(2).Text("Livré à").FontSize(7.5f).FontColor(Couleurs.Discret);
+                adr.Item().PaddingBottom(2).Text(m.L.Destinataire).FontSize(7.5f).FontColor(Couleurs.Discret);
                 var premiere = true;
                 foreach (var l in m.Destinataire)
                 {
@@ -106,7 +106,7 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
         });
 
         if (m.Retour)
-            col.Item().Background(Couleurs.Fond).Padding(4).AlignCenter().Text("RETOUR DE MARCHANDISES").Bold().FontColor(Couleurs.Accent);
+            col.Item().Background(Couleurs.Fond).Padding(4).AlignCenter().Text(m.L.TitreRetour.ToUpperInvariant()).Bold().FontColor(Couleurs.Accent);
         if (m.Introduction.Count > 0) col.Item().ShowOnce().Element(x => Bloc(x, m.Introduction));
 
         col.Item().Element(Lignes);
@@ -135,12 +135,12 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
         t.Header(h =>
         {
             IContainer Titre(IContainer x) => x.Background(Couleurs.Accent).PaddingVertical(4).PaddingHorizontal(4);
-            h.Cell().Element(Titre).Text("Référence").FontColor(Colors.White).Bold();
-            h.Cell().Element(Titre).AlignRight().Text("Quantité").FontColor(Colors.White).Bold();
-            h.Cell().Element(Titre).Text("Désignation").FontColor(Colors.White).Bold();
-            h.Cell().Element(Titre).Text("État").FontColor(Colors.White).Bold();
-            h.Cell().Element(Titre).Text("Colis").FontColor(Colors.White).Bold();
-            h.Cell().Element(Titre).AlignRight().Text("Poids").FontColor(Colors.White).Bold();
+            h.Cell().Element(Titre).Text(m.L.Reference).FontColor(Colors.White).Bold();
+            h.Cell().Element(Titre).AlignRight().Text(m.L.Quantite).FontColor(Colors.White).Bold();
+            h.Cell().Element(Titre).Text(m.L.Designation).FontColor(Colors.White).Bold();
+            h.Cell().Element(Titre).Text(m.L.Etat).FontColor(Colors.White).Bold();
+            h.Cell().Element(Titre).Text(m.L.Colis).FontColor(Colors.White).Bold();
+            h.Cell().Element(Titre).AlignRight().Text(m.L.Poids).FontColor(Colors.White).Bold();
         });
 
         static IContainer Cellule(IContainer x) => x.BorderBottom(0.5f).BorderColor(Couleurs.Trait).PaddingVertical(3).PaddingHorizontal(4);
@@ -157,10 +157,21 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
                     foreach (var comp in l.Complements) x.Line(comp).FontSize(7.5f).FontColor(Couleurs.Discret);
                 });
                 t.Cell().Element(Cellule).AlignRight().Text(l.Quantite).Bold();
-                t.Cell().Element(Cellule).Text(x =>
+                t.Cell().Element(Cellule).Column(col =>
                 {
-                    foreach (var des in l.Designations) x.Line(des);
-                    foreach (var det in l.Details) x.Line(det).FontSize(7.5f).FontColor(Couleurs.Discret);
+                    col.Item().Text(x =>
+                    {
+                        foreach (var des in l.Designations) x.Line(des);
+                        foreach (var det in l.Details) x.Line(det).FontSize(7.5f).FontColor(Couleurs.Discret);
+                    });
+                    // Code-barres de chaque lot (Code 39 du n° de lot), n° en clair et quantité fabriquée, comme EXP035P2
+                    foreach (var cb in l.CodesBarres ?? [])
+                        col.Item().PaddingTop(3).Width(130).Column(c =>
+                        {
+                            c.Item().Height(22).Svg(CodeBarres.Code39Svg(cb.Lot)).FitArea();
+                            c.Item().AlignCenter().Text(cb.Lot).FontSize(7.5f);
+                            if (cb.QuantiteFabriquee != "") c.Item().Text(cb.QuantiteFabriquee).FontSize(7).FontColor(Couleurs.Discret);
+                        });
                 });
                 t.Cell().Element(Cellule).Text(l.Code);
                 t.Cell().Element(Cellule).Text(x => { foreach (var co in l.Colis) x.Line(co); });
@@ -181,30 +192,30 @@ internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool aper
     {
         r.ConstantItem(200).Border(0.6f).BorderColor(Couleurs.Trait).Padding(6).Column(col =>
         {
-            col.Item().Text("Colisage").Bold();
+            col.Item().Text(m.L.Colisage).Bold();
             void Ligne(string libelle, int valeur, string unite)
             {
                 if (valeur != 0)
                     col.Item().Row(x =>
                     {
                         x.RelativeItem().Text(libelle);
-                        x.ConstantItem(80).AlignRight().Text($"{Quantite(valeur)} {unite}");
+                        x.ConstantItem(80).AlignRight().Text($"{Quantite(valeur)} {unite}".Trim());
                     });
             }
-            Ligne("Poids total", m.PoidsTotal, "kg");
-            Ligne("Nombre de colis", m.ColisTotal, "colis");
-            Ligne("Palettes", m.PalettesTotal, m.PalettesTotal > 1 ? "palettes" : "palette");
+            Ligne(m.L.PoidsTotal, m.PoidsTotal, m.L.Kg);
+            Ligne(m.L.NombreColis, m.ColisTotal, "");
+            Ligne(m.L.Palettes, m.PalettesTotal, "");
         });
         r.ConstantItem(14);
         r.RelativeItem().Border(0.6f).BorderColor(Couleurs.Trait).Padding(6).Column(col =>
         {
-            col.Item().Text("Observations à la réception").Bold();
+            col.Item().Text(m.L.Observations).Bold();
             col.Item().Height(18);
             col.Item().Row(x =>
             {
-                x.RelativeItem().Text("Reçu par :").FontColor(Couleurs.Discret);
-                x.RelativeItem().Text("Date :").FontColor(Couleurs.Discret);
-                x.RelativeItem().Text("Signature :").FontColor(Couleurs.Discret);
+                x.RelativeItem().Text($"{m.L.RecuPar} :").FontColor(Couleurs.Discret);
+                x.RelativeItem().Text($"{m.L.Date} :").FontColor(Couleurs.Discret);
+                x.RelativeItem().Text($"{m.L.Signature} :").FontColor(Couleurs.Discret);
             });
             col.Item().Height(16);
         });

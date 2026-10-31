@@ -18,7 +18,7 @@ public class EditionBlTests(ITestOutputHelper sortie)
         165139, "", new DateOnly(2023, 11, 10), "CLARINS", "12 AVENUE DE LA PORTE", "", "95000", "PONTOISE", "", ["", "Quai 3", ""],
         "F", "", "M", "TRANSPORTS X", "95000 PONTOISE", "0102030405", "MENTION", 34, 5, 1, 376,
         "CLARINS SIEGE", "4 RUE BERTEAUX", "", "75008", "PARIS", "FOUR12", "FR123", regime, "FR999", true, adresseClient, refClientDabord,
-        false, "1", "0102", "0103", "achats@clarins.test");
+        false, "1", "0102", "0103", "achats@clarins.test", "", false, false, false);
 
     private static ElementEditionBl Element(int numero = 1, string etat = "C", int type = 2, string norme = "", IReadOnlyList<string>? textes = null) => new(
         numero, etat, type, 12345, "A", 5000, "T", 12, "IMP1", "PO-77", new DateOnly(2023, 10, 2), 10, 500, "C", 0, 0, "Q", 28, "DUPONT",
@@ -32,7 +32,7 @@ public class EditionBlTests(ITestOutputHelper sortie)
     private static DonneesEditionBl Donnees(EnteteEditionBl? e = null, IReadOnlyList<ElementEditionBl>? elements = null,
         IReadOnlyList<LigneEditionBl>? lignes = null, IReadOnlyList<LotEditionBl>? lots = null,
         Dictionary<(string, string), IReadOnlyList<string>>? normes = null, bool partiel = false) =>
-        new(partiel, e ?? Entete(), elements ?? [Element()], lignes ?? [Ligne()], lots ?? [], ["Merci"], normes ?? []);
+        new(partiel, e ?? Entete(), elements ?? [Element()], lignes ?? [Ligne()], lots ?? [], ["Merci"], normes ?? [], LibellesBl.EnFrancais);
 
     // ---------- Règles ----------
     [Fact]
@@ -163,14 +163,73 @@ public class EditionBlTests(ITestOutputHelper sortie)
     [Fact]
     public void Lots_consecutifs_regroupes_lot_fournisseur_et_unite()
     {
-        var lots = new LotEditionBl[] { new(1, 1, "12345A", 1000, ""), new(1, 1, "12345A", 500, ""), new(1, 1, "12399B", 200, "F-77") };
-        Assert.Equal(["N° lot 12345A  1 500 ex.", "N° lot F-77  200 ex."], BonLivraison.Lots(lots, ""));
-        Assert.Equal(["N° lot 12345A  1 000 KG"], BonLivraison.Lots(lots[..1], "KG"));
+        var lots = new LotEditionBl[] { new(1, 1, "12345A", 1000, ""), new(1, 1, "12345A", 500, ""), new(1, 1, "12399B", 200, "F-77"),
+            new(1, 1, "12400C", 50, "F-77") };   // même lot fournisseur, lots NetPrint différents : deux lignes
+        Assert.Equal(["N° lot 12345A  1 500 ex.", "N° lot F-77  200 ex.", "N° lot F-77  50 ex."], BonLivraison.Lots(lots, "").Select(x => x.Texte));
+        Assert.Equal(["N° lot 12345A  1 000 KG"], BonLivraison.Lots(lots[..1], "KG").Select(x => x.Texte));
 
         var l = BonLivraison.Construire(Donnees(lots: lots)).Groupes[0].Lignes[0];
-        Assert.Equal(2, l.Details.Count);
+        Assert.Equal(3, l.Details.Count);
         l = BonLivraison.Construire(Donnees(Entete() with { ImprimerLots = false }, lots: lots)).Groupes[0].Lignes[0];
         Assert.Empty(l.Details);
+    }
+
+    [Fact]
+    public void Codes_barres_des_lots_selon_les_options_et_date_de_sortie_de_fabrication()
+    {
+        var lots = new LotEditionBl[] { new(1, 1, "12345A", 1000, "F-77", 25000, new DateOnly(2023, 10, 5)) };
+        // Société sans l'option : pas de code-barres
+        var l = BonLivraison.Construire(Donnees(Entete() with { CodeBarreClient = true }, lots: lots)).Groupes[0].Lignes[0];
+        Assert.Empty(l.CodesBarres!);
+        // Option société + client : code-barres du n° de lot NetPrint (pas du lot fournisseur) et quantité fabriquée
+        l = BonLivraison.Construire(Donnees(Entete() with { CodeBarreClient = true, CodesBarresSociete = true }, lots: lots)).Groupes[0].Lignes[0];
+        var cb = Assert.Single(l.CodesBarres!);
+        Assert.Equal(("12345A", "Qté totale fab. : 25 000"), (cb.Lot, cb.QuantiteFabriquee));
+        // Option société + article
+        l = BonLivraison.Construire(Donnees(Entete() with { CodesBarresSociete = true }, lignes: [Ligne() with { CodeBarreArticle = true }],
+            lots: lots)).Groupes[0].Lignes[0];
+        Assert.Single(l.CodesBarres!);
+        // Date de sortie de fabrication demandée par le client
+        l = BonLivraison.Construire(Donnees(Entete() with { DateFabSurLots = true }, lots: lots)).Groupes[0].Lignes[0];
+        Assert.Contains("N° lot F-77  1 000 ex. 05/10/2023", l.Details);
+
+        // Lot non encodable : pas de code-barres, pas d'erreur
+        l = BonLivraison.Construire(Donnees(Entete() with { CodeBarreClient = true, CodesBarresSociete = true },
+            lots: [new(1, 1, "12é45A", 10, "")])).Groupes[0].Lignes[0];
+        Assert.Empty(l.CodesBarres!);
+    }
+
+    [Fact]
+    public void Code_39_relu_par_un_lecteur()
+    {
+        var svg = NetPrint.Modules.Logistique.Impressions.CodeBarres.Code39Svg("66426A");
+        // Barres du SVG → ligne de pixels → lecture Code 39
+        var barres = System.Text.RegularExpressions.Regex.Matches(svg, "x=\"([0-9]+)\" y=\"0\" width=\"([0-9]+)\"")
+            .Select(x => (int.Parse(x.Groups[1].Value), int.Parse(x.Groups[2].Value))).ToList();
+        var largeur = int.Parse(System.Text.RegularExpressions.Regex.Match(svg, "viewBox=\"0 0 ([0-9]+)").Groups[1].Value);
+        var ligne = new ZXing.Common.BitArray(largeur + 20);
+        foreach (var (x, w) in barres) for (var i = 0; i < w; i++) ligne[x + i + 10] = true;
+        Assert.Equal("66426A", new ZXing.OneD.Code39Reader().decodeRow(0, ligne, null).Text);
+    }
+
+    [Fact]
+    public void Libelles_traduits_dans_la_langue_du_client()
+    {
+        var traductions = Enumerable.Repeat("", 50).ToArray();
+        (traductions[0], traductions[18], traductions[44], traductions[30]) = ("Delivery note", "Reference", "Delivery call", "Order");
+        var listes = new Dictionary<(int, string), string> { [(32, "T")] = "Total", [(28, "C")] = "Parcel(s)", [(31, "F")] = "EXW" };
+        var L = LibellesBl.Pour(traductions, listes);
+        Assert.Equal(("Delivery note", "Reference", "Quantité"), (L.Titre, L.Reference, L.Quantite));   // non traduit : français
+
+        var m = BonLivraison.Construire(Donnees(lignes: [Ligne(appel: "A1")]) with { Libelles = L });
+        var l = m.Groupes[0].Lignes[0];
+        Assert.StartsWith("Order 12345/A", m.Groupes[0].Titre);
+        Assert.Equal("Total", l.Code);
+        Assert.Equal("10 Parcel(s)", l.Colis[0]);
+        Assert.Contains(("Port", "EXW"), m.Transport);
+        Assert.Equal("Delivery call : A1 du 01/11/2023", l.Details[0]);
+        Assert.Equal("10/11/2023", L.DateLongue(new DateOnly(2023, 11, 10)));
+        Assert.Same(LibellesBl.EnFrancais, LibellesBl.Pour(Enumerable.Repeat("", 50).ToList(), new Dictionary<(int, string), string>()));
     }
 
     [Fact]
