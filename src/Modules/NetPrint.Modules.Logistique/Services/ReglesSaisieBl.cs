@@ -24,6 +24,11 @@ internal static class ReglesSaisieBl
         return null;
     }
 
+    // Ajout à un BL existant : la ligne va au destinataire (raison sociale, code postal, ville) et au client facturé du BL
+    public static bool VaAuBl(LigneProposee l, AdresseBl adresse, int generalFacture, int clientFacture) =>
+        l.Adresse.RaisonSociale == adresse.RaisonSociale && l.Adresse.CodePostal == adresse.CodePostal && l.Adresse.Ville == adresse.Ville
+        && (l.CompteGeneralFacture, l.CompteClientFacture) == (generalFacture, clientFacture);
+
     // Lignes cochées à l'ouverture : les lignes normales (pas à la demande) si elles vont toutes au même destinataire et au même
     // client facturé (même règle que la sélection), sinon aucune
     public static IReadOnlyList<int> LignesCocheesParDefaut(IReadOnlyList<LigneProposee> lignes)
@@ -108,15 +113,32 @@ internal static class ReglesSaisieBl
             .GroupBy(x => (x.Article, x.Indice, x.Depot, x.Lot, x.Emplacement))
             .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantite));
 
-    // Disponible affiché : stock − quantités prises sur la même position par les autres lignes du BL
+    // Disponible affiché (§ 6.3) : stock − quantités prises sur la même position par les autres lignes du BL + (modification)
+    // quantités enregistrées de l'élément, rendues au stock par la validation ; positions enregistrées sans stock restant ajoutées
     public static IReadOnlyList<PositionStock> Disponibles(SaisieBl s, LigneSaisieBl ligne, IReadOnlyList<PositionStock> positions)
     {
         var prises = Prises(s, ligne);
-        return positions.Select(p => p with
+        var enregistrees = s.Lignes.Where(l => l.GereEnStock && l.Article == ligne.Article && l.Indice == ligne.Indice)
+            .SelectMany(l => l.PrisesEnregistrees)
+            .GroupBy(p => (p.Depot, p.Lot, p.Emplacement)).ToDictionary(g => g.Key, g => g.Sum(p => p.Quantite));
+        var toutes = positions.ToList();
+        foreach (var ((depot, lot, emplacement), _) in enregistrees)
+            if (!toutes.Any(p => (p.Depot, p.Lot, p.Emplacement) == (depot, lot, emplacement)))
+                toutes.Add(new PositionStock(depot, lot, emplacement, null, null, 0));
+        return toutes.Select(p => p with
         {
-            Stock = p.Stock - prises.GetValueOrDefault((ligne.Article, ligne.Indice, p.Depot, p.Lot, p.Emplacement)),
+            Stock = p.Stock - prises.GetValueOrDefault((ligne.Article, ligne.Indice, p.Depot, p.Lot, p.Emplacement))
+                    + enregistrees.GetValueOrDefault((p.Depot, p.Lot, p.Emplacement)),
         }).ToList();
     }
+
+    // Variation de stock de tout le BL par position (§ 6.3) : quantité enregistrée (modification) − quantité saisie
+    public static Dictionary<(string TypeStock, string Article, string Indice, int Depot, string Lot, string Emplacement), int> Variations(SaisieBl s) =>
+        s.Lignes.Where(l => l.GereEnStock)
+            .SelectMany(l => l.Prises.Where(p => l.Quantite > 0 && p.Quantite > 0).Select(p => (l, p, Signe: -1))
+                .Concat(l.PrisesEnregistrees.Select(p => (l, p, Signe: 1))))
+            .GroupBy(x => (x.l.TypeStock, x.l.Article, x.l.Indice, x.p.Depot, x.p.Lot, x.p.Emplacement))
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Signe * x.p.Quantite));
 
     // Un seul lot disponible : la quantité y est prise d'office (dans la limite du disponible)
     public static void PrendreSiUnSeulLot(LigneSaisieBl l, IReadOnlyList<PositionStock> disponibles)

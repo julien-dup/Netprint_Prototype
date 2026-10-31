@@ -125,6 +125,32 @@ public class SaisieBlTests(ITestOutputHelper sortie)
     }
 
     [Fact]
+    public void Modification_disponible_et_variation_de_stock()
+    {
+        // Ligne enregistrée : 400 pris sur L1 ; l'utilisateur passe à 300 sur L1 et 200 sur L2
+        var l = Ligne(500);
+        l.PrisesEnregistrees = [new PriseLot { Depot = 1, Lot = "L1", Emplacement = "E1", Quantite = 400 }];
+        l.Prises = [new PriseLot { Depot = 1, Lot = "L1", Emplacement = "E1", Quantite = 300 }, new PriseLot { Depot = 1, Lot = "L2", Emplacement = "E1", Quantite = 200 }];
+        var s = Saisie(l);
+        // L1 n'a plus de stock (tout est sur le BL) : la position reste proposée, avec la quantité enregistrée
+        var dispo = ReglesSaisieBl.Disponibles(s, l, [new PositionStock(1, "L2", "E1", null, null, 500)]);
+        Assert.Equal([("L2", 500), ("L1", 400)], dispo.Select(x => (x.Lot, x.Stock)));
+        var v = ReglesSaisieBl.Variations(s);
+        Assert.Equal(100, v[("P1", "ART", "", 1, "L1", "E1")]);    // rendu au stock
+        Assert.Equal(-200, v[("P1", "ART", "", 1, "L2", "E1")]);   // à contrôler
+        l.Quantite = 0;                                            // ligne retirée : tout est rendu
+        Assert.Equal(400, Assert.Single(ReglesSaisieBl.Variations(s)).Value);
+    }
+
+    [Fact]
+    public void Ajout_a_un_BL_meme_destinataire_et_meme_client_facture()
+    {
+        Assert.True(ReglesSaisieBl.VaAuBl(Proposee(1), Clarins with { Numero = 9 }, 411100, 376));   // le n° d'adresse ne compte pas
+        Assert.False(ReglesSaisieBl.VaAuBl(Proposee(1), Clarins with { Ville = "PARIS" }, 411100, 376));
+        Assert.False(ReglesSaisieBl.VaAuBl(Proposee(1), Clarins, 411100, 20));
+    }
+
+    [Fact]
     public void Textes_de_la_ligne_de_commande_par_trois()
     {
         var textes = ReglesSaisieBl.LignesDeTexte(["a", "b", "c", "d"]).ToList();
@@ -186,7 +212,7 @@ public class SaisieBlTests(ITestOutputHelper sortie)
         var numero = 0;
         try
         {
-            numero = await service.CreerAsync(s);
+            numero = await service.ValiderAsync(s);
             sortie.WriteLine($"BL {numero}");
             Assert.Equal(1, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP009 WHERE RSOC = 8 AND HNOBL = ?", numero));
             Assert.Equal(1, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP010 WHERE RSOC = 8 AND HNOBL = ? AND HNODOS = 69320", numero));
@@ -202,12 +228,43 @@ public class SaisieBlTests(ITestOutputHelper sortie)
             var lc = concurrent.Lignes.Single(l => !l.Texte);
             lc.Quantite = 1000;
             lc.Prises = [new PriseLot { Depot = positions[0].Depot, Lot = positions[0].Lot, Emplacement = positions[0].Emplacement, Quantite = 1000 }];
-            var depassement = await Assert.ThrowsAsync<DepassementResteException>(() => service.CreerAsync(concurrent));
+            var depassement = await Assert.ThrowsAsync<DepassementResteException>(() => service.ValiderAsync(concurrent));
             sortie.WriteLine(depassement.Message);
             Assert.Equal(1, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP010 WHERE RSOC = 8 AND HNODOS = 69320 AND HCLEF = '9' AND HNOBL >= ?", numero));
             var apres = await LigneCommandeAsync(cnx);
             Assert.Equal(avant.Livre + 1500, apres.Livre);
             Assert.Equal(apres.Commande - apres.Livre, apres.Reste);
+            const string Emplacement =
+                "SELECT PEQTE FROM NP11F.AP00F WHERE RSOC = 8 AND PETSTO = 'P1' AND PEREF = 'PQA002' AND PELOT = ? AND PEEMP = ?";
+
+            // Modification : 1 500 → 1 800 ; le disponible de la position compte la quantité déjà livrée par l'élément
+            var m = await service.OuvrirElementAsync(numero, 1);
+            Assert.True(m.Modification);
+            var lm = m.Lignes.Single(l => !l.Texte);
+            Assert.Equal((1500, avant.Reste), (lm.Quantite, lm.Reste));
+            Assert.Equal(positions[0].Stock, (await service.PositionsAsync(m, lm)).Single(x => x.Lot == positions[0].Lot && x.Emplacement == positions[0].Emplacement).Stock);
+            lm.Quantite = 1800;
+            lm.Prises[0].Quantite = 1800;
+            Assert.Equal(numero, await service.ValiderAsync(m));
+            Assert.Equal(avant.Livre + 1800, (await LigneCommandeAsync(cnx)).Livre);
+            Assert.Equal(1800, await CompterAsync(cnx, "SELECT SUM(MVQTUS) FROM NP11F.A700F WHERE RSOC = 8 AND MVBL = ? AND MVCMVT = 'EX'", numero));
+            Assert.Equal(positions[0].Stock - 1800, await CompterAsync(cnx, Emplacement, positions[0].Lot, positions[0].Emplacement));
+
+            // Ajout d'un dossier au BL : le reste de la ligne (200) en second élément ; la ligne de commande est soldée
+            var ajout = await service.PreparerAsync(69320, "9", numero);
+            Assert.Contains(ajout.Lignes, l => l.NumeroLigne == 4 && l.Reste == avant.Reste - 1800);
+            var a = await service.OuvrirAsync(69320, "9", [4], numero);
+            Assert.True(a.Ajout);
+            Assert.Equal(s.DateExpedition, a.DateExpedition);   // en-tête du BL repris
+            Assert.Equal(avant.Reste - 1800, a.Lignes.Single(l => !l.Texte).Reparti);   // lot unique pris d'office
+            Assert.Equal(numero, await service.ValiderAsync(a));
+            Assert.Equal(2, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP010 WHERE RSOC = 8 AND HNOBL = ?", numero));
+            var complete = await LigneCommandeAsync(cnx);
+            Assert.Equal((complete.Commande, "O"), (complete.Livre, complete.Solde));
+
+            // Suppression du second élément : le BL reste, ses totaux sont recalculés
+            Assert.False(await service.SupprimerAsync(numero, 2));
+            Assert.Equal(avant.Livre + 1800, (await LigneCommandeAsync(cnx)).Livre);
 
             // Suppression du BL (dernier élément) : tout ce que le BL avait mis à jour est rétabli
             Assert.True(await service.SupprimerAsync(numero, 1));
@@ -216,9 +273,7 @@ public class SaisieBlTests(ITestOutputHelper sortie)
             Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.A700F WHERE RSOC = 8 AND MVBL = ?", numero));
             Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.PRTLCK WHERE PLPROF = 'NP11'"));
             Assert.Equal(avant, await LigneCommandeAsync(cnx) with { Solde = avant.Solde });
-            Assert.Equal(positions[0].Stock, await CompterAsync(cnx,
-                "SELECT PEQTE FROM NP11F.AP00F WHERE RSOC = 8 AND PETSTO = 'P1' AND PEREF = 'PQA002' AND PELOT = ? AND PEEMP = ?",
-                positions[0].Lot, positions[0].Emplacement));
+            Assert.Equal(positions[0].Stock, await CompterAsync(cnx, Emplacement, positions[0].Lot, positions[0].Emplacement));
             await Executer(cnx, "DELETE FROM NP11F.EVE200 WHERE RSOC = 8 AND AMBL = ?", numero);   // traces d'audit de l'essai
             numero = 0;
         }

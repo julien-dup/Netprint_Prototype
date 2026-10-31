@@ -1,6 +1,8 @@
 @page "/logistique/bl/nouveau"
+@page "/logistique/bl/{NumeroBl:int}/element/{Element:int}/modifier"
 @* =====================================================================
-   Création d'un BL produit fini / négoce (EXP010, cahier des charges lot 1 du 15/10) en trois temps :
+   Saisie d'un BL produit fini / négoce (EXP010, cahier des charges lot 1 du 15/10) : création, ajout d'un dossier à un BL
+   existant (?bl=n°) ou modification d'un élément. Création et ajout en trois temps :
    1. dossier et lignes de commande à livrer (lignes à la demande en rouge, lignes d'OPR signalées) ;
    2. saisie : expédition, destinataire, facturation, lignes (quantité, colisage, soldé), répartition par lot / emplacement,
       texte de pied ; « Contrôler » recalcule colis, poids et vérifie le stock de tout le BL ;
@@ -12,11 +14,18 @@
 @inject Dialogues Dialogues
 @inject Notifications Notifications
 
-<PageTitle>Nouveau BL · NetPrint</PageTitle>
+<PageTitle>@TitrePage · NetPrint</PageTitle>
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
 
 <fieldset class="barre-outils">
-    <button @onclick='() => Navigation.NavigateTo("logistique/bl")' title="Retour à la liste des BL">← Liste des BL</button>
+    @if (NumeroBl > 0 || Ajout > 0)
+    {
+        <button @onclick="RetourFiche" title="Retour à la fiche du BL">← BL @(NumeroBl > 0 ? NumeroBl : Ajout)</button>
+    }
+    else
+    {
+        <button @onclick='() => Navigation.NavigateTo("logistique/bl")' title="Retour à la liste des BL">← Liste des BL</button>
+    }
     <span class="espace"></span>
     @if (saisie is not null && numeroCree is null)
     {
@@ -30,20 +39,28 @@
     @if (numeroCree is { } numero)
     {
         <section class="carte fin-bl">
-            <h2>BL n° @numero créé</h2>
+            <h2>BL n° @numero @(NumeroBl > 0 ? "modifié" : Ajout > 0 ? "complété" : "créé")</h2>
             <p>Dossier @dossier/@cle · @(preparation?.NomClient)</p>
             <div class="ligne-champs">
                 <button class="bouton-principal" @onclick='() => Navigation.NavigateTo($"logistique/bl/{numero}")'>🔎 Ouvrir la fiche du BL</button>
                 <a class="bouton-ancre" href="@($"api/logistique/bl/{numero}/pdf")" target="_blank" rel="noopener" @onclick="() => MarquerEditeAsync(numero)"
                    title="BL en PDF à imprimer ; le BL est marqué édité">🖨 Imprimer</a>
-                <button @onclick="NouveauSurLeDossierAsync">➕ Nouveau BL sur ce dossier</button>
-                <button @onclick="Recommencer">Nouveau BL</button>
+                <button @onclick="() => AjouterAuBl(numero)">➕ Ajouter un autre dossier à ce BL</button>
+                @if (NumeroBl == 0 && Ajout == 0)
+                {
+                    <button @onclick="NouveauSurLeDossierAsync">➕ Nouveau BL sur ce dossier</button>
+                    <button @onclick="Recommencer">Nouveau BL</button>
+                }
             </div>
         </section>
     }
     else if (saisie is null)
     {
         @* ---------- 1. Dossier et lignes ---------- *@
+        @if (Ajout > 0)
+        {
+            <p class="aide">➕ Ajout d'un dossier au BL <b>@Ajout</b> : seules les lignes qui vont au même destinataire et au même client facturé sont proposées.</p>
+        }
         <form class="panneau-criteres" @onsubmit="PreparerAsync">
             <div class="champ">
                 <span>Dossier</span>
@@ -100,7 +117,7 @@
         @* ---------- 2. Saisie ---------- *@
         <section class="carte entete-saisie-bl">
             <div class="titre-fiche">
-                <span class="type-fiche">NOUVEAU BL</span>
+                <span class="type-fiche">@TitreSaisie(s)</span>
                 <b>Dossier @s.Dossier/@s.Cle</b>
                 <span class="discret">@s.CompteGeneral @s.CompteClient · @s.NomClient@(s.Enseigne == "" ? "" : $" · enseigne {s.Enseigne}")</span>
             </div>
@@ -280,6 +297,45 @@
 </div>
 
 @code {
+    [Parameter] public int NumeroBl { get; set; }
+    [Parameter] public int Element { get; set; }
+    [SupplyParameterFromQuery(Name = "bl")] public int Ajout { get; set; }
+
+    private string TitrePage => NumeroBl > 0 ? $"Modifier le BL {NumeroBl}" : Ajout > 0 ? $"Ajouter au BL {Ajout}" : "Nouveau BL";
+
+    private static string TitreSaisie(SaisieBl s) =>
+        s.Modification ? $"BL {s.NumeroBl} · ÉLÉMENT {s.Element} · MODIFICATION" : s.Ajout ? $"AJOUT AU BL {s.NumeroBl}" : "NOUVEAU BL";
+
+    // Changement d'adresse (modification, ajout, nouveau) : saisie remise à zéro ; modification : élément chargé. Un nouveau
+    // passage des paramètres sans changement d'adresse ne touche pas à la saisie en cours.
+    private (int, int, int)? adresse;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (adresse == (NumeroBl, Element, Ajout)) return;
+        adresse = (NumeroBl, Element, Ajout);
+        Reinitialiser();
+        if (NumeroBl > 0 && Element > 0)
+            await Executer(async () =>
+            {
+                saisie = await Saisies.OuvrirElementAsync(NumeroBl, Element);
+                textePied = string.Join(Environment.NewLine, saisie.TextePied);
+            });
+    }
+
+    private void RetourFiche() => Navigation.NavigateTo($"logistique/bl/{(NumeroBl > 0 ? NumeroBl : Ajout)}");
+    private void AjouterAuBl(int numero)
+    {
+        if (Ajout == numero) Reinitialiser();   // déjà sur cette adresse : nouvelle saisie
+        else Navigation.NavigateTo($"logistique/bl/nouveau?bl={numero}");
+    }
+
+    private void Reinitialiser()
+    {
+        (numeroCree, saisie, preparation, controle, ligneLots, dossier, cle) = (null, null, null, null, null, null, "");
+        choisies.Clear();
+    }
+
     private int? dossier;
     private string cle = "";
     private PreparationBl? preparation;
@@ -306,7 +362,7 @@
         if (dossier is not > 0) { Notifications.Erreur("Saisissez un n° de dossier."); return; }
         await Executer(async () =>
         {
-            preparation = await Saisies.PreparerAsync(dossier.Value, cle);
+            preparation = await Saisies.PreparerAsync(dossier.Value, cle, Ajout);
             choisies.Clear();
             choisies.UnionWith(NetPrint.Modules.Logistique.Services.ReglesSaisieBl.LignesCocheesParDefaut(preparation.Lignes));
         });
@@ -326,8 +382,8 @@
                 "Lignes d'ordre de préparation", "Livrer")) return;
         await Executer(async () =>
         {
-            saisie = await Saisies.OuvrirAsync(p.Dossier, p.Cle, [.. choisies.Order()]);
-            textePied = "";
+            saisie = await Saisies.OuvrirAsync(p.Dossier, p.Cle, [.. choisies.Order()], Ajout);
+            textePied = string.Join(Environment.NewLine, saisie.TextePied);
             controle = null;
             ligneLots = null;
         });
@@ -396,14 +452,14 @@
                 && !await Dialogues.ConfirmerAsync(string.Join("\n", controle.Avertissements), "Avertissements", "Valider quand même")) return;
             try
             {
-                numeroCree = await Saisies.CreerAsync(saisie!);
+                numeroCree = await Saisies.ValiderAsync(saisie!);
             }
             catch (DepassementResteException ex)
             {
                 if (!await Dialogues.ConfirmerAsync(ex.Message, "Reste à livrer modifié", "Valider quand même")) return;
-                numeroCree = await Saisies.CreerAsync(saisie!, depassementAccepte: true);
+                numeroCree = await Saisies.ValiderAsync(saisie!, depassementAccepte: true);
             }
-            Notifications.Succes($"BL n° {numeroCree} créé.");
+            Notifications.Succes($"BL n° {numeroCree} enregistré.");
         });
     }
 
@@ -411,6 +467,7 @@
     {
         if (await Dialogues.ConfirmerAsync("Abandonner la saisie de ce BL ?", "Abandon", "Abandonner"))
         {
+            if (NumeroBl > 0) { RetourFiche(); return; }
             saisie = null;
             controle = null;
             ligneLots = null;

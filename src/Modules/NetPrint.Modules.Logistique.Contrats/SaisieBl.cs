@@ -3,15 +3,19 @@ namespace NetPrint.Modules.Logistique.Contrats;
 // =====================================================================
 // Saisie d'un BL produit fini / négoce (cahier des charges lot 1 du 15/10, D:\docs\Netprint\BL-bons-de-livraison) :
 // choix du dossier et des lignes de commande, saisie (en-tête, lignes, répartition par lot / emplacement), validation en
-// une transaction. Étape 1 : création d'un BL sur un dossier, à partir des lignes de commande.
+// une transaction. Création d'un BL, ajout d'un dossier à un BL existant, modification et suppression d'un élément.
 // =====================================================================
 public interface ISaisieBl
 {
-    // Contrôles du dossier (C1 à C6) et lignes de commande restant à livrer
-    Task<PreparationBl> PreparerAsync(int dossier, string cle, CancellationToken ct = default);
+    // Contrôles du dossier (C1 à C6) et lignes de commande restant à livrer ; ajout à un BL existant (numeroBl) : contrôles C7
+    // et seulement les lignes qui vont au destinataire et au client facturé du BL
+    Task<PreparationBl> PreparerAsync(int dossier, string cle, int numeroBl = 0, CancellationToken ct = default);
 
-    // Saisie initialisée à partir des lignes de commande choisies (même adresse, même client facturé)
-    Task<SaisieBl> OuvrirAsync(int dossier, string cle, IReadOnlyList<int> lignes, CancellationToken ct = default);
+    // Saisie initialisée à partir des lignes de commande choisies (même adresse, même client facturé) ; en ajout, en-tête du BL
+    Task<SaisieBl> OuvrirAsync(int dossier, string cle, IReadOnlyList<int> lignes, int numeroBl = 0, CancellationToken ct = default);
+
+    // Saisie d'un élément enregistré, pour le modifier (cahier des charges § 9)
+    Task<SaisieBl> OuvrirElementAsync(int numeroBl, int element, CancellationToken ct = default);
 
     // Lots / emplacements disponibles pour un article, dans son type de stock (dépôt principal)
     Task<IReadOnlyList<PositionStock>> PositionsAsync(SaisieBl saisie, LigneSaisieBl ligne, CancellationToken ct = default);
@@ -19,9 +23,10 @@ public interface ISaisieBl
     // Contrôles et calculs sans écriture : erreurs bloquantes, avertissements (colisage, poids et totaux recalculés)
     Task<ControleBl> ControlerAsync(SaisieBl saisie, CancellationToken ct = default);
 
-    // Validation : n° de BL attribué. Si le reste à livrer d'une ligne a diminué depuis l'ouverture (autre BL validé) et que la
-    // quantité le dépasse : DepassementResteException, à confirmer puis à relancer avec depassementAccepte.
-    Task<int> CreerAsync(SaisieBl saisie, bool depassementAccepte = false, CancellationToken ct = default);
+    // Validation (création, ajout de dossier ou modification selon NumeroBl / Element) : n° de BL. Si le reste à livrer d'une
+    // ligne a diminué depuis l'ouverture (autre BL validé) et que la quantité le dépasse : DepassementResteException, à confirmer
+    // puis à relancer avec depassementAccepte.
+    Task<int> ValiderAsync(SaisieBl saisie, bool depassementAccepte = false, CancellationToken ct = default);
 
     // Suppression d'un élément (le BL disparaît avec son dernier élément) : true si le BL entier a été supprimé
     Task<bool> SupprimerAsync(int numeroBl, int element, CancellationToken ct = default);
@@ -51,6 +56,8 @@ public sealed record PositionStock(int Depot, string Lot, string Emplacement, Da
 
 public sealed class PriseLot
 {
+    public PriseLot Copie() => new() { Depot = Depot, Lot = Lot, Emplacement = Emplacement, Quantite = Quantite };
+
     public int Depot { get; set; }
     public string Lot { get; set; } = "";
     public string Emplacement { get; set; } = "";
@@ -59,6 +66,7 @@ public sealed class PriseLot
 
 public sealed class LigneSaisieBl
 {
+    public int NumeroLigneBl { get; set; }              // n° de ligne EXP015 enregistré (modification), sinon 0
     public int NumeroLigneCommande { get; set; }
     public string CodeLigne { get; set; } = "";
     public string Article { get; set; } = "";
@@ -83,6 +91,7 @@ public sealed class LigneSaisieBl
     public bool QuantiteEnUc { get; set; }
     public bool Fractionnable { get; set; } = true;
     public List<PriseLot> Prises { get; set; } = [];
+    public List<PriseLot> PrisesEnregistrees { get; set; } = [];   // modification : lots de la ligne avant la saisie
 
     public int Reparti => Prises.Sum(p => p.Quantite);
     public decimal Poids => EmballagePar > 0 ? Colis * PoidsUc + PoidsUc * Mecompte / EmballagePar : 0;
@@ -90,6 +99,10 @@ public sealed class LigneSaisieBl
 
 public sealed class SaisieBl
 {
+    public int NumeroBl { get; set; }       // 0 : nouveau BL
+    public int Element { get; set; }        // 0 : nouvel élément (création ou ajout d'un dossier)
+    public bool Modification => NumeroBl > 0 && Element > 0;
+    public bool Ajout => NumeroBl > 0 && Element == 0;
     public int Dossier { get; set; }
     public string Cle { get; set; } = "";
     public string TypeDossier { get; set; } = "";

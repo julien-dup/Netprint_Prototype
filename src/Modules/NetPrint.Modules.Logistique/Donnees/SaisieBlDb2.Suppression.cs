@@ -30,6 +30,19 @@ internal sealed partial class SaisieBlDb2
             rd.Texte(4) == "O" || rd.Entier(5) != 0, rd.Texte(6) == "O", rd.Entier(7), rd.Entier(8) > 0, types);
     }
 
+    // Élément relu dans la transaction de modification (facturé entre-temps ?)
+    private async Task<ElementEnregistre?> ElementDansTransactionAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, int numeroBl,
+        int element, CancellationToken ct)
+    {
+        await using var rd = await Lire(cnx, tx, """
+            SELECT HETABL, HTYPBL, HNODOS, HCLEF, HBLFAC, HNOFAC FROM {b}.EXP010 WHERE RSOC = ? AND HNOBL = ? AND HNUM = ?
+            WITH RS USE AND KEEP EXCLUSIVE LOCKS
+            """, ct, societe, numeroBl, element);
+        if (!await rd.ReadAsync(ct)) return null;
+        return new ElementEnregistre(numeroBl, element, rd.Texte(0), rd.Entier(1), rd.Entier(2), rd.Texte(3),
+            rd.Texte(4) == "O" || rd.Entier(5) != 0, false, 0, false, []);
+    }
+
     // Suppression d'un élément de BL (cahier des charges § 10) : verrous BL et dossier (PRTLCK), puis une transaction qui
     // annule tout ce que l'élément avait mis à jour (commande, OPR, dossier, stock, palettes) et supprime ses lignes ; le BL
     // entier disparaît avec son dernier élément (pré-BL remis « non basculé »), sinon ses totaux sont recalculés et son texte

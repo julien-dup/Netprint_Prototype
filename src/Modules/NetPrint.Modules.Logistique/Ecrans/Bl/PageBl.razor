@@ -18,6 +18,10 @@
     <button @onclick='() => Navigation.NavigateTo("logistique/bl")' title="Retour à la liste des BL">← Liste des BL</button>
     @if (fiche is not null)
     {
+        @if (fiche.Elements.All(x => x.Etat == "C" && x.NumeroFacture == 0))
+        {
+            <button title="Ajouter un autre dossier du même client à ce BL" @onclick="AjouterDossier">➕ Ajouter un dossier</button>
+        }
         @* PDF dans un onglet ; « Imprimer » marque le BL édité (EXP035P2), l'aperçu n'écrit rien *@
         <a class="bouton-ancre" href="@($"api/logistique/bl/{Numero}/pdf?apercu=1")" target="_blank" rel="noopener"
            title="Aperçu du BL en PDF, sans le marquer édité">👁 Aperçu</a>
@@ -97,6 +101,10 @@
                         @if (e.ClientFacture != "") {<span class="discret"> · facturé à @e.ClientFacture</span>}
                         @if (e.NomRepresentant != "") {<span class="discret"> · @e.NomRepresentant</span>}
                     </span>
+                    @if (e.NumeroFacture == 0 && e.Etat == "C" && e.Dossier > 0)
+                    {
+                        <button type="button" title="Modifier cet élément (quantités, lots, en-tête)" @onclick="() => Modifier(e)">✏ Modifier</button>
+                    }
                     @if (e.NumeroFacture == 0 && e.Etat is "C" or "D")
                     {
                         <button type="button" class="bouton-danger" title="Supprimer cet élément et annuler la livraison (stock, commande)"
@@ -166,6 +174,9 @@
         fiche = lue;
         chargement = false;
     }
+
+    private void Modifier(DetailElementBl e) => Navigation.NavigateTo($"logistique/bl/{Numero}/element/{e.Element}/modifier");
+    private void AjouterDossier() => Navigation.NavigateTo($"logistique/bl/nouveau?bl={Numero}");
 
     // Suppression d'un élément : confirmation (Échap / Annuler = non), puis liste des BL si le BL a disparu, sinon fiche relue
     private async Task SupprimerAsync(DetailElementBl e)
