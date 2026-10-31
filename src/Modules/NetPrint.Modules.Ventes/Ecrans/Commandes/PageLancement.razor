@@ -9,6 +9,7 @@
    ===================================================================== *@
 @using NetPrint.Modules.Production.Contrats
 @using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@using NetPrint.Noyau.Evenements
 @inject ILancementCommande Lancement
 @inject NavigationManager Navigation
 @inject Notifications Notifications
@@ -120,6 +121,7 @@
                                 }
                             </td>
                             <td class="actions-source">
+                                <button class="bouton-ligne" @onclick="() => evenements = (a, s)" title="Événements et commentaires de l'article dans ce dossier (option EC)">💬</button>
                                 @if (lancement.PeutModifier)
                                 {
                                     @if (s.Nature == NatureSource.OfAOuvrir && s.LieALaCommande)
@@ -165,6 +167,22 @@
 {
     <FenetreLancement Commande="CleCourante" Situation="lancement" Articles="fl.Articles" Of="fl.Of" OnFermer="FermerAsync" />
 }
+@if (evenements is { } ev)
+{
+    <div class="voile" @onclick="() => evenements = null">
+        <div class="fenetre fenetre-evenements" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="titre-fenetre">💬 Événements · @ev.Source.Of.Libelle · @ev.Article.Article@(ev.Article.Indice != "" ? $" {ev.Article.Indice}" : "")</div>
+            <div class="corps-fenetre">
+                <Evenements Objet="ObjetEvenements.DeLancement(ev.Source.Of.Numero, ev.Source.Of.Cle, ev.Article.Article, ev.Article.Indice, CleCourante.Numero, CleCourante.Cle)"
+                             Modifiable="lancement?.PeutModifier == true" />
+            </div>
+            <div class="pied-fenetre">
+                <span class="espace"></span>
+                <button type="button" @onclick="() => evenements = null">Fermer</button>
+            </div>
+        </div>
+    </div>
+}
 @if (affectation is { } af)
 {
     <FenetreAffectation Commande="CleCourante" Article="af.Article" Source="af.Source" OnFermer="FermerAsync" />
@@ -183,6 +201,7 @@
     private readonly HashSet<ReferenceArticle> coches = [];
     private (IReadOnlyList<ReferenceArticle> Articles, NumeroOf? Of)? fenetre;
     private (ArticleALancer Article, SourceArticle Source)? affectation;
+    private (ArticleALancer Article, SourceArticle Source)? evenements;
 
     protected override Task OnParametersSetAsync() => ChargerAsync();
 

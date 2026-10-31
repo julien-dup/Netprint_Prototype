@@ -1,0 +1,342 @@
+@* =====================================================================
+   Événements et commentaires d'un objet (EVE300) : liste, création, modification, suppression.
+   Utilisé dans la fiche commande (onglet) et dans l'écran de lancement (fenêtre). Les événements automatiques
+   (créés par programme) ne se suppriment pas ; seul leur rappel se modifie.
+   ===================================================================== *@
+@using NetPrint.Noyau.Evenements
+@using NetPrint.Socle
+@inject IEvenements Service
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+
+<div class="evenements">
+    <div class="barre-evenements">
+        <span class="discret">@(liste is null ? "" : liste.Count == 0 ? "Aucun événement." : $"{liste.Count} événement{(liste.Count > 1 ? "s" : "")}")</span>
+        @if (tronque)
+        {
+            <span class="avertissement-saisie">Liste limitée aux @LimitesRecherche.Maximum.ToString("N0") plus récents.</span>
+        }
+        <span class="espace"></span>
+        @if (Modifiable)
+        {
+            <button type="button" class="bouton-principal" @onclick="NouveauAsync" disabled="@enCours">＋ Nouvel événement</button>
+        }
+    </div>
+    @if (erreurLecture is not null)
+    {
+        <p class="erreur-saisie">@erreurLecture <button type="button" class="bouton-lien" @onclick="ChargerAsync">Réessayer</button></p>
+    }
+    else if (liste is null)
+    {
+        <p class="chargement">Chargement…</p>
+    }
+    else
+    {
+        @foreach (var e in liste)
+        {
+            <article class="carte-evenement @(e.Automatique ? "automatique" : "")">
+                <header>
+                    <span class="badge">@(e.LibelleType != "" ? e.LibelleType : e.Type)</span>
+                    @if (e.Automatique) {<span class="badge badge-discret" title="Créé par programme">auto</span>}
+                    <span class="discret">@e.Date?.ToString("dd/MM/yyyy") · @e.Profil</span>
+                    @if (e.DatePrevue is { } dp)
+                    {
+                        <span title="Date prévue">📅 @dp.ToString("dd/MM/yyyy")@(e.HeurePrevue is { } hp ? $" {hp:HH\\:mm}" : "")</span>
+                    }
+                    @if (e.DateRappel is { } dr)
+                    {
+                        <span title="Rappel">⏰ @dr.ToString("dd/MM/yyyy")@(e.HeureRappel is { } hr ? $" {hr:HH\\:mm}" : "")</span>
+                    }
+                    @if (e.Agenda) {<span class="discret" title="Affiché dans l'agenda">agenda</span>}
+                    @if (e.Navigateur) {<span class="discret" title="Compté dans les commentaires du dossier (navigateur)">navigateur</span>}
+                    <span class="espace"></span>
+                    @if (Modifiable)
+                    {
+                        <button type="button" class="bouton-ligne" @onclick="() => OuvrirAsync(e)" disabled="@enCours"
+                                title="@(e.Automatique ? "Événement créé par programme : seul le rappel se modifie" : "Modifier l'événement")">✎ Modifier</button>
+                        @if (!e.Automatique)
+                        {
+                            <button type="button" class="bouton-ligne" @onclick="() => SupprimerAsync(e)" disabled="@enCours" title="Supprimer l'événement">🗑</button>
+                        }
+                    }
+                </header>
+                <div class="texte-evenement">@string.Join("\n", e.Textes.Where(t => t != ""))</div>
+            </article>
+        }
+    }
+</div>
+
+@if (s is not null)
+{
+    var protege = s.Automatique;
+    <div class="voile voile-evenement" @onclick="Fermer">
+        <form class="fenetre fenetre-evenement" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onsubmit="EnregistrerAsync">
+            <div class="titre-fenetre">@(s.Numero == 0 ? "Nouvel événement" : protege ? "Rappel de l'événement" : "Modifier l'événement") · @Objet.Libelle</div>
+            <div class="corps-fenetre">
+                @if (erreurs.Count > 0)
+                {
+                    <p class="erreur-saisie">@erreurs.Count zone@(erreurs.Count > 1 ? "s" : "") à corriger.</p>
+                }
+                @if (protege)
+                {
+                    <p class="avertissement-saisie">Événement créé par programme : seul le rappel se modifie.</p>
+                }
+                <div class="ligne-champs">
+                    <label class="champ @Classe("type")"><span>Type</span>
+                        @if (s.Numero == 0)
+                        {
+                            <select value="@s.Type" @onchange="ChangerTypeAsync">
+                                <option value="">— choisir —</option>
+                                @foreach (var t in types)
+                                {
+                                    <option value="@t.Code">@t.Code · @t.Libelle</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <input value="@($"{s.Type} · {s.LibelleType}")" disabled />
+                        }
+                    </label>
+                    <label class="champ"><span>Créé par</span><input value="@s.Createur" disabled class="code-profil" /></label>
+                </div>
+                @Message("type")
+                <div class="ligne-champs">
+                    <label class="champ @Classe("datePrevue")"><span>Prévu le</span><input type="date" @bind="s.DatePrevue" disabled="@protege" /></label>
+                    <label class="champ @Classe("datePrevue")"><span>à</span><input type="time" @bind="s.HeurePrevue" disabled="@protege" /></label>
+                </div>
+                @Message("datePrevue")
+                <label class="champ"><span>Texte</span>
+                    @for (var i = 0; i < 4; i++)
+                    {
+                        var n = i;
+                        <input maxlength="@ReglesEvenements.TexteMaximum" value="@s.Textes[n]" @onchange="ev => s.Textes[n] = Valeur(ev)" disabled="@protege" />
+                    }
+                </label>
+                @for (var i = 1; i <= 4; i++) { @Message($"texte{i}") }
+                <div class="ligne-champs">
+                    <label class="champ-ligne"><input type="checkbox" @bind="s.Rappel" /> Rappel</label>
+                    @if (s.Rappel)
+                    {
+                        <label class="champ @Classe("dateRappel")"><span>Date</span><input type="date" @bind="s.DateRappel" /></label>
+                        <label class="champ @Classe("heureRappel")"><span>Heure</span><input type="time" @bind="s.HeureRappel" /></label>
+                    }
+                </div>
+                @Message("dateRappel")
+                @Message("heureRappel")
+                @if (s.Rappel && s.DateRappel is null)
+                {
+                    <p class="aide">Sans date de rappel, elle est calculée d'après la date prévue et le type d'événement.</p>
+                }
+                <div class="ligne-champs">
+                    <label class="champ-ligne"><input type="checkbox" @bind="s.Agenda" disabled="@protege" /> Afficher dans l'agenda</label>
+                    <label class="champ-ligne"><input type="checkbox" @bind="s.Navigateur" disabled="@protege" /> Afficher dans le navigateur</label>
+                </div>
+                <div class="champ"><span>Profils prévenus</span>
+                    @for (var i = 0; i < s.Profils.Count; i++)
+                    {
+                        var n = i;
+                        <div class="ligne-profil @Classe($"profil{n}")">
+                            <input class="code-profil" maxlength="10" value="@s.Profils[n]" @onchange="ev => s.Profils[n] = Valeur(ev).ToUpperInvariant()" disabled="@protege" />
+                            @if (!protege)
+                            {
+                                <BoutonRecherche Liste="ListeChoix.Profil" Titre="Rechercher un profil" OnChoix="l => s.Profils[n] = l.Code" />
+                                <button type="button" class="bouton-icone" title="Retirer ce profil" @onclick="() => RetirerProfil(n)">✕</button>
+                            }
+                        </div>
+                        @Message($"profil{n}")
+                    }
+                    @if (!protege)
+                    {
+                        <button type="button" class="bouton-lien" @onclick='() => s.Profils.Add("")'>＋ Ajouter un profil</button>
+                    }
+                </div>
+            </div>
+            <div class="pied-fenetre">
+                <span class="espace"></span>
+                <button type="button" @onclick="Fermer">Annuler</button>
+                <button type="submit" class="bouton-principal" disabled="@enCours">Enregistrer</button>
+            </div>
+        </form>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ObjetEvenements Objet { get; set; } = default!;
+    [Parameter] public bool Modifiable { get; set; } = true;
+    // Nombre d'événements, après chaque chargement (titre d'onglet)
+    [Parameter] public EventCallback<int> OnNombre { get; set; }
+
+    private IReadOnlyList<Evenement>? liste;
+    private bool tronque;
+    private string? erreurLecture;
+    private IReadOnlyList<TypeEvenement> types = [];
+    private SaisieEvenement? s;
+    private List<ErreurEvenement> erreurs = [];
+    private bool enCours;
+    private ObjetEvenements? charge;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Objet == charge) return;
+        charge = Objet;
+        s = null;
+        await ChargerAsync();
+    }
+
+    private async Task ChargerAsync()
+    {
+        var objet = Objet;
+        erreurLecture = null;
+        liste = null;
+        try
+        {
+            var lue = await Service.ListerAsync(objet);
+            if (objet != Objet) return;
+            (liste, tronque) = (lue.Lignes, lue.Tronque);
+            await OnNombre.InvokeAsync(lue.Lignes.Count);
+        }
+        catch (Exception ex)
+        {
+            erreurLecture = $"Lecture des événements impossible : {ex.Message}";
+        }
+    }
+
+    private async Task NouveauAsync()
+    {
+        await ExecuterAsync(async () =>
+        {
+            types = await Service.TypesAsync(Objet);
+            if (types.Count == 0)
+            {
+                await Dialogues.AlerterAsync("Aucun type d'événement n'est prévu ici (paramètres des types d'événements, DOS030).");
+                return;
+            }
+            erreurs = [];
+            s = await Service.NouveauAsync(Objet);
+        });
+    }
+
+    // Valeurs par défaut du type choisi ; en cas d'échec, le type précédent est rétabli
+    private async Task ChangerTypeAsync(ChangeEventArgs ev)
+    {
+        if (s is null || enCours) return;
+        var saisie = s;
+        var ancien = saisie.Type;
+        saisie.Type = Valeur(ev);
+        enCours = true;
+        try
+        {
+            s = await Service.AppliquerTypeAsync(Objet, saisie);
+        }
+        catch (Exception ex)
+        {
+            saisie.Type = ancien;
+            Notifications.Erreur(ex.Message);
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    // Les erreurs des profils sont repérées par leur rang : elles ne valent plus après un retrait
+    private void RetirerProfil(int n)
+    {
+        s?.Profils.RemoveAt(n);
+        erreurs.RemoveAll(e => e.Zone.StartsWith("profil"));
+    }
+
+    private async Task OuvrirAsync(Evenement e)
+    {
+        await ExecuterAsync(async () =>
+        {
+            erreurs = [];
+            s = await Service.LireAsync(Objet, e.Numero);
+            if (s is null)
+            {
+                Notifications.Erreur(MessagesEvenements.EvenementInexistant);
+                await ChargerAsync();
+            }
+        });
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        if (s is null || enCours) return;
+        enCours = true;
+        erreurs = [];
+        try
+        {
+            if (s.Numero == 0) await Service.CreerAsync(Objet, s);
+            else await Service.ModifierAsync(Objet, s.Numero, s);
+            Notifications.Succes(s.Numero == 0 ? "Événement créé." : "Événement modifié.");
+            s = null;
+            await ChargerAsync();
+        }
+        catch (EvenementInvalideException ex)
+        {
+            erreurs = [.. ex.Erreurs];
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Enregistrement impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private async Task SupprimerAsync(Evenement e)
+    {
+        var texte = e.Textes.FirstOrDefault(t => t != "") ?? e.LibelleType;
+        if (!await Dialogues.ConfirmerAsync($"Supprimer l'événement « {texte} » ?", "Suppression", "Supprimer")) return;
+        await ExecuterAsync(async () =>
+        {
+            await Service.SupprimerAsync(Objet, e.Numero);
+            Notifications.Succes("Événement supprimé.");
+            await ChargerAsync();
+        });
+    }
+
+    private async Task ExecuterAsync(Func<Task> action)
+    {
+        if (enCours) return;
+        enCours = true;
+        try
+        {
+            await action();
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur(ex.Message);
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private void Fermer() => s = null;
+
+    private static string Valeur(ChangeEventArgs ev) => ev.Value?.ToString() ?? "";
+
+    private string Classe(string zone) => erreurs.Any(e => e.Zone == zone) ? "en-erreur" : "";
+
+    private RenderFragment Message(string zone) => __builder =>
+    {
+        foreach (var e in erreurs.Where(e => e.Zone == zone))
+        {
+            <span class="message-erreur">@e.Message</span>
+        }
+    };
+}

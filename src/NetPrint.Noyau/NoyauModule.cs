@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using NetPrint.Noyau.Evenements;
 using NetPrint.Noyau.ListesDeChoix;
 using NetPrint.Noyau.Messagerie;
 using NetPrint.Noyau.Societes;
@@ -17,6 +18,8 @@ public static class NoyauModule
         services.AddScoped<IJournalEnvois, JournalEnvoisDb2>();   // journal des envois (ENV100)
         services.AddScoped<NetPrint.Noyau.Utilisateurs.IUtilisateurs, NetPrint.Noyau.Utilisateurs.UtilisateursDb2>();   // profils (AI00F)
         services.AddScoped<IListesDeChoix, ListesDeChoixDb2>();   // recherches F4 / bouton « … »
+        services.AddScoped<EvenementsDb2>();
+        services.AddScoped<IEvenements, EvenementsService>();   // événements et commentaires (EVE300)
         return services;
     }
 }

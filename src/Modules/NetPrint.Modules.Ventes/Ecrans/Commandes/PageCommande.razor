@@ -17,6 +17,7 @@
 @inject Dialogues Dialogues
 @inject IActionsCommande Actions
 @inject IEditionArc Arc
+@using NetPrint.Noyau.Evenements
 
 <PageTitle>Commande @CleCourante.Libelle · NetPrint</PageTitle>
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
@@ -164,6 +165,9 @@
                 case "envois":
                     @TableEnvois
                     break;
+                case "evenements":
+                    <Evenements Objet="ObjetEvenements.DeCommande(CleCourante.Numero, CleCourante.Cle)" Modifiable="fiche.Droits.Modifier" OnNombre="n => nbEvenements = n" />
+                    break;
                 default:
                     @TableHistorique
                     break;
@@ -205,6 +209,7 @@
     private FicheCommande? fiche;
     private bool chargement = true;
     private string onglet = "lignes";
+    private int? nbEvenements;   // connu une fois l'onglet ouvert (EVE300)
     private readonly HashSet<int> lignesOuvertes = [];
 
     // Passage d'une commande à une autre : seule la dernière lecture demandée est affichée
@@ -232,6 +237,7 @@
         if (fiche is not null) Etat.Selection = cle;
         versionArc++;
         envois = null;
+        nbEvenements = null;
         if (fiche is not null) await ChargerEnvoisAsync();
         chargement = false;
     }
@@ -414,13 +420,14 @@
 
 
 
-    private IEnumerable<(string Cle, string Libelle, int Nombre)> Onglets =>
+    private IEnumerable<(string Cle, string Libelle, int? Nombre)> Onglets =>
     [
         ("lignes", "Lignes", fiche!.Lignes.Count),
         ("livraisons", "Livraisons", fiche.Livraisons.Count),
         ("factures", "Factures", fiche.Factures.Count),
         ("journal", "Journal des lignes", fiche.Journal.Count),
         ("envois", "Envois ARC", erreurEnvois is null ? envois?.Count ?? 0 : 0),
+        ("evenements", "Événements", nbEvenements),
         ("historique", "Historique", fiche.Historique.Count),
     ];
 
