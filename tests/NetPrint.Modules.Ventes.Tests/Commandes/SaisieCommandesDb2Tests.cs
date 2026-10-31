@@ -145,12 +145,29 @@ public class SaisieCommandesDb2Tests(ITestOutputHelper sortie)
                 DateDossier = DateOnly.FromDateTime(DateTime.Today), Devis = null,
             };
 
+            // Clé calculée par GETCLE (les tests n'ont pas Production:CleOf = PremierChiffreLibre), sauf si un dossier de ce n°
+            // l'a déjà (les n° d'essai repassent par d'anciens n°) : premier chiffre libre, comme GETDOSSIER
+            var calculee = NetPrint.Noyau.Compteurs.NumerosDossier.CleCalculee(cle.Numero, BaseDeTest.CompteClient);
+            var prise = false;
+            await using (var cmd = new OdbcCommand("""
+                SELECT 1 FROM NP11F.AB001 WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?
+                UNION ALL SELECT 1 FROM NP11F.AB001T WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?
+                """, cnx))
+            {
+                foreach (var _ in new[] { 0, 1 })
+                {
+                    cmd.Parameters.AddWithValue("s", BaseDeTest.Societe);
+                    cmd.Parameters.AddWithValue("n", cle.Numero);
+                    cmd.Parameters.AddWithValue("c", calculee);
+                }
+                prise = await cmd.ExecuteScalarAsync() is not null;
+            }
             var of = await production.DemanderOfAsync(demande);
             crees.Add(of);
-            sortie.WriteLine($"Commande {cle.Libelle} → OF {of.Libelle}");
-            // n° de la commande ; clé calculée par GETCLE (les tests n'ont pas Production:CleOf = PremierChiffreLibre)
+            sortie.WriteLine($"Commande {cle.Libelle} → OF {of.Libelle} (clé calculée {calculee}{(prise ? " déjà prise" : "")})");
             Assert.Equal(cle.Numero, of.Numero);
-            Assert.Equal(NetPrint.Noyau.Compteurs.NumerosDossier.CleCalculee(cle.Numero, BaseDeTest.CompteClient), of.Cle);
+            if (prise) Assert.True(char.IsDigit(of.Cle[0]), of.Cle);
+            else Assert.Equal(calculee, of.Cle);
             Assert.Equal(NetPrint.Modules.Production.Contrats.EtatOf.AOuvrir, await production.EtatAsync(of));
 
             var lue = (await production.LireDemandeOfAsync(of, origine))!;

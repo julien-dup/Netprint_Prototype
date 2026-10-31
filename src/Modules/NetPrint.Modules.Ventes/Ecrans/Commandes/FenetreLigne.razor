@@ -215,7 +215,12 @@
                             <textarea rows="5" @bind="l.Texte"></textarea>
                         </label>
                         <div class="ligne-champs">
-                            <label class="champ"><span>Norme</span><input class="code" maxlength="4" @bind="l.Norme" /></label>
+                            <div class="champ @Classe(nameof(l.Norme))"><span>Norme</span>
+                                <div class="ligne-champs">
+                                    <input class="code" maxlength="4" @bind="l.Norme" />
+                                    <BoutonRecherche Liste="ListeChoix.Norme" Titre="Rechercher une norme" OnChoix="c => l.Norme = c.Code" />
+                                </div>
+                            </div>
                             <label class="champ @Classe(nameof(l.Emplacement))"><span>Emplacement</span><input class="court" maxlength="8" @bind="l.Emplacement" /></label>
                             <div class="champ @Classe(nameof(l.CompteClientFacture))">
                                 <span>Client facturé</span>
@@ -225,6 +230,7 @@
                                 </div>
                             </div>
                         </div>
+                        @Message(nameof(l.Norme))
                         @Message(nameof(l.Emplacement))
                         @Message(nameof(l.CompteClientFacture))
                         @Message(nameof(l.NouvelleApplication))

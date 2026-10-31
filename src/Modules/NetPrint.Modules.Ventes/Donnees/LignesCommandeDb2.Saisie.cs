@@ -29,7 +29,7 @@ internal sealed record VerificationsLigne(
     string? TypeCodeVente, long? TnumUnite, bool UniteExiste, (decimal Entree, decimal Reserve)? Stock,
     bool DateAuCalendrier, string TypeJour, int JourSemaine, string? JoursAutorises, bool AdresseExiste,
     bool ClientFactureExiste, bool ClientEdi, bool EmplacementExiste, int? OprNonLivre, bool AppelsExistent,
-    bool ReferenceFournisseurManquante);
+    bool ReferenceFournisseurManquante, bool NormeExiste = true);
 
 internal sealed partial class LignesCommandeDb2
 {
@@ -168,6 +168,9 @@ internal sealed partial class LignesCommandeDb2
             $"SELECT 1 FROM {b}.AA0003 WHERE RSOC = ? AND RGEN = ? AND RCLI = ?", societe, l.CompteGeneralFacture ?? 0, l.CompteClientFacture);
         var edi = await Existe($"SELECT 1 FROM {b}.PRT057F WHERE RSOC = ? AND RGEN = ? AND RCLI = ? AND PFFMT LIKE 'EDI%'",
             societe, c.CompteGeneral, c.CompteClient);
+        // Norme de l'enseigne de la commande (NOR010F, clé RSOC / NOENS / NOCOD comme CTL520)
+        var norme = l.Norme == "" || await Existe($"SELECT 1 FROM {b}.NOR010F WHERE RSOC = ? AND NOENS = ? AND NOCOD = ?",
+            societe, c.Enseigne, l.Norme);
         var emplacement = l.Emplacement == "" || await Existe(
             $"SELECT 1 FROM {b}.STO050 WHERE RSOC = ? AND ESDEP = ? AND ESEMP = ?", societe, c.Depot, l.Emplacement);
 
@@ -199,7 +202,7 @@ internal sealed partial class LignesCommandeDb2
         }
 
         return new VerificationsLigne(typeCode, tnum, tnum is not null, stock, auCalendrier, typeJour, jourSemaine, joursAutorises,
-            adresse, facture, edi, emplacement, opr, appels, referenceManquante);
+            adresse, facture, edi, emplacement, opr, appels, referenceManquante, norme);
     }
 
     // GETTYPSTOC (AXISRV R26-R27) : type de stock d'un article géré en stock, sinon null

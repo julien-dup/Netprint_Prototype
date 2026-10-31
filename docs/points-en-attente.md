@@ -79,11 +79,11 @@ Questions ouvertes :
 | ✅ | ~~Reprise des lignes d'un devis~~ | NEG520 F10 (NEG52009, SPDEV, SPADR) | Fait le 31/10 : bouton « 📄 Ligne d'après un devis » de la fiche commande ; devis chiffrés du client (les plus récents d'abord, recherche par n° ou désignation), choix de l'adresse si le devis en a plusieurs ; ligne « à la demande » pré-remplie (désignation, unité, prix remis, cession d'après le prix de revient, quantité, adresse), puis complétée dans la fenêtre de ligne ; devis enregistré sur la ligne (DNDEV / DNVERS / DNHYPO) |
 | 🟠 | Écarts et questions de la reprise d'un devis | NEG520 F10 | Seuls les devis du client de la commande sont proposés (NEG520 acceptait n'importe quel n°) ; quantité de l'adresse reprise aussi quand c'est un n° d'adresse du client (NEG520 la laissait à 0) ; « LT » = le tout, ramené au mille (la fiche de rétro-doc supposait « le mille ») ; désignation et unité du devis gardées si l'article est saisi ensuite (comme RECUP de CTL520). Devis **non marqué** « passé en commande » (D5000F.DETAG), comme NEG520 : décision de David du 31/10 |
 | 🟠 | Articles avec nomenclature | NEG520 (lignes composants, DNLCOM) | Refusés aujourd'hui |
-| ⚪ | Articles libres « 999… » | CTL520 l. 804-845 | Refusés aujourd'hui |
+| ✅ | ~~Articles libres « 999… »~~ | CTL520 l. 804-845 | Abandonnés : plus utilisés (David, 31/10) ; toujours refusés à la saisie |
 | ⚪ | Lignes de frais E / P, remises R | CTL520 l. 1643-1707, NEG520 SPCAVT | Refusées aujourd'hui |
 | ✅ | ~~Changement de date de livraison en masse~~ | NEG520 F19 (NEG520CW) | Fait le 31/10 : bouton « 📅 Reporter des dates » de la fiche commande ; lignes non soldées dont la date de livraison ou confirmée vaut X → Y (livraison ou confirmée), en une transaction, stock recalculé ; refusé si une ligne fait partie d'un OPR non livré (comme NEG520). La rétro-doc indiquait F20 : c'est F19 |
 | ⚪ | Import Excel (NEGIMP / NEGIMPS) | NEG520 R3, ImportCommande | |
-| ⚪ | Contrôle de la norme | NOR010 (colonnes inconnues dans la cartographie) | Non contrôlée aujourd'hui |
+| ✅ | ~~Contrôle de la norme~~ | CTL520, NOR010F | Fait le 31/10 : norme de la ligne cherchée dans NOR010F pour l'enseigne de la commande (clé RSOC / NOENS / NOCOD), message NOR0001 ; recherche F4 sur la zone Norme |
 | ⚪ | Paramètres de facturation automatique (F13) | DOS505 DOS50505, AB001FA | Valeurs par défaut écrites, pas de saisie |
 | ⚪ | Changement de client d'une commande (F17) | DOS505 R15 | Client figé en modification |
 | ✅ | ~~Texte complémentaire~~ | DOS560 (option 3 de NEG510), AB0011 | Fait (30/10) : saisi avec l'en-tête (8 lignes de 40, cases ARC / BL / facture), imprimé sur l'ARC si la case est cochée, supprimé avec la commande ; AB0011 journalisée |

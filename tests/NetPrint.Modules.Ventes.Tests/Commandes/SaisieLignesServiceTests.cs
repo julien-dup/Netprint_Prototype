@@ -12,6 +12,15 @@ public class SaisieLignesServiceTests
 
     // ---------- Nouvelle ligne ----------
     [Fact]
+    public void Norme_inexistante_refusee()
+    {
+        var (erreurs, _) = SaisieLignesService.Controler(Contexte(), Ligne(), Article(), Verifs() with { NormeExiste = false }, null, Aujourdhui);
+        Assert.Contains(erreurs, e => e.Zone == nameof(LigneSaisie.Norme) && e.Message == "Ce code norme n'existe pas.");
+        Assert.DoesNotContain(SaisieLignesService.Controler(Contexte(), Ligne(), Article(), Verifs(), null, Aujourdhui).Erreurs,
+            e => e.Zone == nameof(LigneSaisie.Norme));
+    }
+
+    [Fact]
     public void Nouvelle_ligne_avec_le_code_vente_et_l_adresse_par_defaut()
     {
         var l = SaisieLignesService.Nouvelle(Contexte() with { AdresseParDefaut = 4 });

@@ -285,6 +285,7 @@ internal sealed partial class SaisieLignesService(LignesCommandeDb2 donnees, ISo
             W(l.MaxiLivrable % l.Emballage != 0, A.MaxiNonMultiple, MessagesLigne.MaxiMultiple);
 
         E(l.CompteClientFacture is > 0 && !v.ClientFactureExiste, nameof(l.CompteClientFacture), MessagesLigne.ClientInexistant);
+        E(!v.NormeExiste, nameof(l.Norme), MessagesLigne.NormeInexistante);
         E(!v.EmplacementExiste, nameof(l.Emplacement), MessagesLigne.EmplacementInexistant);
         return (erreurs, avertissements);
     }
@@ -524,6 +525,7 @@ internal static class MessagesLigne
     public const string NumeroAppelEdi = "Le client est en transfert EDI. Le numéro d'appel est obligatoire.";                // CLI0006
     public const string MaxiMultiple = "Le maxi livrable doit être un multiple du conditionnement.";                          // NEG0041
     public const string ClientInexistant = "Ce compte client n'existe pas.";                                                  // CPT0001
+    public const string NormeInexistante = "Ce code norme n'existe pas.";                                                     // NOR0001
     public const string EmplacementInexistant = "Cet emplacement de stock n'existe pas.";                                     // STO0076
     public const string AppelSurLigneNormale = "Appel de livraison impossible sur une ligne de type normal.";                // NEG0026
     public const string DepassementOrigine = "Quantité saisie supérieure au reste à appeler de la ligne d'origine";            // NEG0029

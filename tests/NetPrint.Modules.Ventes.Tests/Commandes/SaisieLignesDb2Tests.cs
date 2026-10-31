@@ -222,6 +222,21 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
         }
     }
 
+    // Lecture seule : norme de la ligne cherchée dans NOR010F pour l'enseigne de la commande (CTL520)
+    [FactDb2]
+    public async Task Norme_controlee_pour_l_enseigne_de_la_commande()
+    {
+        var cle = new CleCommande(68916, "9");
+        var c = (await Lignes.ContexteAsync(BaseDeTest.Societe, cle, null, default))!;
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var norme = Convert.ToString((await ValeursAsync(cnx, "SELECT NOCOD FROM NP11F.NOR010F WHERE RSOC = ? AND NOENS = ? FETCH FIRST 1 ROW ONLY",
+            BaseDeTest.Societe, c.Enseigne))[0])!.Trim();
+        Assert.True((await Lignes.VerifierAsync(BaseDeTest.Societe, cle, c, new LigneSaisie { Norme = norme }, null, default)).NormeExiste);
+        Assert.False((await Lignes.VerifierAsync(BaseDeTest.Societe, cle, c, new LigneSaisie { Norme = "ZZZZ" }, null, default)).NormeExiste);
+        Assert.True((await Lignes.VerifierAsync(BaseDeTest.Societe, cle, c, new LigneSaisie(), null, default)).NormeExiste);
+    }
+
     // Lecture seule : une commande livrée et facturée du client d'essai serait refusée à la suppression
     [FactDb2]
     public async Task Commande_livree_non_supprimable()
