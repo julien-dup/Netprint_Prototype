@@ -57,3 +57,17 @@
 .fenetre-envoi .champ-case { align-self: flex-start; min-height: 0; }
 .tableau-envois { border-collapse: collapse; font-size: 0.88em; }
 .tableau-envois td { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--bordure, #e3e3e3); vertical-align: top; }
+
+/* Ordres de préparation */
+.appliquer-opr { gap: 10px; align-items: flex-end; padding: 6px 0; flex-wrap: wrap; }
+.lignes-opr td { vertical-align: top; }
+.options-opr { white-space: nowrap; }
+.options-opr label { display: inline-flex; align-items: center; gap: 1px; margin-right: 4px; font-size: 0.85em; }
+.options-opr label.alerte { background: #fde2e2; border-radius: 3px; padding: 0 2px; }
+.observation-opr { width: 16em; }
+tr.ligne-retiree td { text-decoration: line-through; opacity: 0.6; }
+tr.prix-a-definir td:first-child { box-shadow: inset 3px 0 0 #e8892c; }
+tr.client-bloque td { background: #fdecec; }
+.lignes-opr .discret { display: block; max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85em; }
+.lignes-opr input[type=date] { width: 8.5em; }
+.lignes-opr .observation-opr { width: 11em; }

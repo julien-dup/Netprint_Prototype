@@ -34,6 +34,15 @@ public static class LogistiqueModule
             Assemblage: typeof(LogistiqueModule).Assembly,
             Description: "Lignes de commande à livrer sur une période : stock, en-cours, OPR, pré-BL ; création du BL et fiche de préparation."));
 
+        services.AddSingleton(new DescriptionModule(
+            Code: "LOGISTIQUE-OPR",
+            Nom: "Ordres de préparation",
+            Url: "/logistique/opr",
+            Icone: "🧺",
+            Ordre: 6,
+            Assemblage: typeof(LogistiqueModule).Assembly,
+            Description: "OPR : lignes de commande à préparer regroupées par client, adresse, date et transporteur ; création, ajout, modification."));
+
         services.AddScoped<ConsultationBlDb2>();
         services.AddScoped<IConsultationBl, ConsultationBlService>();   // ConsultationBL / EXP010S
         services.AddScoped<Ecrans.Bl.EtatListeBl>();                    // critères et liste conservés pendant la session
@@ -49,6 +58,9 @@ public static class LogistiqueModule
         services.AddScoped<LivraisonsDb2>();
         services.AddScoped<ILivraisons, LivraisonsService>();              // LivraisonsAEffectuer
         services.AddScoped<Ecrans.Livraisons.EtatLivraisons>();
+        services.AddScoped<OprDb2>();
+        services.AddScoped<IOpr, OprService>();                             // WinDev OPR (ordres de préparation)
+        services.AddScoped<Ecrans.Opr.EtatListeOpr>();
         return services;
     }
 

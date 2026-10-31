@@ -10,6 +10,7 @@ using Xunit.Abstractions;
 namespace NetPrint.Modules.Logistique.Tests;
 
 // BL divers (cahier des charges § 11) : contrôles sans base, puis création, modification et suppression sur le client d'essai
+[Collection(EcrituresNp11f.Collection)]
 public class BlDiversTests(ITestOutputHelper sortie)
 {
     private static SaisieBlDivers Saisie() => new()

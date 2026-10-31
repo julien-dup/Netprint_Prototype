@@ -10,6 +10,7 @@ using Xunit.Abstractions;
 namespace NetPrint.Modules.Logistique.Tests;
 
 // Retour de marchandises : règles sans base, lecture, puis retour et suppression de bout en bout sur NP11F de test
+[Collection(EcrituresNp11f.Collection)]
 public class RetourBlTests(ITestOutputHelper sortie)
 {
     private static readonly DateOnly Jour = new(2024, 10, 15);

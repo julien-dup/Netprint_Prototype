@@ -11,6 +11,7 @@ using Xunit.Abstractions;
 namespace NetPrint.Modules.Logistique.Tests;
 
 // Édition du BL (EXP035P2) : règles du modèle sans base, puis PDF d'un BL réel du client d'essai
+[Collection(EcrituresNp11f.Collection)]
 public class EditionBlTests(ITestOutputHelper sortie)
 {
     // ---------- Jeux de données ----------

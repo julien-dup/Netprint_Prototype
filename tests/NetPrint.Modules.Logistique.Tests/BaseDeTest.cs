@@ -48,3 +48,10 @@ internal static class CultureDesTests
             System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.CurrentUICulture =
                 new System.Globalization.CultureInfo("fr-FR");
 }
+
+// Les classes qui écrivent dans NP11F partagent des données d'essai (dossiers 69320 et 68682, BL 165271, compteurs) :
+// elles passent l'une après l'autre
+public static class EcrituresNp11f
+{
+    public const string Collection = "Écritures NP11F";
+}

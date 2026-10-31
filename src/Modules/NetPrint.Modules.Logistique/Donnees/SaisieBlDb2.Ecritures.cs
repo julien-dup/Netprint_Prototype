@@ -146,21 +146,8 @@ internal sealed partial class SaisieBlDb2
     }
 
     // ---------- Verrous applicatifs (PRTLCK : « DOSSIER », « BL »), vus par les écrans AS/400 ----------
-    // Clé unique de PRTLCK (PLFIC, PLCLE) : l'insertion échoue si le verrou est déjà posé, même par une validation simultanée
-    private async Task PoserVerrouAsync(OdbcConnection cnx, string fichier, string cle, string profil, string message, CancellationToken ct)
-    {
-        try
-        {
-            await Executer(cnx, null, "INSERT INTO {b}.PRTLCK (PLFIC, PLCLE, PLPROF) VALUES (?, ?, ?)", ct, fichier, cle, profil);
-        }
-        catch (OdbcException ex) when (ex.Errors.Count > 0 && ex.Errors[0].SQLState == "23505")
-        {
-            var detenteur = "un autre poste";
-            await using (var rd = await Lire(cnx, "SELECT PLPROF FROM {b}.PRTLCK WHERE PLFIC = ? AND PLCLE = ?", ct, fichier, cle))
-                if (await rd.ReadAsync(ct)) detenteur = rd.Texte(0);
-            throw new RegleMetierException($"{message} {detenteur}.");
-        }
-    }
+    private Task PoserVerrouAsync(OdbcConnection cnx, string fichier, string cle, string profil, string message, CancellationToken ct) =>
+        VerrousApplicatifs.PoserAsync(cnx, Bib, fichier, cle, profil, message, ct);
 
     // Reste à livrer relu dans la transaction (lignes verrouillées) : diminué depuis l'ouverture et dépassé → à confirmer
     private async Task VerifierResteAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, BlAEcrire bl, CancellationToken ct)
@@ -185,18 +172,8 @@ internal sealed partial class SaisieBlDb2
         if (messages.Count > 0) throw new DepassementResteException(string.Join("\n", messages));
     }
 
-    private async Task LeverVerrouAsync(OdbcConnection cnx, string fichier, string cle, string profil)
-    {
-        try
-        {
-            await Executer(cnx, null, "DELETE FROM {b}.PRTLCK WHERE PLFIC = ? AND PLCLE = ? AND PLPROF = ?", CancellationToken.None,
-                fichier, cle, profil);
-        }
-        catch (OdbcException)
-        {
-            // verrou orphelin : se supprime comme ceux des écrans AS/400
-        }
-    }
+    private Task LeverVerrouAsync(OdbcConnection cnx, string fichier, string cle, string profil) =>
+        VerrousApplicatifs.LeverAsync(cnx, Bib, fichier, cle, profil);
 
     // ---------- Stock : contrôle de la variation totale du BL par lot / emplacement, dans la transaction (§ 8.1) ----------
     // Les positions article (AK00F, journalisée, clé unique) sont d'abord verrouillées, dans un ordre fixe : deux BL qui prennent

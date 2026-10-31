@@ -10,6 +10,7 @@ using Xunit.Abstractions;
 namespace NetPrint.Modules.Logistique.Tests;
 
 // Saisie des BL (cahier des charges lot 1) : règles sans base, puis création d'un BL d'essai de bout en bout
+[Collection(EcrituresNp11f.Collection)]
 public class SaisieBlTests(ITestOutputHelper sortie)
 {
     private static readonly AdresseBl Clarins = new(0, "", "CLARINS", "12 AV", "", "95000", "PONTOISE", "95", "FR");
