@@ -43,3 +43,8 @@
 .ok { color: #15803d; }
 .fin-bl h2 { margin: 0 0 6px; }
 .cartes-saisie .champ-case { align-self: flex-start; min-height: 0; }
+
+/* Livraisons à effectuer */
+.grille-livraisons td { white-space: nowrap; }
+.grille-livraisons td:nth-child(6) { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.stock-court { color: var(--danger); font-weight: 600; }

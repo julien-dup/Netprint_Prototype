@@ -117,7 +117,7 @@
                     </tbody>
                 </table>
                 <p class="legende"><span class="ligne-a-la-demande">En rouge</span> : ligne à la demande (contrat), non cochée par défaut.
-                    @if (sourceOpr) {<span> · ⓘ article ni stocké ni imprimable, ajouté d'office avec les autres lignes de son OPR.</span>}</p>
+                    @if (sourceOpr) {<span> · ⓘ article ni stocké ni imprimable, coché d'office avec les lignes de son OPR.</span>}</p>
             </section>
         }
     }
@@ -311,6 +311,11 @@
     [Parameter] public int NumeroBl { get; set; }
     [Parameter] public int Element { get; set; }
     [SupplyParameterFromQuery(Name = "bl")] public int Ajout { get; set; }
+    // Depuis les livraisons à effectuer : dossier et lignes pré-choisies (?dossier=…&cle=…&lignes=1,2&opr=1)
+    [SupplyParameterFromQuery(Name = "dossier")] public int DossierDemande { get; set; }
+    [SupplyParameterFromQuery(Name = "cle")] public string? CleDemandee { get; set; }
+    [SupplyParameterFromQuery(Name = "lignes")] public string? LignesDemandees { get; set; }
+    [SupplyParameterFromQuery(Name = "opr")] public int OprDemande { get; set; }
 
     private string TitrePage => NumeroBl > 0 ? $"Modifier le BL {NumeroBl}" : Ajout > 0 ? $"Ajouter au BL {Ajout}" : "Nouveau BL";
 
@@ -319,13 +324,26 @@
 
     // Changement d'adresse (modification, ajout, nouveau) : saisie remise à zéro ; modification : élément chargé. Un nouveau
     // passage des paramètres sans changement d'adresse ne touche pas à la saisie en cours.
-    private (int, int, int)? adresse;
+    private (int, int, int, int, string?, string?, int)? adresse;
 
     protected override async Task OnParametersSetAsync()
     {
-        if (adresse == (NumeroBl, Element, Ajout)) return;
-        adresse = (NumeroBl, Element, Ajout);
+        if (adresse == (NumeroBl, Element, Ajout, DossierDemande, CleDemandee, LignesDemandees, OprDemande)) return;
+        adresse = (NumeroBl, Element, Ajout, DossierDemande, CleDemandee, LignesDemandees, OprDemande);
         Reinitialiser();
+        if (DossierDemande > 0 && NumeroBl == 0)
+        {
+            (dossier, cle) = (DossierDemande, CleDemandee ?? "");
+            Etat.SourceOpr = OprDemande == 1;
+            await PreparerAsync();
+            var demandees = (LignesDemandees ?? "").Split(',').Select(x => int.TryParse(x, out var n) ? n : 0).ToHashSet();
+            if (preparation is not null)
+            {
+                choisies.Clear();
+                foreach (var l in preparation.Lignes.Where(l => demandees.Contains(l.NumeroLigne))) Basculer(l);   // OPR : lignes d'office aussi
+            }
+            return;
+        }
         if (NumeroBl > 0 && Element > 0)
             await Executer(async () =>
             {

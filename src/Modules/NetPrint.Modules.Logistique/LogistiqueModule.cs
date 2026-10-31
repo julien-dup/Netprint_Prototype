@@ -25,6 +25,15 @@ public static class LogistiqueModule
             Assemblage: typeof(LogistiqueModule).Assembly,
             Description: "Consultation des bons de livraison. À venir : saisie des BL, livraisons à effectuer, OPR, pré-BL."));
 
+        services.AddSingleton(new DescriptionModule(
+            Code: "LOGISTIQUE-LIVRAISONS",
+            Nom: "Livraisons à effectuer",
+            Url: "/logistique/livraisons",
+            Icone: "📦",
+            Ordre: 5,
+            Assemblage: typeof(LogistiqueModule).Assembly,
+            Description: "Lignes de commande à livrer sur une période : stock, en-cours, OPR, pré-BL ; création du BL et fiche de préparation."));
+
         services.AddScoped<ConsultationBlDb2>();
         services.AddScoped<IConsultationBl, ConsultationBlService>();   // ConsultationBL / EXP010S
         services.AddScoped<Ecrans.Bl.EtatListeBl>();                    // critères et liste conservés pendant la session
@@ -33,6 +42,11 @@ public static class LogistiqueModule
         services.AddScoped<SaisieBlDb2>();
         services.AddScoped<ISaisieBl, SaisieBlService>();               // EXP010, cahier des charges lot 1
         services.AddScoped<IBlDivers, BlDiversService>();               // BL divers (EXP010 état D)
+        services.AddScoped<PreparationDb2>();
+        services.AddScoped<IPreparation, PreparationService>();           // EXP078
+        services.AddScoped<LivraisonsDb2>();
+        services.AddScoped<ILivraisons, LivraisonsService>();              // LivraisonsAEffectuer
+        services.AddScoped<Ecrans.Livraisons.EtatLivraisons>();
         return services;
     }
 
@@ -55,6 +69,26 @@ public static class LogistiqueModule
             {
                 return Results.Text($"Édition du BL impossible : {ex.Message}", "text/plain; charset=utf-8",
                     statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Fiche de préparation (EXP078) : GET /api/logistique/preparation?du=2023-11-01&au=2023-11-30&gen=411100&cli=376
+        api.MapGet("/preparation", async (HttpContext http, IPreparation preparation, CancellationToken ct) =>
+        {
+            var q = http.Request.Query;
+            int? Entier(string nom) => int.TryParse(q[nom], out var n) && n > 0 ? n : null;
+            string? Texte(string nom) => string.IsNullOrWhiteSpace(q[nom]) ? null : q[nom].ToString();
+            if (!DateOnly.TryParse(q["du"], out var du) || !DateOnly.TryParse(q["au"], out var au))
+                return Results.Text("Indiquez la période (du, au).", "text/plain; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
+            try
+            {
+                return DocumentsPdf.Reponse(http, await preparation.EditerAsync(new CriteresPreparation(du, au, Entier("gen"), Entier("cli"),
+                    Entier("cde"), q["nonstockes"] == "1", Texte("fab"), Texte("ens"), Texte("art"), Entier("adr"), Texte("rfi"), Texte("appel"),
+                    Entier("numopr"), Enum.TryParse<FiltreOpr>(q["opr"], out var opr) ? opr : FiltreOpr.Tous, Entier("rep")), ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
             }
         });
         return app;
