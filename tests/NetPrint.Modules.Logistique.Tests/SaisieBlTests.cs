@@ -208,6 +208,19 @@ public class SaisieBlTests(ITestOutputHelper sortie)
             var apres = await LigneCommandeAsync(cnx);
             Assert.Equal(avant.Livre + 1500, apres.Livre);
             Assert.Equal(apres.Commande - apres.Livre, apres.Reste);
+
+            // Suppression du BL (dernier élément) : tout ce que le BL avait mis à jour est rétabli
+            Assert.True(await service.SupprimerAsync(numero, 1));
+            Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP009 WHERE RSOC = 8 AND HNOBL = ?", numero));
+            Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.EXP015 WHERE RSOC = 8 AND DNBL = ?", numero));
+            Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.A700F WHERE RSOC = 8 AND MVBL = ?", numero));
+            Assert.Equal(0, await CompterAsync(cnx, "SELECT COUNT(*) FROM NP11F.PRTLCK WHERE PLPROF = 'NP11'"));
+            Assert.Equal(avant, await LigneCommandeAsync(cnx) with { Solde = avant.Solde });
+            Assert.Equal(positions[0].Stock, await CompterAsync(cnx,
+                "SELECT PEQTE FROM NP11F.AP00F WHERE RSOC = 8 AND PETSTO = 'P1' AND PEREF = 'PQA002' AND PELOT = ? AND PEEMP = ?",
+                positions[0].Lot, positions[0].Emplacement));
+            await Executer(cnx, "DELETE FROM NP11F.EVE200 WHERE RSOC = 8 AND AMBL = ?", numero);   // traces d'audit de l'essai
+            numero = 0;
         }
         finally
         {
@@ -238,6 +251,15 @@ public class SaisieBlTests(ITestOutputHelper sortie)
         return r is null or DBNull ? 0 : Convert.ToInt32(r);
     }
 
+    private static async Task Executer(OdbcConnection cnx, string sql, params object[] valeurs)
+    {
+        await using var cmd = cnx.CreateCommand();
+        cmd.CommandText = sql;
+        foreach (var v in valeurs) cmd.Parameters.AddWithValue("", v);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    // Secours si la suppression échoue : remise en état directe
     private static async Task NettoyerAsync(OdbcConnection cnx, int numero,
         (int Commande, int Livre, int Reste, string Solde, int QteLivreeDossier) avant)
     {

@@ -179,6 +179,28 @@ internal sealed class SaisieBlService(SaisieBlDb2 donnees, IUtilisateurCourant u
         return (d, p, new ControleBl(erreurs, avertissements, poids, colis));
     }
 
+    // Suppression d'un élément (cahier des charges § 10.1) : ni facturé, ni retourné ; BL client ou divers ; dossier ni
+    // sous-traité ni en inventaire
+    public async Task<bool> SupprimerAsync(int numeroBl, int element, CancellationToken ct = default)
+    {
+        var u = await utilisateur.ExigerAsync();
+        var el = await donnees.ElementAsync(u.Societe, numeroBl, element, ct)
+            ?? throw new RegleMetierException($"L'élément {element} du BL {numeroBl} n'existe pas.");
+        if (el.Facture) throw new RegleMetierException("Cet élément est facturé : il ne peut pas être supprimé.");
+        if (el.AvecRetour) throw new RegleMetierException("Un retour de marchandises existe sur ce BL : il ne peut pas être supprimé.");
+        if (el.Etat is not ("C" or "D"))
+            throw new RegleMetierException("La suppression d'un retour, d'une sous-traitance ou d'un BL vierge n'est pas disponible dans cette version.");
+        if (el.Etat == "C" && el.TypeBl == 1) throw new RegleMetierException("BL de fabrication : suppression non disponible dans cette version.");
+        if (el.SousTraitanceSynchronisee)
+            throw new RegleMetierException("BL de sous-traitance synchronisée : suppression non disponible dans cette version.");
+        if (el.Dossier != 0 && el.Etat == "C" && await donnees.DossierAsync(u.Societe, el.Dossier, el.Cle, ct) is { SousTraite: true })
+            throw new RegleMetierException("Vous ne pouvez pas faire de BL pour ce dossier.");
+        foreach (var typeStock in el.TypesStock)
+            if (await donnees.InventaireEnCoursAsync(u.Societe, typeStock, DateOnly.FromDateTime(DateTime.Today), ct))
+                throw new RegleMetierException("Création ou modification de BL impossible, inventaire en cours.");
+        return await donnees.SupprimerElementAsync(u.Societe, u.Profil, el, ct);
+    }
+
     public async Task<int> CreerAsync(SaisieBl saisie, bool depassementAccepte = false, CancellationToken ct = default)
     {
         var u = await utilisateur.ExigerAsync();

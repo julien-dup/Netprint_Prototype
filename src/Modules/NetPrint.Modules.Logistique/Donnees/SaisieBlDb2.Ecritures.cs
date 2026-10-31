@@ -35,7 +35,7 @@ internal sealed partial class SaisieBlDb2
         profil = profil.ToUpperInvariant();
         await using var cnx = await OuvrirAsync(ct);
         var verrou = CleVerrouDossier(societe, d.Dossier, d.Cle);
-        await PoserVerrouAsync(cnx, verrou, profil, ct);
+        await PoserVerrouAsync(cnx, "DOSSIER", verrou, profil, "Ce dossier est en cours de modification par", ct);
         int numero;
         try
         {
@@ -60,7 +60,7 @@ internal sealed partial class SaisieBlDb2
         }
         finally
         {
-            await LeverVerrouAsync(cnx, verrou, profil);
+            await LeverVerrouAsync(cnx, "DOSSIER", verrou, profil);
         }
 
         // Après la validation : recalcul du stock de chaque article / type de stock (dépôt principal) et audit
@@ -71,20 +71,20 @@ internal sealed partial class SaisieBlDb2
         return numero;
     }
 
-    // ---------- Verrou applicatif du dossier (PRTLCK), vu par les écrans AS/400 ----------
+    // ---------- Verrous applicatifs (PRTLCK : « DOSSIER », « BL »), vus par les écrans AS/400 ----------
     // Clé unique de PRTLCK (PLFIC, PLCLE) : l'insertion échoue si le verrou est déjà posé, même par une validation simultanée
-    private async Task PoserVerrouAsync(OdbcConnection cnx, string cle, string profil, CancellationToken ct)
+    private async Task PoserVerrouAsync(OdbcConnection cnx, string fichier, string cle, string profil, string message, CancellationToken ct)
     {
         try
         {
-            await Executer(cnx, null, "INSERT INTO {b}.PRTLCK (PLFIC, PLCLE, PLPROF) VALUES ('DOSSIER', ?, ?)", ct, cle, profil);
+            await Executer(cnx, null, "INSERT INTO {b}.PRTLCK (PLFIC, PLCLE, PLPROF) VALUES (?, ?, ?)", ct, fichier, cle, profil);
         }
         catch (OdbcException ex) when (ex.Errors.Count > 0 && ex.Errors[0].SQLState == "23505")
         {
             var detenteur = "un autre poste";
-            await using (var rd = await Lire(cnx, "SELECT PLPROF FROM {b}.PRTLCK WHERE PLFIC = 'DOSSIER' AND PLCLE = ?", ct, cle))
+            await using (var rd = await Lire(cnx, "SELECT PLPROF FROM {b}.PRTLCK WHERE PLFIC = ? AND PLCLE = ?", ct, fichier, cle))
                 if (await rd.ReadAsync(ct)) detenteur = rd.Texte(0);
-            throw new RegleMetierException($"Ce dossier est en cours de modification par {detenteur}.");
+            throw new RegleMetierException($"{message} {detenteur}.");
         }
     }
 
@@ -109,12 +109,12 @@ internal sealed partial class SaisieBlDb2
         if (messages.Count > 0) throw new DepassementResteException(string.Join("\n", messages));
     }
 
-    private async Task LeverVerrouAsync(OdbcConnection cnx, string cle, string profil)
+    private async Task LeverVerrouAsync(OdbcConnection cnx, string fichier, string cle, string profil)
     {
         try
         {
-            await Executer(cnx, null, "DELETE FROM {b}.PRTLCK WHERE PLFIC = 'DOSSIER' AND PLCLE = ? AND PLPROF = ?", CancellationToken.None,
-                cle, profil);
+            await Executer(cnx, null, "DELETE FROM {b}.PRTLCK WHERE PLFIC = ? AND PLCLE = ? AND PLPROF = ?", CancellationToken.None,
+                fichier, cle, profil);
         }
         catch (OdbcException)
         {

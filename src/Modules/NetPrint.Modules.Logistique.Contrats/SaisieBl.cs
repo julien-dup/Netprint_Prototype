@@ -22,6 +22,9 @@ public interface ISaisieBl
     // Validation : n° de BL attribué. Si le reste à livrer d'une ligne a diminué depuis l'ouverture (autre BL validé) et que la
     // quantité le dépasse : DepassementResteException, à confirmer puis à relancer avec depassementAccepte.
     Task<int> CreerAsync(SaisieBl saisie, bool depassementAccepte = false, CancellationToken ct = default);
+
+    // Suppression d'un élément (le BL disparaît avec son dernier élément) : true si le BL entier a été supprimé
+    Task<bool> SupprimerAsync(int numeroBl, int element, CancellationToken ct = default);
 }
 
 public sealed record AdresseBl(

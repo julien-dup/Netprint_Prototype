@@ -6,6 +6,8 @@
    ===================================================================== *@
 @inject IConsultationBl Consultation
 @inject IEditionBl Edition
+@inject ISaisieBl Saisies
+@inject Dialogues Dialogues
 @inject NavigationManager Navigation
 @inject Notifications Notifications
 
@@ -95,6 +97,11 @@
                         @if (e.ClientFacture != "") {<span class="discret"> · facturé à @e.ClientFacture</span>}
                         @if (e.NomRepresentant != "") {<span class="discret"> · @e.NomRepresentant</span>}
                     </span>
+                    @if (e.NumeroFacture == 0 && e.Etat is "C" or "D")
+                    {
+                        <button type="button" class="bouton-danger" title="Supprimer cet élément et annuler la livraison (stock, commande)"
+                                @onclick="() => SupprimerAsync(e)">🗑 Supprimer</button>
+                    }
                 </div>
                 <table class="grille grille-fiche">
                     <thead><tr><th class="nombre">L.</th><th>Article</th><th>Désignation</th><th class="nombre">Quantité</th><th class="nombre">Colis</th>
@@ -158,6 +165,29 @@
         if (n != lecture) return;
         fiche = lue;
         chargement = false;
+    }
+
+    // Suppression d'un élément : confirmation (Échap / Annuler = non), puis liste des BL si le BL a disparu, sinon fiche relue
+    private async Task SupprimerAsync(DetailElementBl e)
+    {
+        var dernier = fiche!.Elements.Count == 1;
+        var message = (e.Dossier > 0 ? $"Supprimer l'élément {e.Element} (commande {e.Dossier}/{e.CleDossier}) ?" : $"Supprimer l'élément {e.Element} ?")
+            + "\nLes quantités livrées, le stock et le solde de la commande seront rétablis."
+            + (dernier ? $"\nC'est le dernier élément : le BL {Numero} sera supprimé." : "");
+        if (!await Dialogues.ConfirmerAsync(message, "Suppression", "Supprimer")) return;
+        try
+        {
+            if (await Saisies.SupprimerAsync(Numero, e.Element))
+            {
+                Notifications.Succes($"BL {Numero} supprimé.");
+                Navigation.NavigateTo("logistique/bl");
+                return;
+            }
+            Notifications.Succes($"Élément {e.Element} supprimé.");
+            await OnParametersSetAsync();
+        }
+        catch (RegleMetierException ex) { Notifications.Erreur(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
     }
 
     // « Imprimer » : le lien ouvre le PDF (sans écriture) ; le clic pose la marque « édité » (EXP035P2)
