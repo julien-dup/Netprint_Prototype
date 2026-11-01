@@ -96,7 +96,7 @@ OPR015.ODQPREP).
 
 | Étape | Contenu | Remplace |
 |---|---|---|
-| L8a | **Consultation des pré-BL** : liste (client, date, état « à préparer / en cours / prêt / livré »), fiche avec lignes, lots, palettes pointées ou non | FEN_GestionPreBL (liste) |
+| L8a ✅ | **Consultation des pré-BL** (fait le 01/11 : menu « Pré-BL palettes ») : liste (client, date, état « à préparer / en cours / prêt / livré »), fiche avec lignes, lots, palettes pointées ou non | FEN_GestionPreBL (liste) |
 | L8b | **Transformation en BL** native, en une transaction, avec le code de la saisie des BL : refus si une palette n'est pas pointée (statut 4), pré-BL déjà transformé ou vide ; sortie sur la quantité réelle des palettes | EXP540 / EXP540NAV |
 | L8c | **Saisie du pré-BL** : création, en-tête, lignes de commande, lots et palettes réservées (ou quantité seule si FEPREB = O), récapitulatif des palettes, suppression (refusée si livré) | FEN_CreationPREBL, FEN_SaisiePREBL, FI_AjoutPalettes* |
 | L8d | **Éditions** : pré-BL en PDF, feuille de préparation, feuille camion | EXP535P2, éditions du WinDev |
