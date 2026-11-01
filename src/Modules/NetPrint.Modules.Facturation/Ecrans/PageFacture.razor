@@ -12,6 +12,11 @@
 
 <fieldset class="barre-outils">
     <button @onclick='() => Navigation.NavigateTo("facturation/factures")'>← Liste des factures</button>
+    @if (fiche is not null)
+    {
+        <a class="bouton-ancre" href="@($"api/facturation/factures/{Numero}/{Jour}/pdf")" target="_blank" rel="noopener"
+           title="Facture en PDF, recalculée (FAC202P5) ; « BROUILLON » tant qu'elle n'est pas éditée en définitif">🖨 Imprimer</a>
+    }
 </fieldset>
 
 <div class="contenu contenu-detail fiche-facture">
