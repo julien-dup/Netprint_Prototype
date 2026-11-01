@@ -71,7 +71,7 @@ flowchart TD
 | Étape | Contenu | Remplace |
 |---|---|---|
 | F1 (en cours) | **Consultation des factures** (01/11 : module `NetPrint.Modules.Facturation`, menu « 🧾 Factures », liste et fiche) : critères combinables, vue facture / élément / ligne, statuts d'édition, d'envoi et de règlement (si compta intégrée), pièces jointes FACDOC, représentant limité | ConsultationFactures, FAC080S (liste), FAC525 |
-| F2 | **Calcul et édition PDF native** : moteur de calcul (totaux, TVA multi-taux, port, remises, escompte, acompte, échéance) repris de FAC201 / FAC199, mise en page d'après FAC202P5, **PDF archivé à l'émission** puis relu ; édition définitive (marquage des BL, dossiers, commandes, historique) | FAC199, FAC201, FAC202P5, FAC200CLP |
+| F2 | **Calcul et édition PDF native** : moteur de calcul (totaux, TVA multi-taux, port, remises, escompte, acompte, échéance) repris de FAC201 / FAC199, mise en page d'après FAC202P5, PDF recalculé à chaque affichage comme aujourd'hui (David, 01/11 : pas de stockage pour l'instant ; l'archivage à l'émission reste une idée intéressante) ; édition définitive (marquage des BL, dossiers, commandes, historique) | FAC199, FAC201, FAC202P5, FAC200CLP |
 | F3 | **Saisie manuelle** : création depuis un dossier, un client ou un BL (bouton « Facturer » de la fiche BL), ajout d'élément, modification, copie, suppression | FAC085, FAC150, FAC160, option FA d'EXP010S |
 | F4 | **Avoirs** depuis une facture (total, partiel sur plusieurs BL), avec libération explicite des BL | FAC080S option SA |
 | F5 | **Facturation automatique** des BL, un seul service avec un mode simulation (provisoire) | FAC400 → FAC402P, FAC412 / FAC412P |
@@ -95,9 +95,9 @@ réel. F1 peut démarrer avant, en lecture seule, avec un PDF provisoire.
 
 ## 6. Questions pour David
 
-1. **PDF de référence** : en SaaS, faut-il archiver le PDF à l'émission et toujours montrer celui-là (au lieu de le recalculer) ?
+1. ~~PDF de référence~~ : **réponse de David (01/11)** : on garde le fonctionnement actuel, PDF recalculé, pas de stockage pour l'instant (fonction intéressante pour plus tard).
 2. **VisuFacture** : qui le lance, sert-il encore ? (aucune référence trouvée dans NP11 ni dans les autres projets WinDev)
-3. **Modification d'une facture comptabilisée** : l'interdire (passer par un avoir) ou la garder en la traçant ?
+3. ~~Modification d'une facture comptabilisée~~ : **réponse de David (01/11)** : interdite (on passe par un avoir).
 4. **Avoir** : un avoir total doit-il toujours remettre les BL « à facturer » (le RPG le fait, la facturation automatique peut alors
    les refacturer) ?
 5. **CCTYPC 2** : FAC085 refuse le type 2 (« mise en stock »), le glossaire dit 2 = fabrication : lequel est juste ?
