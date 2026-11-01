@@ -24,7 +24,27 @@ public interface ISaisiePreBl
     Task<int> EnregistrerAsync(SaisiePreBl saisie, CancellationToken ct = default);
 
     Task SupprimerAsync(int numero, CancellationToken ct = default);
+
+    // Récapitulatif palettes (FEN_RecapPalettes) : lots des articles stockés, n° de palette mixte pour les lots incomplets ;
+    // Calculer : n° des palettes sans rien écrire ; Enregistrer : n° des palettes (EXP516) et nombre de palettes (EXP509)
+    Task<RecapPalettesPreBl> RecapAsync(int numero, CancellationToken ct = default);
+    Task<RecapPalettesPreBl> CalculerRecapAsync(int numero, IReadOnlyList<GroupePaletteMixte> groupes, CancellationToken ct = default);
+    Task EnregistrerRecapAsync(int numero, IReadOnlyList<GroupePaletteMixte> groupes, CancellationToken ct = default);
 }
+
+// Lot d'une ligne (n° de ligne, n° de lot) et n° de palette mixte choisi (0 : aucune)
+public sealed record GroupePaletteMixte(int Ligne, int Lot, int PaletteMixte);
+
+// Erreur : groupe refusé (lot incomplet sans palette mixte, palette mixte sur deux dépôts ou de plus de 8 lots) ; NombrePalettes :
+// palettes complètes puis mixtes
+public sealed record RecapPalettesPreBl(int Numero, IReadOnlyList<LigneRecapPreBl> Lignes, int NombrePalettes, string Erreur);
+
+// Une ligne de lot : ExParPalette = emballage par × UC par palette ; ExHorsPalettes : quantité hors palettes complètes ;
+// ColisPicking : colis pris en picking ; Incomplete : demande un n° de palette mixte ; Libelle : « N° 1 à 3 », « N° 4 et n° 7 »
+public sealed record LigneRecapPreBl(
+    int Ligne, int Lot, int Depot, string Article, string Indice, string RefImprime, string Designation, int Dossier, string Cle,
+    string NumeroLot, int Quantite, int EmballagePar, string Caisse, int Colis, int ColisIncomplets, int ExIncomplets, int ExParPalette,
+    int PalettesCompletes, int ExHorsPalettes, int ColisPicking, bool Incomplete, int PaletteMixte, string Libelle);
 
 public sealed class SaisiePreBl
 {

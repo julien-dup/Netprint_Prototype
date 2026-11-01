@@ -58,6 +58,9 @@ internal sealed partial class SaisieBlDb2
                         if (rd.Entier(1) != s.CompteGeneral || rd.Entier(2) != s.CompteClient) throw new RegleMetierException("Le client d'un pré-BL ne change pas.");
                     }
                     lotsChanges = await RemplacerLignesPreBlAsync(cnx, tx, societe, numero, s, ct);
+                    // Numérotation des palettes à la suite sur tous les lots : un lot changé la rend fausse partout (récap à refaire)
+                    if (lotsChanges)
+                        await Executer(cnx, tx, "UPDATE {b}.EXP516 SET DNPALM = 0, DLIBPAL = ' ' WHERE RSOC = ? AND DNBL = ?", ct, societe, numero);
                     await Executer(cnx, tx, """
                         UPDATE {b}.EXP509 SET HDEXAA = ?, HDEXMM = ?, HDEXJJ = ?, HOBS = ?, HOBS2 = ?, HOBS3 = ?, HPDSTT = ?, HTRAN = ?, HTYPL = ?,
                                HTYPP = ?, HNADRE = ?, HMENTI = ?, HSTOCKP = ?, HNPALT = CASE WHEN ? = 'O' THEN 0 ELSE HNPALT END
@@ -283,6 +286,55 @@ internal sealed partial class SaisieBlDb2
         finally
         {
             await LeverVerrouAsync(cnx, "PREBL", CleVerrouPreBl(societe, numero), profil);
+        }
+    }
+
+    // Récapitulatif palettes (FEN_RecapPalettes.BTN_Valider) : n° de palette mixte et libellé des n° de palettes de chaque lot,
+    // nombre de palettes du pré-BL ; refusé pour un pré-BL transformé ou dont les lots ont changé depuis le calcul
+    public async Task EnregistrerRecapPreBlAsync(int societe, string profil, RecapPalettesPreBl recap, CancellationToken ct)
+    {
+        profil = profil.ToUpperInvariant();
+        await using var cnx = await OuvrirAsync(ct);
+        await PoserVerrouAsync(cnx, "PREBL", CleVerrouPreBl(societe, recap.Numero), profil, $"Le pré-BL {recap.Numero} est en cours de modification par", ct);
+        try
+        {
+            await using var tx = (OdbcTransaction)await cnx.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+            var valide = false;
+            try
+            {
+                await using (var rd = await Lire(cnx, tx, "SELECT HENBL FROM {b}.EXP509 WHERE RSOC = ? AND HNOBL = ? WITH RS USE AND KEEP EXCLUSIVE LOCKS", ct,
+                                 societe, recap.Numero))
+                {
+                    if (!await rd.ReadAsync(ct)) throw new RegleMetierException($"Le pré-BL {recap.Numero} n'existe plus.");
+                    if (rd.Texte(0) == "O") throw new RegleMetierException($"Le pré-BL {recap.Numero} est transformé en BL.");
+                }
+                // Lots relus : les mêmes que ceux du calcul (lot, dépôt, quantité, palettes complètes, incomplet), aucun ajouté ni retiré
+                var lus = new List<(int, int, string, int, int, int, bool)>();
+                await using (var rd = await Lire(cnx, tx, """
+                    SELECT d.DNUM, d.DNLIG, d.DNLOT, d.DNDEP, d.DNQTPL, d.DNPAL, d.DPALINCOM FROM {b}.EXP516 d
+                    JOIN {b}.EXP510 l ON l.RSOC = d.RSOC AND l.HNOBL = d.DNBL AND l.HNUM = d.DNUM
+                    JOIN {b}.SPF010 s ON s.RSOC = l.RSOC AND s.AARTIC = l.DART AND s.AINDIC = l.DIND AND s.ASTK = 'O'
+                    WHERE d.RSOC = ? AND d.DNBL = ?
+                    """, ct, societe, recap.Numero))
+                    while (await rd.ReadAsync(ct)) lus.Add((rd.Entier(0), rd.Entier(1), rd.Texte(2), rd.Entier(3), rd.Entier(4), rd.Entier(5), rd.Texte(6) == "O"));
+                if (!lus.OrderBy(x => x.Item1).ThenBy(x => x.Item2).SequenceEqual(recap.Lignes
+                        .Select(l => (l.Ligne, l.Lot, l.NumeroLot, l.Depot, l.Quantite, l.PalettesCompletes, l.Incomplete)).OrderBy(x => x.Ligne).ThenBy(x => x.Lot)))
+                    throw new RegleMetierException("Le pré-BL a été modifié depuis l'ouverture du récapitulatif : rouvrez-le.");
+                foreach (var l in recap.Lignes)
+                    await Executer(cnx, tx, "UPDATE {b}.EXP516 SET DNPALM = ?, DLIBPAL = ? WHERE RSOC = ? AND DNBL = ? AND DNUM = ? AND DNLIG = ?",
+                        ct, l.PaletteMixte, Tronquer(l.Libelle, 25), societe, recap.Numero, l.Ligne, l.Lot);
+                await Executer(cnx, tx, "UPDATE {b}.EXP509 SET HNPALT = ? WHERE RSOC = ? AND HNOBL = ?", ct, recap.NombrePalettes, societe, recap.Numero);
+                await tx.CommitAsync(ct);
+                valide = true;
+            }
+            finally
+            {
+                if (!valide) await tx.RollbackAsync(CancellationToken.None);
+            }
+        }
+        finally
+        {
+            await LeverVerrouAsync(cnx, "PREBL", CleVerrouPreBl(societe, recap.Numero), profil);
         }
     }
 }

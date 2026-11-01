@@ -83,6 +83,29 @@ public class SaisiePreBlTests(ITestOutputHelper sortie)
         Assert.False(ReglesSaisiePreBl.LotInchange(Lot(1500, 1000, 500), Lot(1400, 1000, 400)));
     }
 
+    private static LigneRecapPreBl R(int ligne, int depot, int completes, bool incomplete, int mixte = 0) => new(
+        ligne, 1, depot, "ART", "", "", "", 1, "9", "123451", 1000, 100, "", 10, 0, 0, 1000, completes, 0, 0, incomplete, mixte, "");
+
+    [Fact]
+    public void Recapitulatif_palettes()
+    {
+        // 2 + 0 + 3 palettes complètes (1 à 2, 3 à 5) ; lignes 2 et 3 sur la palette mixte « 9 » (n° 6), ligne 4 seule (n° 7)
+        var lignes = new[] { R(1, 1, 2, false), R(2, 1, 0, true), R(3, 1, 3, true), R(4, 1, 0, true) };
+        var r = ReglesRecapPalettes.Calculer(1, lignes, [new(2, 1, 9), new(3, 1, 9), new(4, 1, 4)]);
+        Assert.Equal("", r.Erreur);
+        Assert.Equal(["N° 1 à 2", "N° 6", "N° 3 à 5 et n° 6", "N° 7"], r.Lignes.Select(l => l.Libelle));
+        Assert.Equal([0, 6, 6, 7], r.Lignes.Select(l => l.PaletteMixte));
+        Assert.Equal(7, r.NombrePalettes);
+        Assert.Equal(["N° 1"], ReglesRecapPalettes.Calculer(1, [R(1, 1, 1, false)], []).Lignes.Select(l => l.Libelle));
+
+        Assert.Contains("doit être renseigné", ReglesRecapPalettes.Calculer(1, lignes, [new(2, 1, 9)]).Erreur);
+        Assert.Contains("même dépôt", ReglesRecapPalettes.Calculer(1, [R(1, 1, 0, true), R(2, 2, 0, true)], [new(1, 1, 5), new(2, 1, 5)]).Erreur);
+        var neuf = Enumerable.Range(1, 9).Select(i => R(i, 1, 0, true)).ToArray();
+        Assert.Contains("8 lots au plus", ReglesRecapPalettes.Calculer(1, neuf, [.. neuf.Select(l => new GroupePaletteMixte(l.Ligne, 1, 1))]).Erreur);
+        // Le n° déjà enregistré (DNPALM) sert de regroupement à la réouverture
+        Assert.Equal("", ReglesRecapPalettes.Calculer(1, [R(1, 1, 0, true, mixte: 3)], []).Erreur);
+    }
+
     private sealed class Utilisateur(int societe) : IUtilisateurCourant
     {
         public Task<UtilisateurConnecte> LireAsync() => Task.FromResult(new UtilisateurConnecte("NP11", societe, "TEST", 411000));
@@ -190,6 +213,23 @@ public class SaisiePreBlTests(ITestOutputHelper sortie)
             Assert.Equal(p1.Disponible + p2.Disponible, apres.Lignes.Single().Quantite);
             Assert.All(apres.Lignes.Single().Lots.Single().Palettes, p => Assert.False(p.Picking));
             Assert.Equal("MODIFIE", apres.Observations[1]);
+
+            // Récapitulatif palettes : lot incomplet sur la palette mixte 1, puis modification de l'en-tête seul (lot gardé)
+            var recap = await service.RecapAsync(numero);
+            foreach (var l in recap.Lignes) sortie.WriteLine($"récap : lot {l.NumeroLot} {l.Quantite} ex/pal {l.ExParPalette} complètes {l.PalettesCompletes} incomplet {l.Incomplete}");
+            var groupes = recap.Lignes.Where(l => l.Incomplete).Select(l => new GroupePaletteMixte(l.Ligne, l.Lot, 1)).ToList();
+            await service.EnregistrerRecapAsync(numero, groupes);
+            var numerote = await Consultation(29).LireAsync(numero);
+            var libelle = numerote!.Lignes.Single().Lots.Single().LibellePalettes;
+            sortie.WriteLine($"n° des palettes : {libelle} ({numerote.Palettes} palettes)");
+            Assert.StartsWith("N° 1", libelle);
+            Assert.True(numerote.Palettes > 0);
+            var entete = await service.OuvrirAsync(numero);
+            entete.Mention = "MENTION";
+            await service.EnregistrerAsync(entete);
+            var garde = await Consultation(29).LireAsync(numero);
+            Assert.Equal(libelle, garde!.Lignes.Single().Lots.Single().LibellePalettes);
+            Assert.Equal(numerote.Palettes, garde.Palettes);
         }
         finally
         {

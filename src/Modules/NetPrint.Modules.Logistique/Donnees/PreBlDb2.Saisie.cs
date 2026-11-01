@@ -185,4 +185,43 @@ internal sealed partial class PreBlDb2
                     palettes.GetValueOrDefault((rd.Texte(0), rd.Entier(1))) ?? []));
         return r;
     }
+
+    // ---------- Récapitulatif palettes (FEN_RecapPalettes) : lots des articles stockés, ordre dépôt, commande, article, lot ----------
+    public async Task<List<LigneRecapPreBl>> RecapAsync(int societe, int numero, CancellationToken ct)
+    {
+        await using var cnx = await OuvrirAsync(ct);
+        var r = new List<LigneRecapPreBl>();
+        await using var rd = await Lire(cnx, """
+            SELECT l.HNUM, d.DNLIG, d.DNDEP, l.DART, l.DIND, COALESCE(s.ARFIMP, ''), COALESCE(s.ADES, ''), l.HNODOS, l.HCLEF, d.DNLOT, d.DNQTPL,
+                   CASE WHEN l.DEEMBPE <> 0 THEN l.DEEMBPE ELSE l.DEMBP1 END,
+                   COALESCE(NULLIF(c2.GLIBAB, ''), NULLIF(c3.GLIBAB, ''), c1.GLIBAB, ''), d.DNUC, d.DEXMEC, d.DNPAL,
+                   COALESCE((SELECT SUM(p.DPQTEP) FROM {b}.EXP517 p WHERE p.RSOC = d.RSOC AND p.DNBL = d.DNBL AND p.DNUM = d.DNUM AND p.DNLIG = d.DNLIG
+                             AND p.DPPICK = 'O'), 0),
+                   d.DPALINCOM, d.DNPALM, d.DLIBPAL,
+                   CASE WHEN l.DENPALE <> 0 THEN l.DENPALE ELSE COALESCE(NULLIF(f.ANPAL, 0), NULLIF(fc.ANPAL, 0), s.ANPAL, 0) END, d.DCOLIM
+            FROM {b}.EXP510 l
+            JOIN {b}.EXP509 h ON h.RSOC = l.RSOC AND h.HNOBL = l.HNOBL
+            JOIN {b}.EXP516 d ON d.RSOC = l.RSOC AND d.DNBL = l.HNOBL AND d.DNUM = l.HNUM
+            JOIN {b}.SPF010 s ON s.RSOC = l.RSOC AND s.AARTIC = l.DART AND s.AINDIC = l.DIND AND s.ASTK = 'O'
+            LEFT OUTER JOIN {b}.SPF026 f ON f.RSOC = l.RSOC AND f.AARTIC = l.DART AND f.AINDIC = l.DIND AND f.EAGEN = h.HGENE AND f.EACLI = h.HCLIE
+                 AND f.EANLIG = h.HNADRE
+            LEFT OUTER JOIN {b}.SPF026 fc ON fc.RSOC = l.RSOC AND fc.AARTIC = l.DART AND fc.AINDIC = l.DIND AND fc.EAGEN = h.HGENE
+                 AND fc.EACLI = h.HCLIE AND fc.EANLIG = 0
+            LEFT OUTER JOIN {b}.C000F c1 ON c1.RSOC = s.RSOC AND c1.RMATIE = s.AMATUC AND c1.GTAG <> '*'
+            LEFT OUTER JOIN {b}.C000F c2 ON c2.RSOC = f.RSOC AND c2.RMATIE = f.AMATUC AND c2.GTAG <> '*'
+            LEFT OUTER JOIN {b}.C000F c3 ON c3.RSOC = fc.RSOC AND c3.RMATIE = fc.AMATUC AND c3.GTAG <> '*'
+            WHERE l.RSOC = ? AND l.HNOBL = ?
+            ORDER BY d.DNDEP, l.HNODOS, l.HCLEF, l.DART, l.DIND, d.DNLOT, l.HNUM, d.DNLIG
+            """, ct, societe, numero);
+        while (await rd.ReadAsync(ct))
+        {
+            var (quantite, emballage, ucPalette, completes) = (rd.Entier(10), rd.Entier(11), rd.Entier(20), rd.Entier(15));
+            var exParPalette = emballage * ucPalette;
+            r.Add(new LigneRecapPreBl(rd.Entier(0), rd.Entier(1), rd.Entier(2), rd.Texte(3), rd.Texte(4), rd.Texte(5), rd.Texte(6), rd.Entier(7),
+                rd.Texte(8), rd.Texte(9), quantite, emballage, rd.Texte(12), rd.Entier(13), rd.Entier(21), rd.Entier(14), exParPalette,
+                completes, quantite - exParPalette * completes, emballage > 0 ? (rd.Entier(16) + emballage - 1) / emballage : 0, rd.Texte(17) == "O", rd.Entier(18),
+                rd.Texte(19)));
+        }
+        return r;
+    }
 }

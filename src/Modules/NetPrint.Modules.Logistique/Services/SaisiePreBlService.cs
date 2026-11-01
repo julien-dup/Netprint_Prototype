@@ -61,6 +61,36 @@ internal sealed class SaisiePreBlService(PreBlDb2 donnees, OprDb2 opr, SaisieBlD
         await bl.SupprimerPreBlAsync(u.Societe, u.Profil, numero, ct);
     }
 
+    public async Task<RecapPalettesPreBl> RecapAsync(int numero, CancellationToken ct = default)
+    {
+        var u = await PreBlModifiableAsync(numero, ct);
+        return ReglesRecapPalettes.Calculer(numero, await donnees.RecapAsync(u.Societe, numero, ct), []);
+    }
+
+    public async Task<RecapPalettesPreBl> CalculerRecapAsync(int numero, IReadOnlyList<GroupePaletteMixte> groupes, CancellationToken ct = default)
+    {
+        var u = await PreBlModifiableAsync(numero, ct);
+        return ReglesRecapPalettes.Calculer(numero, await donnees.RecapAsync(u.Societe, numero, ct), groupes);
+    }
+
+    public async Task EnregistrerRecapAsync(int numero, IReadOnlyList<GroupePaletteMixte> groupes, CancellationToken ct = default)
+    {
+        var u = await PreBlModifiableAsync(numero, ct);
+        var recap = ReglesRecapPalettes.Calculer(numero, await donnees.RecapAsync(u.Societe, numero, ct), groupes);
+        if (recap.Erreur != "") throw new RegleMetierException(recap.Erreur);
+        await bl.EnregistrerRecapPreBlAsync(u.Societe, u.Profil, recap, ct);
+    }
+
+    // Droit de modification, pré-BL accessible au profil et non transformé
+    private async Task<UtilisateurConnecte> PreBlModifiableAsync(int numero, CancellationToken ct)
+    {
+        var u = await AccesAsync(d => d.Modifier, "modifier", ct);
+        var fiche = await donnees.LireAsync(u.Societe, numero, await opr.RepresentantImposeAsync(u.Societe, u.Profil, ct), ct)
+                    ?? throw new RegleMetierException($"Le pré-BL {numero} n'existe pas ou ne vous est pas accessible.");
+        if (fiche.Etat == EtatsPreBl.Livre) throw new RegleMetierException($"Le pré-BL {numero} est transformé en BL.");
+        return u;
+    }
+
     private async Task<UtilisateurConnecte> AccesAsync(Func<DroitsOpr, bool> droit, string action, CancellationToken ct)
     {
         var u = await utilisateur.ExigerAsync();
