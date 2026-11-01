@@ -15,7 +15,8 @@ namespace NetPrint.Modules.Facturation.Services;
 // remettre à éditer (total ou modification), supprimer (total ou suppression), sur FAC200 pour éditer en définitif ; représentant
 // limité : ses factures seulement. Ajout de BL à une facture pas encore éditée (FAC085 / FAC150 mode A) : droit de création (comme
 // l'option AE de FAC080S), nouveaux éléments écrits comme à la création. Copie (FAC150 mode D) : droits de création et de
-// modification (la copie s'ouvre en modification ; le RPG ne contrôlait que la modification). Facture d'une commande sans BL
+// modification (la copie s'ouvre en modification ; le RPG ne contrôlait que la modification). Avoir d'une facture éditée (FAC080S
+// option SA), total ou d'un BL : même copie en type A, mêmes droits. Facture d'une commande sans BL
 // (FAC085 clé dossier) : même moteur, élément sans BL. Facture d'un client sans commande (FAC085 clé client) : élément sans dossier,
 // catégorie et sous-catégorie choisies, code vente et compte d'escompte contrôlés dans FAC030 (R20, R34).
 // =====================================================================
@@ -334,7 +335,13 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         return await TerminerAsync(u, numero, date, aControler, editerDefinitif, ct);
     }
 
-    public async Task<FactureCreee> CopierAsync(int numero, DateOnly date, CancellationToken ct = default)
+    public Task<FactureCreee> CopierAsync(int numero, DateOnly date, CancellationToken ct = default) => DupliquerAsync(numero, date, null, ct);
+
+    public Task<FactureCreee> CreerAvoirAsync(int numero, DateOnly date, int? bl = null, CancellationToken ct = default) =>
+        DupliquerAsync(numero, date, new AvoirDemande(bl), ct);
+
+    // Copie ou avoir (FAC150 mode D, FAC080S option SA) : document du jour, n° au compteur, ouvert ensuite en modification
+    private async Task<FactureCreee> DupliquerAsync(int numero, DateOnly date, AvoirDemande? avoir, CancellationToken ct)
     {
         var u = await ExigerFactureAsync(numero, date, ActionFacture.Creation, ct);
         await ExigerDroitAsync(ct, ActionFacture.Modification);   // la copie s'ouvre en modification pour être corrigée
@@ -348,10 +355,10 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         if (contexte.GereEnseignes && type == 3 && f.Enseigne.Trim() == "")
             throw new RegleMetierException("La numérotation est par enseigne et la facture n'a pas d'enseigne.");
         var c = f.Conditions;
-        var echeance = CalculFacture.Echeance(new ConditionsFacture(f.Avoir, jour, c.Escompte, 0, c.Le, c.NombreJours, c.Arrete, null));
+        var echeance = CalculFacture.Echeance(new ConditionsFacture(f.Avoir || avoir is not null, jour, c.Escompte, 0, c.Le, c.NombreJours, c.Arrete, null));
         // Compteur absent : CompteurFacturesAbsentException levée à l'écriture (transaction annulée), l'écran propose de le créer
         var (copie, aControler) = await bls.CopierFactureAsync(u.Societe, u.Profil, new NumerotationFactures(type, contexte.GereEnseignes, f.Enseigne),
-            numero, date, jour, echeance, ct);
+            numero, date, jour, echeance, ct, avoir);
         return new FactureCreee(copie, jour, aControler, false, null);
     }
 

@@ -536,6 +536,61 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
     }
 
+    [FactDb2Ecriture]
+    public async Task Avoirs_total_et_d_un_BL_puis_remise_a_l_identique()
+    {
+        const int societe = 29, bl = 29379;
+        var date = DateOnly.FromDateTime(DateTime.Today);
+        var service = Service(societe);
+        var f = await service.PreparerAsync([new ElementDeBl(bl, 1)]);
+
+        await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
+        await cnx.OpenAsync();
+        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        var numeros = new List<int>();
+        try
+        {
+            var facture = await service.CreerAsync(f, editerDefinitif: false);
+            numeros.Add(facture.Numero);
+            // Pas encore éditée : pas d'avoir (elle se modifie ou se supprime)
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.CreerAvoirAsync(facture.Numero, date));
+            await service.ModifierAsync(await service.OuvrirAsync(facture.Numero, date), editerDefinitif: true);
+            var compte = await CompterAsync(cnx, societe, facture.Numero, date);
+
+            // Avoir d'un BL : ses lignes seulement, ce BL de nouveau à facturer
+            var parBl = await service.CreerAvoirAsync(facture.Numero, date, bl);
+            numeros.Add(parBl.Numero);
+            var lu = await service.OuvrirAsync(parBl.Numero, date);
+            Assert.True(lu.Avoir);
+            Assert.All(lu.Elements.SelectMany(e => e.Lignes), l => Assert.Equal(bl, l.Bl));
+            Assert.Contains((await service.ChercherBlsAsync(new CleFacturation { Bl = bl })).Bls, b => b.Bl == bl);
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.CreerAvoirAsync(parBl.Numero, date));   // pas d'avoir d'un avoir
+            // Déjà un avoir de ce BL : ni un autre, ni un avoir total, tant qu'il n'est pas supprimé
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.CreerAvoirAsync(facture.Numero, date, bl));
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.CreerAvoirAsync(facture.Numero, date));
+            Assert.True(await service.SupprimerAsync(parBl.Numero, date));
+
+            // Avoir total : mêmes éléments et lignes que la facture
+            var total = await service.CreerAvoirAsync(facture.Numero, date);
+            numeros.Add(total.Numero);
+            static string Sans(string comptes) => string.Join(" ", comptes.Split(' ').Where(c => !c.StartsWith("EXP010=")));
+            Assert.Equal(Sans(compte), Sans(await CompterAsync(cnx, societe, total.Numero, date)));
+            sortie.WriteLine($"Facture {facture.Numero} : avoir du BL {bl} {parBl.Numero}, avoir total {total.Numero}");
+        }
+        finally
+        {
+            foreach (var n in numeros)
+                foreach (var table in new[] { ("FAC100", "FG"), ("FAC105", "FT"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
+                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
+                        societe, n, date.Year, date.Month, date.Day);
+            foreach (var (table, rrn, colonnes, valeurs) in avant)
+                await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
+                    [.. valeurs, rrn]);
+        }
+        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+    }
+
     // Comptes des lignes d'une facture par fichier, à une date
     private static async Task<string> CompterAsync(System.Data.Odbc.OdbcConnection cnx, int societe, int numero, DateOnly d)
     {

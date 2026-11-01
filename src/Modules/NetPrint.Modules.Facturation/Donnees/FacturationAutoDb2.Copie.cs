@@ -13,7 +13,17 @@ namespace NetPrint.Modules.Facturation.Donnees;
 // Les BL, éléments en plus et compléments ne sont pas rattachés à la copie (les lignes gardent la référence du BL, comme le RPG).
 // Comme le RPG : la copie éditée en définitif ajoute de nouveau ses quantités à la commande (AB001, NEG100) — elle refacture.
 // Colonnes générées par la base (identité, horodatage…) laissées à la base.
+// Avoir d'une facture éditée (FAC080S option SA : SpCreTot, SpCrePar) : même copie en type A, facture d'origine (FDFACO, FDFACA),
+// « à éditer » ; avoir total = toute la facture, et ses BL (EXP010) et éléments en plus (EXP011) redeviennent à facturer ; avoir
+// d'un BL = les éléments et lignes de ce BL (montants d'élément à zéro, recalculés en modification), et ce BL seul redevient à
+// facturer : quantité d'élément = celle de ce BL (EXP010.HQTELI, retirée de la commande à l'édition), honoraires et pied non repris.
+// Un deuxième avoir de la même facture (ou du même BL) est refusé tant que le premier n'est pas supprimé. Comme le RPG : compléments
+// AB004 laissés facturés ; lignes de texte sans BL non reprises dans l'avoir d'un BL ; BL libérés dès la création de l'avoir, et pas
+// rattachés de nouveau à la facture si l'avoir est supprimé.
 // =====================================================================
+
+// Avoir demandé : Bl null = avoir total
+internal sealed record AvoirDemande(int? Bl);
 internal sealed partial class FacturationAutoDb2
 {
     // En-tête : zones remises à zéro (0 ou blanc selon le type)
@@ -24,9 +34,9 @@ internal sealed partial class FacturationAutoDb2
         "FDCPT", "FDACPT", "FDTAGE", "FDDATEE", "FDHEURE", "FDMANAU", "FDMETHE", "FDTYPEE", "FDIDFACTX", "FDSTAT", "FDFACSTAT",
     ];
 
-    // Renvoie le n° de la copie et son statut (« à contrôler » si l'originale l'est)
+    // Renvoie le n° de la copie et son statut (« à contrôler » si l'originale l'est) ; avoir : avoir de la facture (voir ci-dessus)
     public async Task<(int Numero, bool AControler)> CopierFactureAsync(int societe, string profil, NumerotationFactures numerotation, int numero, DateOnly origine,
-        DateOnly date, DateOnly echeance, CancellationToken ct)
+        DateOnly date, DateOnly echeance, CancellationToken ct, AvoirDemande? avoir = null)
     {
         await using var cnx = await OuvrirAsync(ct);
         await using var tx = (OdbcTransaction)await cnx.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
@@ -35,12 +45,45 @@ internal sealed partial class FacturationAutoDb2
         try
         {
             string statut;
-            await using (var rd = await Lire(cnx, tx, "SELECT FDEDIT FROM {b}.FAC080 WHERE RSOC = ? AND RNFAC = ? AND FDANNE = ? AND FDMOIS = ? AND FDJOUR = ?",
-                             ct, societe, numero, origine.Year, origine.Month, origine.Day))
+            var cle = new object[] { societe, numero, origine.Year, origine.Month, origine.Day };
+            await using (var rd = await Lire(cnx, tx, """
+                SELECT FDEDIT, FDTYPE FROM {b}.FAC080 WHERE RSOC = ? AND RNFAC = ? AND FDANNE = ? AND FDMOIS = ? AND FDJOUR = ?
+                WITH RS USE AND KEEP EXCLUSIVE LOCKS
+                """, ct, cle))
             {
                 if (!await rd.ReadAsync(ct)) throw new RegleMetierException($"La facture {numero} du {origine:dd/MM/yyyy} n'existe plus.");
                 if (rd.Texte(0) == "S") throw new RegleMetierException($"La facture {numero} est supprimée : elle ne se copie pas.");
-                statut = rd.Texte(0) == "A" ? "A" : "O";
+                // FAC080S option SA : avoir d'une facture (pas d'un avoir) éditée ; pas encore éditée, elle se modifie ou se supprime
+                if (avoir is not null && rd.Texte(1) != "F") throw new RegleMetierException($"Le document {numero} est un avoir : on ne fait pas d'avoir d'un avoir.");
+                if (avoir is not null && rd.Texte(0) != "E")
+                    throw new RegleMetierException($"La facture {numero} n'est pas éditée : modifiez-la ou supprimez-la plutôt que d'en faire un avoir.");
+                statut = avoir is null && rd.Texte(0) == "A" ? "A" : "O";
+            }
+
+            // Avoir déjà fait (non supprimé) : total, ou du même BL
+            if (avoir is not null)
+                await using (var rd = await Lire(cnx, tx, """
+                    SELECT a.RNFAC, (SELECT COUNT(*) FROM {b}.FAC100 l WHERE l.RSOC = a.RSOC AND l.RNFAC = a.RNFAC AND l.FGANNE = a.FDANNE
+                                     AND l.FGMOIS = a.FDMOIS AND l.FGJOUR = a.FDJOUR AND l.FGBL = ?),
+                           (SELECT COUNT(DISTINCT l.FGBL) FROM {b}.FAC100 l WHERE l.RSOC = a.RSOC AND l.RNFAC = a.RNFAC AND l.FGANNE = a.FDANNE
+                                     AND l.FGMOIS = a.FDMOIS AND l.FGJOUR = a.FDJOUR AND l.FGBL <> 0)
+                    FROM {b}.FAC080 a WHERE a.RSOC = ? AND a.FDTYPE = 'A' AND a.FDFACO = ? AND a.FDFACA = ? AND a.FDEDIT <> 'S'
+                    """, ct, avoir.Bl ?? -1, societe, numero, origine.Year))
+                    while (await rd.ReadAsync(ct))
+                        // avoir total demandé : tout avoir existant gêne ; avoir d'un BL : un avoir qui a des lignes de ce BL
+                        if (avoir.Bl is null || rd.Entier(1) > 0)
+                            throw new RegleMetierException($"L'avoir {rd.Entier(0)} existe déjà pour {(avoir.Bl is { } dejaBl ? $"le BL {dejaBl} de " : "")}la facture {numero} : "
+                                + "supprimez-le ou modifiez-le plutôt que d'en faire un autre.");
+
+            // Avoir d'un BL : éléments qui ont des lignes de ce BL
+            var parBl = avoir?.Bl is not null;
+            const string ElementsDuBl = "SELECT FGNEL FROM {b}.FAC100 WHERE RSOC = ? AND RNFAC = ? AND FGANNE = ? AND FGMOIS = ? AND FGJOUR = ? AND FGBL = ?";
+            var elementsDuBl = 0;
+            if (avoir?.Bl is { } b)
+            {
+                await using var rd = await Lire(cnx, tx, $"SELECT COUNT(DISTINCT FGNEL) FROM ({ElementsDuBl}) x", ct, [.. cle, b]);
+                if (await rd.ReadAsync(ct)) elementsDuBl = rd.Entier(0);
+                if (elementsDuBl == 0) throw new RegleMetierException($"Le BL {b} n'a aucune ligne sur la facture {numero}.");
             }
 
             var nouveau = await NumeroAsync(cnx, tx, Executer, societe, numerotation, date, ct);
@@ -62,11 +105,54 @@ internal sealed partial class FacturationAutoDb2
                     valeurs["FDPROF"] = Tronquer(profil, 10);
                     (valeurs["FDECHA"], valeurs["FDECHM"], valeurs["FDECHJ"]) = (echeance.Year, echeance.Month, echeance.Day);
                     aZero = RemisesAZeroEnTete;
+                    if (avoir is not null)
+                    {
+                        (valeurs["FDTYPE"], valeurs["FDFACO"], valeurs["FDFACA"]) = ("A", numero, origine.Year);
+                        if (parBl) valeurs["FDPLEL"] = elementsDuBl;
+                    }
                 }
-                if (table == "FAC090") valeurs["FEEDT"] = "N";
-                await CopierLignesAsync(cnx, tx, table, valeurs, aZero,
-                    $"RSOC = ? AND {colNumero} = ? AND {colAnnee} = ? AND {colMois} = ? AND {colJour} = ?",
-                    [societe, numero, origine.Year, origine.Month, origine.Day], ct);
+                if (table == "FAC090")
+                {
+                    valeurs["FEEDT"] = "N";
+                    if (parBl) aZero = new HashSet<string> { "FECA", "FEVEN", "FECAA", "FEVENA", "FEMTO" };
+                }
+                if (table == "FAC081" && parBl) continue;   // pied de toute la facture : pas pour l'avoir d'un BL
+                var condition = $"RSOC = ? AND {colNumero} = ? AND {colAnnee} = ? AND {colMois} = ? AND {colJour} = ?";
+                object?[] parametres = cle;
+                if (avoir?.Bl is { } blAvoir && table is "FAC090" or "FAC100" or "FAC105")
+                {
+                    condition += table switch
+                    {
+                        "FAC100" => " AND FGBL = ?",
+                        "FAC090" => $" AND FENUM IN ({ElementsDuBl})",
+                        _ => $" AND FTNEL IN ({ElementsDuBl})",
+                    };
+                    parametres = table == "FAC100" ? [.. cle, blAvoir] : [.. cle, .. cle, blAvoir];
+                }
+                await CopierLignesAsync(cnx, tx, table, valeurs, aZero, condition, parametres, ct);
+            }
+
+            // Avoir d'un BL : quantité de chaque élément = celle de ce BL (avant de libérer le BL)
+            if (avoir?.Bl is { } blQte)
+                await Executer("""
+                    UPDATE {b}.FAC090 e SET FEQTE = (SELECT COALESCE(SUM(x.HQTELI), 0) FROM {b}.EXP010 x WHERE x.RSOC = e.RSOC AND x.HNOFAC = ?
+                        AND x.HDAFAA = ? AND x.HDAFAM = ? AND x.HDAFAJ = ? AND x.HNOBL = ? AND x.HNOELT = e.FENUM)
+                    WHERE e.RSOC = ? AND e.RNFAC = ? AND e.FEANNE = ? AND e.FEMOIS = ? AND e.FEJOUR = ?
+                    """, numero, origine.Year, origine.Month, origine.Day, blQte, societe, nouveau, date.Year, date.Month, date.Day);
+
+            // Avoir : BL (tous, ou celui demandé) et éléments en plus de la facture de nouveau à facturer
+            if (avoir is not null)
+            {
+                var filtreBl = avoir.Bl is null ? "" : " AND HNOBL = ?";
+                object?[] p = avoir.Bl is { } x ? [.. cle, x] : cle;
+                await Executer($"""
+                    UPDATE {"{b}"}.EXP010 SET HBLFAC = 'N', HNOFAC = 0, HNOELT = 0, HDAFAA = 0, HDAFAM = 0, HDAFAJ = 0
+                    WHERE RSOC = ? AND HNOFAC = ? AND HDAFAA = ? AND HDAFAM = ? AND HDAFAJ = ?{filtreBl}
+                    """, p);
+                await Executer($"""
+                    UPDATE {"{b}"}.EXP011 SET HPFACT = 'N', HPNFAC = 0, HPNELT = 0, HPDFAA = 0, HPDFAM = 0, HPDFAJ = 0
+                    WHERE RSOC = ? AND HPNFAC = ? AND HPDFAA = ? AND HPDFAM = ? AND HPDFAJ = ?{filtreBl}
+                    """, p);
             }
             await tx.CommitAsync(ct);
             valide = true;

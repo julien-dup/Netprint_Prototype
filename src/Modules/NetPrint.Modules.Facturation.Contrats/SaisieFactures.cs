@@ -169,4 +169,8 @@ public interface ISaisieFactures
     // Copie d'une facture (FAC080S option 3 → FAC150 mode D) : nouvelle facture du jour, n° pris au compteur, « à éditer », mêmes
     // en-tête, éléments et lignes, sans acompte ni BL rattachés ; à corriger ensuite en modification
     Task<FactureCreee> CopierAsync(int numero, DateOnly date, CancellationToken ct = default);
+
+    // Avoir d'une facture éditée (FAC080S option SA) : avoir du jour, « à éditer », facture d'origine renseignée ; total (bl null :
+    // toute la facture, ses BL redeviennent à facturer) ou d'un BL (ses lignes, ce BL redevient à facturer) ; à ajuster en modification
+    Task<FactureCreee> CreerAvoirAsync(int numero, DateOnly date, int? bl = null, CancellationToken ct = default);
 }
