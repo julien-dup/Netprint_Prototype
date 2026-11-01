@@ -20,6 +20,8 @@
     }
     else if (fiche is not null)
     {
+        <button disabled="@(!droits.Modifier)" title="Modifier l'en-tête, les lignes, les lots et les palettes ; supprimer le pré-BL"
+                @onclick='() => Navigation.NavigateTo($"logistique/prebl/{Numero}/modifier")'>✏ Modifier</button>
         <span class="espace"></span>
         <button class="bouton-principal" disabled="@(fiche.Refus != "" || !droits.Modifier || occupe)"
                 title="@(fiche.Refus != "" ? fiche.Refus : droits.Modifier ? "Créer le BL du même numéro : sortie du stock, palettes expédiées, commande mise à jour" : "Droit de modification des OPR nécessaire")"

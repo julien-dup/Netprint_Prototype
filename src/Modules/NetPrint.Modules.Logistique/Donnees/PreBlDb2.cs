@@ -13,7 +13,7 @@ namespace NetPrint.Modules.Logistique.Donnees;
 // statut des palettes dans PROD_ENTITE (pointage des terminaux) ; variante sans palette : EXP005.FEPREB.
 // Adresse : A500F (EXP509.HNADRE), sinon fiche client.
 // =====================================================================
-internal sealed class PreBlDb2(IConfiguration config)
+internal sealed partial class PreBlDb2(IConfiguration config)
 {
     private string Bib => BaseDb2.Bibliotheque(config);
 

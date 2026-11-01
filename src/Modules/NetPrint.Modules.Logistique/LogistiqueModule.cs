@@ -74,6 +74,7 @@ public static class LogistiqueModule
         services.AddScoped<Ecrans.Opr.EtatListeOpr>();
         services.AddScoped<PreBlDb2>();
         services.AddScoped<IPreBl, PreBlService>();                         // WinDev PreBL / PreBLSansPalette
+        services.AddScoped<ISaisiePreBl, SaisiePreBlService>();             // FEN_CreationPREBL, FEN_SaisiePREBL
         services.AddScoped<Ecrans.PreBl.EtatListePreBl>();
         return services;
     }

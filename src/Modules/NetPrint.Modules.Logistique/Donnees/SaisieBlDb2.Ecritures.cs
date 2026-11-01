@@ -216,7 +216,7 @@ internal sealed partial class SaisieBlDb2
               $"le stock deviendrait négatif le {BaseDb2.DateAAAAMMJJ(retour):dd/MM/yyyy}.";
 
     // ---------- N° de BL (§ 8.2) : incrément dans la transaction (PRT320F par enseigne, sinon AA00083 « NB ») ; un n° déjà
-    // utilisé (compteur en retard sur les données) est sauté ----------
+    // utilisé (compteur en retard sur les données) est sauté : BL, pré-BL (qui deviendra le BL du même n°), palettes ----------
     private async Task<int> NumeroBlAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, string enseigne, bool parEnseigne,
         CancellationToken ct)
     {
@@ -233,7 +233,11 @@ internal sealed partial class SaisieBlDb2
             }
             else numero = await CompteurAsync(cnx, tx, societe, "NB", ct);
             if (numero > 999999) throw new RegleMetierException("Le compteur des BL a atteint 999999.");
-            await using var existe = await Lire(cnx, tx, "SELECT 1 FROM {b}.EXP009 WHERE RSOC = ? AND HNOBL = ?", ct, societe, numero);
+            await using var existe = await Lire(cnx, tx, """
+                SELECT 1 FROM SYSIBM.SYSDUMMY1 WHERE EXISTS (SELECT 1 FROM {b}.EXP009 WHERE RSOC = ? AND HNOBL = ?)
+                   OR EXISTS (SELECT 1 FROM {b}.EXP509 WHERE RSOC = ? AND HNOBL = ?)
+                   OR EXISTS (SELECT 1 FROM {b}.PROD_ENTITE WHERE SOCIETE = ? AND NUMERO_BL = ?)
+                """, ct, societe, numero, societe, numero, societe, numero);
             if (!await existe.ReadAsync(ct)) return numero;
         }
         throw new RegleMetierException("Aucun n° de BL libre trouvé : vérifiez le compteur des BL.");
@@ -313,15 +317,15 @@ internal sealed partial class SaisieBlDb2
             societe, numero, element);
     }
 
-    // Texte de pied du BL : lignes non vides, en gardant les lignes vides intermédiaires
+    // Texte de pied du BL (EXP012) ou du pré-BL (EXP512) : lignes vides de fin retirées, lignes vides intermédiaires gardées
     private async Task EcrireTextePiedAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, int numero, IReadOnlyList<string> texte,
-        CancellationToken ct)
+        CancellationToken ct, string table = "EXP012")
     {
         var pied = texte.Select(x => x.Trim()).ToList();
         while (pied.Count > 0 && pied[^1] == "") pied.RemoveAt(pied.Count - 1);
-        await Executer(cnx, tx, "DELETE FROM {b}.EXP012 WHERE RSOC = ? AND HNOBL = ?", ct, societe, numero);
+        await Executer(cnx, tx, $"DELETE FROM {{b}}.{table} WHERE RSOC = ? AND HNOBL = ?", ct, societe, numero);
         for (var i = 0; i < pied.Count; i++)
-            await Executer(cnx, tx, "INSERT INTO {b}.EXP012 (RSOC, HNOBL, HTNLIG, HTTXT) VALUES (?, ?, ?, ?)", ct, societe, numero, i + 1,
+            await Executer(cnx, tx, $"INSERT INTO {{b}}.{table} (RSOC, HNOBL, HTNLIG, HTTXT) VALUES (?, ?, ?, ?)", ct, societe, numero, i + 1,
                 Tronquer(pied[i], 40));
     }
 

@@ -14,6 +14,8 @@
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
 
 <fieldset class="barre-outils">
+    <button disabled="@(!droits.Creer)" title="Préparer une expédition : client, adresse, lignes de commande, lots et palettes"
+            @onclick='() => Navigation.NavigateTo("logistique/prebl/nouveau")'>➕ Nouveau pré-BL</button>
     <span class="espace"></span>
     <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche du pré-BL (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir le pré-BL</button>
 </fieldset>
