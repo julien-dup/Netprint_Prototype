@@ -105,9 +105,12 @@ Anomalies à ne pas reproduire (détail dans les fiches) : aucune transaction (W
 toujours annoncé), client facturé reporté d'un dossier à l'autre, valeurs reportées d'une ligne à l'autre, double transformation
 possible, modification qui efface récapitulatif et clôture, palettes non réservées, pré-BL livré supprimable.
 
-Questions pour David :
-1. N° de pré-BL = n° de BL (un pré-BL supprimé laisse un trou) : à garder ?
-2. Lignes « A PROD » (OF pas encore produit) dans le pré-BL : à reprendre ?
-3. Colisage Hermès (e-SCM), facturation Kimmel (stockage), feuille camion : encore utilisés ?
-4. SPF010.AOPT7 (exclu du « stock payé ») : sens ?
-5. Circuit « OPR avec sacs » : correspond-il aux web services articles + PET (pas de « StockArticle » en PHP) ?
+Réponses de David (01/11) :
+1. **N° de pré-BL = n° de BL : on garde** (n° réservé par GETBL à la création du pré-BL).
+2. **Lots « A PROD » (OF pas encore produit) : non utilisés** ; pas repris dans la saisie (L8c), refusés à la transformation.
+3. **Colisage Hermès (e-SCM), facturation Kimmel du stockage et feuille camion : utilisés** ; à reprendre (L8d et suites).
+4. SPF010.AOPT7 (« option div 7 ») : David ne sait pas. Seul usage trouvé : en pré-BL « stock payé », les lignes de commande
+   dont l'article a AOPT7 = O ne sont pas proposées (FEN_AjoutLigneCde) ; aussi imprimé à part sur la feuille camion. Le
+   libellé de l'option dans la fiche article dirait à quoi elle sert.
+5. « OPR avec sacs » vient du message de David du 31/10 (« 2 clients utilisent les OPR avec des sacs et l'appli StockArticle
+   pour générer les BL ») : aucun projet StockArticle dans `D:\Mes Projets` ni en PHP ; à retrouver.
