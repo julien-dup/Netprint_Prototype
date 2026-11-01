@@ -201,6 +201,16 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
         return releve;
     }
 
+    // Facture d'essai effacée de tous ses fichiers, historique commercial compris (FAC070 / FAC072 écrits par l'édition définitive)
+    internal static async Task SupprimerFactureAsync(System.Data.Odbc.OdbcConnection cnx, int societe, int numero, DateOnly date)
+    {
+        foreach (var (table, an, mois, jour) in new[] { ("FAC100", "FGANNE", "FGMOIS", "FGJOUR"), ("FAC105", "FTANNE", "FTMOIS", "FTJOUR"),
+                     ("FAC090", "FEANNE", "FEMOIS", "FEJOUR"), ("FAC081", "FDANNE", "FDMOIS", "FDJOUR"), ("FAC072", "HNDTFA", "HNDTFM", "HNDTFJ"),
+                     ("FAC070", "HFDTFA", "HFDTFM", "HFDTFJ"), ("FAC080", "FDANNE", "FDMOIS", "FDJOUR") })
+            await ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table} WHERE RSOC = ? AND RNFAC = ? AND {an} = ? AND {mois} = ? AND {jour} = ?",
+                societe, numero, date.Year, date.Month, date.Day);
+    }
+
     internal static async Task<int> ExecuterAsync(System.Data.Odbc.OdbcConnection cnx, string sql, params object?[] v)
     {
         await using var cmd = cnx.CreateCommand();
@@ -276,9 +286,7 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
             finally
             {
                 if (numero is { } n)
-                    foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                        await ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                            societe, n, date.Year, date.Month, date.Day);
+                    await SupprimerFactureAsync(cnx, societe, n, date);
                 foreach (var (table, rrn, colonnes, valeurs) in avant)
                     await ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(c => $"{c.Trim()} = ?"))} WHERE RRN(t) = ?",
                         [.. valeurs, rrn]);

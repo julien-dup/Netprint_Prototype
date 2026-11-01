@@ -15,7 +15,8 @@ namespace NetPrint.Modules.Facturation.Donnees;
 //  - EXP010 : BL de la facture facturés (HBLFAC = O ; BL rattachés par HNOFAC et la date de facture, comme EXP010L7) ;
 //  - AB001 : n° et date de la dernière facture, quantité facturée de l'élément (+ facture, − avoir) ;
 //  - NEG100 : quantité facturée des lignes des éléments de type 2 et 3 (+ facture, − avoir).
-// Pas repris ici : historique commercial FAC070 / FAC072 (commissions, frais, marges), notifications TRTMSG. Une facture
+//  - FAC070 / FAC072 : historique commercial (HistoriqueCommercial, comme FAC199 : vérifié sur 300 factures éditées par l'AS400).
+// Pas repris ici : notifications TRTMSG. Une facture
 // « supprimée » (FDEDIT = S) n'est plus effacée de FAC080 (R17) : elle est refusée.
 // =====================================================================
 internal sealed class EditionDefinitiveDb2(IConfiguration config, CalculFacturesDb2 calcul)
@@ -68,6 +69,16 @@ internal sealed class EditionDefinitiveDb2(IConfiguration config, CalculFactures
             await Executer("UPDATE {b}.EXP010 SET HBLFAC = 'O' WHERE RSOC = ? AND HNOFAC = ? AND HDAFAA = ? AND HDAFAM = ? AND HDAFAJ = ?", cle);
 
             await QuantitesFactureesAsync(cnx, tx, Bib, cle, avoir ? -1 : 1, derniereFacture: true, ct);
+
+            // Historique commercial (FAC199 HISTO / HISNEG) ; un historique resté d'une édition annulée est remplacé
+            await Executer("DELETE FROM {b}.FAC072 WHERE RSOC = ? AND RNFAC = ? AND HNDTFA = ? AND HNDTFM = ? AND HNDTFJ = ?", cle);
+            await Executer("DELETE FROM {b}.FAC070 WHERE RSOC = ? AND RNFAC = ? AND HFDTFA = ? AND HFDTFM = ? AND HFDTFJ = ?", cle);
+            if (await HistoriqueCommercialDb2.LireAsync(cnx, tx, Bib, societe, numero, date, ct) is { } h)
+            {
+                var (fac070, fac072) = HistoriqueCommercial.Calculer(h.Entete, h.Parametres, h.Elements);
+                await HistoriqueCommercialDb2.EcrireAsync(cnx, tx, Bib, "FAC072", fac072, ct);
+                await HistoriqueCommercialDb2.EcrireAsync(cnx, tx, Bib, "FAC070", fac070, ct);
+            }
             await tx.CommitAsync(ct);
             valide = true;
             return t;

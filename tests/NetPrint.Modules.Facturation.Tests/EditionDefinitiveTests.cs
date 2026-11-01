@@ -7,7 +7,8 @@ using NetPrint.Socle.Donnees;
 namespace NetPrint.Modules.Facturation.Tests;
 
 // Édition définitive (FAC201 en définitif) sur la base de test : facture d'essai 100544 du 23/10/2008 (société 8, « à éditer »).
-// Tout ce que l'édition touche (FAC080, FAC090, EXP010, AB001, NEG100) est relevé avant, puis remis à l'identique.
+// Tout ce que l'édition touche (FAC080, FAC090, EXP010, AB001, NEG100) est relevé avant, puis remis à l'identique ; l'historique
+// commercial (FAC070, FAC072) est relevé avant (la facture d'essai en a un, resté d'une ancienne édition) et remis tel quel.
 [Collection(EcrituresNp11f.Nom)]   // une seule classe d'écriture à la fois : compteurs et BL partagés
 public class EditionDefinitiveTests
 {
@@ -55,6 +56,43 @@ public class EditionDefinitiveTests
         return releve;
     }
 
+    private static async Task<(int Fac070, int Fac072)> HistoriqueAsync(OdbcConnection cnx)
+    {
+        var comptes = new int[2];
+        foreach (var (i, table, an, mois, jour) in new[] { (0, "FAC070", "HFDTFA", "HFDTFM", "HFDTFJ"), (1, "FAC072", "HNDTFA", "HNDTFM", "HNDTFJ") })
+        {
+            await using var cmd = cnx.CreateCommand();
+            cmd.CommandText = $"SELECT COUNT(*) FROM {Bib}.{table} WHERE RSOC = ? AND RNFAC = ? AND {an} = ? AND {mois} = ? AND {jour} = ?";
+            foreach (var v in new object[] { Societe, Numero, Date.Year, Date.Month, Date.Day }) cmd.Parameters.Valeur(v);
+            comptes[i] = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+        }
+        return (comptes[0], comptes[1]);
+    }
+
+    // Lignes FAC070 / FAC072 de la facture d'essai, toutes colonnes
+    private static async Task<List<(string Table, List<Dictionary<string, object>> Lignes)>> LignesHistoriqueAsync(OdbcConnection cnx)
+    {
+        var resultat = new List<(string, List<Dictionary<string, object>>)>();
+        foreach (var (table, an, mois, jour) in new[] { ("FAC070", "HFDTFA", "HFDTFM", "HFDTFJ"), ("FAC072", "HNDTFA", "HNDTFM", "HNDTFJ") })
+        {
+            await using var cmd = cnx.CreateCommand();
+            cmd.CommandText = $"SELECT * FROM {Bib}.{table} WHERE RSOC = ? AND RNFAC = ? AND {an} = ? AND {mois} = ? AND {jour} = ?";
+            foreach (var v in new object[] { Societe, Numero, Date.Year, Date.Month, Date.Day }) cmd.Parameters.Valeur(v);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            var lignes = new List<Dictionary<string, object>>();
+            while (await rd.ReadAsync())
+            {
+                var l = new Dictionary<string, object>();
+                for (var i = 0; i < rd.FieldCount; i++) l[rd.GetName(i).Trim()] = rd.GetValue(i) is string t ? t.TrimEnd() : rd.GetValue(i);
+                lignes.Add(l);
+            }
+            resultat.Add((table, lignes));
+        }
+        return resultat;
+    }
+
+    private static string Texte(Dictionary<string, object> l) => string.Join("|", l.Select(x => $"{x.Key}={x.Value}".TrimEnd()));
+
     private static async Task RemettreAsync(OdbcConnection cnx, List<(string Table, long Rrn, string Colonnes, object?[] Valeurs)> releve)
     {
         foreach (var (table, rrn, colonnes, valeurs) in releve)
@@ -81,6 +119,7 @@ public class EditionDefinitiveTests
         await using var cnx = BaseDb2.Connexion(BaseDeTest.Configuration);
         await cnx.OpenAsync();
         var avant = await ReleverAsync(cnx);
+        var historique = await LignesHistoriqueAsync(cnx);
         var entete = avant.Single(x => x.Table == "FAC080");
         Assert.Equal("O", entete.Valeurs[0]!.ToString()!.Trim());   // facture d'essai encore « à éditer »
         var calcul = await new CalculFacturesDb2(BaseDeTest.Configuration).LireAsync(Societe, Numero, Date, default);
@@ -100,6 +139,11 @@ public class EditionDefinitiveTests
             Assert.All(apres.Where(x => x.Table is "FAC090" or "EXP010"), x => Assert.Equal("O", x.Valeurs[0]!.ToString()!.Trim()));
             foreach (var ab in apres.Where(x => x.Table == "AB001"))
                 Assert.Equal([Numero, Date.Year, Date.Month, Date.Day], ab.Valeurs[..4].Select(Convert.ToInt32));
+            // Historique commercial remplacé : une ligne FAC070 par élément, les lignes FAC072 calculées
+            var (h070, h072) = await HistoriqueAsync(cnx);
+            Assert.Equal(apres.Count(x => x.Table == "FAC090"), h070);
+            var lu = await HistoriqueCommercialDb2.LireAsync(cnx, null, Bib, Societe, Numero, Date, default);
+            Assert.Equal(HistoriqueCommercial.Calculer(lu!.Value.Entete, lu.Value.Parametres, lu.Value.Elements).Fac072.Count, h072);
 
             // Deuxième édition refusée : la facture est éditée
             var refus = await Assert.ThrowsAsync<RegleMetierException>(() =>
@@ -109,7 +153,20 @@ public class EditionDefinitiveTests
         finally
         {
             await RemettreAsync(cnx, avant);
+            foreach (var (table, an, mois, jour) in new[] { ("FAC070", "HFDTFA", "HFDTFM", "HFDTFJ"), ("FAC072", "HNDTFA", "HNDTFM", "HNDTFJ") })
+            {
+                await using var cmd = cnx.CreateCommand();
+                cmd.CommandText = $"DELETE FROM {Bib}.{table} WHERE RSOC = ? AND RNFAC = ? AND {an} = ? AND {mois} = ? AND {jour} = ?";
+                foreach (var v in new object[] { Societe, Numero, Date.Year, Date.Month, Date.Day }) cmd.Parameters.Valeur(v);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            await using var tx = cnx.BeginTransaction();
+            foreach (var (table, lignes) in historique) await HistoriqueCommercialDb2.EcrireAsync(cnx, tx, Bib, table, lignes, default);
+            tx.Commit();
         }
+        var remisHistorique = await LignesHistoriqueAsync(cnx);
+        Assert.Equal(historique.Select(x => (x.Table, string.Join(";", x.Lignes.Select(Texte).Order()))),
+            remisHistorique.Select(x => (x.Table, string.Join(";", x.Lignes.Select(Texte).Order()))));
         var remis = await ReleverAsync(cnx);
         Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
     }

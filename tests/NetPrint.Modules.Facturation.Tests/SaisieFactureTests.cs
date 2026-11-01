@@ -286,9 +286,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         finally
         {
             if (numero is { } n)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
+                await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, date);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
@@ -338,9 +336,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         finally
         {
             if (numero is { } n)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
+                await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, date);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
@@ -402,9 +398,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         finally
         {
             if (numero is { } n)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
+                await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, date);
             foreach (var (table, rrn, colonnes, valeurs) in avant2.Concat(avant))
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
@@ -454,9 +448,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         finally
         {
             foreach (var n in numeros)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC105", "FT"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
+                await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, date);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
@@ -501,9 +493,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         finally
         {
             if (numero is { } n)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
+                await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, date);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
@@ -553,9 +543,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         finally
         {
             if (numero is { } n)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
+                await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, date);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
@@ -608,9 +596,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         finally
         {
             foreach (var n in numeros)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC105", "FT"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
+                await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, date);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
@@ -658,9 +644,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         finally
         {
             if (numero is { } n)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
+                await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, date);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
@@ -739,9 +723,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         {
             if (numero is { } n)
                 foreach (var d in new[] { date, autre })
-                    foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                        await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                            societe, n, d.Year, d.Month, d.Day);
+                    await FacturationAutoBaseTests.SupprimerFactureAsync(cnx, societe, n, d);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
