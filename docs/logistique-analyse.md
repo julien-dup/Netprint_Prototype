@@ -26,7 +26,7 @@ AP00F, EXP009, EXP509, EXP517, EXP520, OPR010, OPR015, PROD_ENTITE…). Sources 
 |---|---|---|---|
 | **A. Saisie au 5250** (sans code-barre) | EXP010 / EXP010S | Livraisons à effectuer (WinDev, lecture) + état des préparations de commande **EXP078** | soc 1, 2, 22, 23, 24, 26, 27, 28, 30… : la majorité des sociétés |
 | **B. OPR** | WinDev OPR (`FEN_CreationBL`, écriture directe) | OPR010 / 015 / 016, préparation et colisage (PROD_ENTITE, PROD_COLISAGE) | Printor étiquettes, Gouzy, Petrel (soc 8 : 50 %, soc 9 : 88 %, soc 31) |
-| **C. OPR avec sacs** | web service PHP StockArticle | OPR | 2 clients |
+| **C. OPR avec code-barre** (toutes les unités de produit fini identifiées, SSCC) | WinDev OPR (`FEN_CreationBL`), repris en L7 | OPR ; sortie de stock, préparation (PROD_ENTITE statut 3), cartons et clôture (PROD_COLISAGE, statut 4) par le web service PHP `articles_controller.php` | 2 clients |
 | **D. Pré-BL palettes code-barre** | RPG **EXP540** (transformation du pré-BL) | WinDev PreBL / PreBLSansPalette + web services PHP GRA / GRAPPG / CFP (pointage des palettes SSCC) | Graphidecor, Printor Étuis, CoffretPack, Draeger (soc 20 : 98 %, soc 29 : 94 %, soc 25, soc 8 : 7 %) |
 
 Commun à tous : liste / consultation des BL (ConsultationBL WinDev, EXP010S), édition (EXP030 → EXP035P2), certificats
@@ -112,5 +112,6 @@ Réponses de David (01/11) :
 4. SPF010.AOPT7 (« option div 7 ») : David ne sait pas. Seul usage trouvé : en pré-BL « stock payé », les lignes de commande
    dont l'article a AOPT7 = O ne sont pas proposées (FEN_AjoutLigneCde) ; aussi imprimé à part sur la feuille camion. Le
    libellé de l'option dans la fiche article dirait à quoi elle sert.
-5. « OPR avec sacs » vient du message de David du 31/10 (« 2 clients utilisent les OPR avec des sacs et l'appli StockArticle
-   pour générer les BL ») : aucun projet StockArticle dans `D:\Mes Projets` ni en PHP ; à retrouver.
+5. « OPR avec sacs » était une faute de frappe : **OPR avec code-barre** (toutes les unités de produit fini identifiées). Le
+   PHP est `articles_controller.php` : il prépare (statut 3) et met en cartons (PROD_COLISAGE, statut 4) ; le BL reste créé
+   par le WinDev OPR, déjà repris en L7 (la situation de la préparation lit justement ces palettes et ces cartons).
