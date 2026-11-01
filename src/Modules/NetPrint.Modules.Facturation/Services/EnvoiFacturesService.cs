@@ -20,13 +20,15 @@ namespace NetPrint.Modules.Facturation.Services;
 // marque d'envoi FAC080 après l'envoi réel seulement (le WinDev marquait avant, même si l'envoi échouait). Pour l'instant : mail
 // en PDF ; les clients en FTP, plateforme (SuperPDP) ou formats Factur-X / EDI / CSV sont signalés, pas encore pris en charge.
 // =====================================================================
-internal sealed class EnvoiFacturesService(EnvoiFacturesDb2 donnees, ConsultationFacturesDb2 consultation, IEditionFactures edition, IContactsTiers contacts, IMessagerie messagerie,
+internal sealed class EnvoiFacturesService(EnvoiFacturesDb2 donnees, ConsultationFacturesDb2 consultation, DroitsFacturationDb2 droits,
+    IEditionFactures edition, IContactsTiers contacts, IMessagerie messagerie,
     IJournalEnvois journal, IUtilisateurs utilisateurs, ISocietes societes, IUtilisateurCourant utilisateur,
     ILogger<EnvoiFacturesService> journalTechnique) : IEnvoiFactures
 {
     public const string TypeEnvoi = "FAC";   // ENV100.ENTYPE (CHAR 3) : envoi d'une facture
     public const int Maxi = LimitesRecherche.Maximum;   // factures listées pour un client (garde-fou de la charte)
     public const string FormatPdf = "PDF";
+    public const string ProgrammeEnvoiAuto = "PCFACAUTO";   // PRT000P1 : AOPT01 = « ** » interdit l'envoi automatique (WinDev)
 
     // Mail en PDF : canal N ou blanc, format blanc, PDF ou PDF1 (EDIP : PDF + fichier EDI, pas encore)
     internal static bool PrisEnCharge(ParametresEnvoiClient? p) => p is null || (p.Canal is "" or "N" && p.Format is "" or "PDF" or "PDF1");
@@ -111,19 +113,129 @@ internal sealed class EnvoiFacturesService(EnvoiFacturesDb2 donnees, Consultatio
         EnvoiFactures envoi, CancellationToken ct)
     {
         var (nom, p) = await donnees.ClientAsync(u.Societe, envoi.CompteGeneral, envoi.CompteClient, ct);
-        var factures = new List<(FactureAEnvoyer, DocumentGenere)>();
+        var factures = new List<(FactureAEnvoyer Facture, DocumentGenere Pdf)>();
         foreach (var lue in await RelireAsync(u, envoi, ct)) factures.Add((lue, await edition.EditerAsync(lue.Numero, lue.Date, ct)));
-        nom ??= "";
-        var a = Adresses(envoi.Destinataires);
-        var cc = Adresses(envoi.Copies).Except(a, StringComparer.OrdinalIgnoreCase).ToList();
         var societe = await societes.LireNomAsync(u.Societe, ct) ?? "";
-        var numeros = string.Join(", ", factures.Select(f => f.Item1.Numero));
-        var objet = Objet(p?.Objet ?? "", factures.Select(f => f.Item1).ToList(), nom);
+        return (Message(factures, nom ?? "", p?.Objet ?? "", envoi.Destinataires, envoi.Copies, societe), factures);
+    }
+
+    // Message : objet (modèle PFOBJM sinon « Facture n° … »), texte, un PDF par facture
+    private static MessageBrouillon Message(IReadOnlyList<(FactureAEnvoyer Facture, DocumentGenere Pdf)> factures, string nom, string modeleObjet,
+        IEnumerable<string> destinataires, IEnumerable<string> copies, string societe)
+    {
+        var a = Adresses(destinataires);
+        var cc = Adresses(copies).Except(a, StringComparer.OrdinalIgnoreCase).ToList();
+        var objet = Objet(modeleObjet, [.. factures.Select(f => f.Facture)], nom);
         var quoi = factures.Count == 1
-            ? $"{(factures[0].Item1.Avoir ? "l'avoir" : "la facture")} n° {factures[0].Item1.Numero} du {factures[0].Item1.Date:dd/MM/yyyy}"
-            : $"nos factures et avoirs n° {numeros}";
+            ? $"{(factures[0].Facture.Avoir ? "l'avoir" : "la facture")} n° {factures[0].Facture.Numero} du {factures[0].Facture.Date:dd/MM/yyyy}"
+            : $"nos factures et avoirs n° {string.Join(", ", factures.Select(f => f.Facture.Numero))}";
         var texte = $"Bonjour,\r\n\r\nVeuillez trouver ci-joint {quoi}.\r\n\r\nCordialement,\r\n{societe}".TrimEnd();
-        return (new MessageBrouillon(a, cc, objet, texte, [.. factures.Select(f => new PieceJointe(f.Item2.Nom, f.Item2.Contenu))]), factures);
+        return new MessageBrouillon(a, cc, objet, texte, [.. factures.Select(f => new PieceJointe(f.Pdf.Nom, f.Pdf.Contenu))]);
+    }
+
+    // ---------- Envoi automatique ----------
+    private async Task<UtilisateurConnecte> ExigerDroitAutoAsync(CancellationToken ct)
+    {
+        var u = await utilisateur.ExigerAsync();
+        if (await droits.OptionsProgrammeAsync(ProgrammeEnvoiAuto, u.Profil, ct) is [var total, ..] && total == "**")
+            throw new RegleMetierException($"Vous n'avez pas le droit de lancer l'envoi automatique des factures ({ProgrammeEnvoiAuto}).");
+        return u;
+    }
+
+    // Clients du lot, avec leur paramétrage d'envoi (objet du message)
+    private async Task<(List<(ClientEnvoiAuto Client, ParametresEnvoiClient Parametres)> Clients, bool Tronque)> ClientsAutoAsync(UtilisateurConnecte u,
+        CriteresEnvoiAuto c, CancellationToken ct)
+    {
+        var (lignes, tronque) = await donnees.FacturesAutoAsync(u.Societe, c, await consultation.RepresentantImposeAsync(u.Societe, u.Profil, ct), Maxi, ct);
+        return ([.. lignes.GroupBy(l => (l.General, l.Client)).Select(g =>
+        {
+            var (gen, cli, nom, p, _) = g.First();
+            return (new ClientEnvoiAuto(gen, cli, nom, p.Canal, p.Format, PrisEnCharge(p), p.Destinataires, p.UnParFacture, [.. g.Select(x => x.Facture)]), p);
+        })], tronque);
+    }
+
+    private static ErreurLancement? ControlerAuto(CriteresEnvoiAuto c)
+    {
+        if (c.Du > c.Au) return new ErreurLancement(nameof(c.Du), "Période : le début est après la fin.");
+        if (c.NumeroDu > c.NumeroAu) return new ErreurLancement(nameof(c.NumeroDu), "N° de facture : le début est après la fin.");
+        if ((c.CompteGeneral is null) != (c.CompteClient is null))
+            return new ErreurLancement(nameof(c.CompteGeneral), "Client : indiquez le compte général et le compte client, ou aucun des deux.");
+        return null;
+    }
+
+    public async Task<LotEnvoiAuto> PreparerAutoAsync(CriteresEnvoiAuto c, CancellationToken ct = default)
+    {
+        var u = await ExigerDroitAutoAsync(ct);
+        if (ControlerAuto(c) is { } e) return new LotEnvoiAuto([e], [], false, false, "", "", null);
+        var etat = await messagerie.EtatAsync(u.Societe, null, ct);   // expéditeur : la société (FAC010.PEXPEN)
+        var (clients, tronque) = await ClientsAutoAsync(u, c, ct);
+        return new LotEnvoiAuto([], [.. clients.Select(x => x.Client)], tronque, etat.Disponible, etat.Raison, etat.Expediteur, etat.Redirection);
+    }
+
+    public async Task<IReadOnlyList<ClientEnvoiAuto>> EnvoyerAutoAsync(CriteresEnvoiAuto c, CancellationToken ct = default)
+    {
+        var u = await ExigerDroitAutoAsync(ct);
+        if (ControlerAuto(c) is { } e) throw new RegleMetierException(e.Message);
+        var etat = await messagerie.EtatAsync(u.Societe, null, ct);
+        if (!etat.Disponible) throw new RegleMetierException(etat.Raison);   // rien n'est tenté
+        var (clients, tronque) = await ClientsAutoAsync(u, c, ct);
+        if (tronque) throw new RegleMetierException($"Plus de {Maxi} factures à envoyer : affinez les critères (période, n°, client) avant d'envoyer.");
+        var societe = await societes.LireNomAsync(u.Societe, ct) ?? "";
+        var resultats = new List<ClientEnvoiAuto>();
+        foreach (var (client, p) in clients)
+        {
+            ct.ThrowIfCancellationRequested();
+            try { resultats.Add(await EnvoyerClientAsync(u, client, p, etat, societe, ct)); }
+            catch (Exception ex) when (ex is not OperationCanceledException)   // un client en erreur n'arrête pas le lot
+            {
+                resultats.Add(client with { Resultat = $"KO : {ex.Message}" });
+            }
+        }
+        return resultats;
+    }
+
+    private async Task<ClientEnvoiAuto> EnvoyerClientAsync(UtilisateurConnecte u, ClientEnvoiAuto client, ParametresEnvoiClient p, EtatMessagerie etat,
+        string societe, CancellationToken ct)
+    {
+        {
+            if (!client.PrisEnCharge)
+                return client with { Resultat = $"Non envoyé : {CanalLisible(client.Canal, client.Format)}, pas encore pris en charge" };
+            if (Adresses(client.Destinataires).Count == 0)
+                return client with { Resultat = "Non envoyé : aucun destinataire dans le paramétrage d'envoi du client (PRT057F)" };
+            var envoyees = 0;
+            var erreurs = new List<string>();
+            foreach (var groupe in client.UnParFacture ? client.Factures.Select(f => (IReadOnlyList<FactureAEnvoyer>)[f]) : [client.Factures])
+            {
+                var envoi = new EnvoiFactures(client.CompteGeneral, client.CompteClient, groupe, client.Destinataires, []);
+                List<(FactureAEnvoyer Facture, DocumentGenere Pdf)> factures = [];
+                MessageBrouillon? message = null;
+                try
+                {
+                    foreach (var f in groupe) factures.Add((f, await edition.EditerAsync(f.Numero, f.Date, ct)));
+                    message = Message(factures, client.Nom, p.Objet, client.Destinataires, [], societe);
+                    await messagerie.EnvoyerAsync(u.Societe, message, null, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    if (message is not null)
+                        await TracerAsync(u, envoi, message, factures, CanauxEnvoi.Smtp, StatutsEnvoi.Echec, etat.Expediteur, etat.Redirection ?? "", ex.Message);
+                    erreurs.Add($"{string.Join(", ", groupe.Select(f => f.Numero))} : {ex.Message}");
+                    continue;
+                }
+                await TracerAsync(u, envoi, message, factures, CanauxEnvoi.Smtp, etat.Redirection is null ? StatutsEnvoi.Envoye : StatutsEnvoi.Test,
+                    etat.Expediteur, etat.Redirection ?? "", "");
+                if (etat.Redirection is null)
+                    try { await donnees.MarquerAsync(u.Societe, groupe.Select(f => (f.Numero, f.Date)), manuel: false, "M", FormatPdf, DateTime.Now, CancellationToken.None); }
+                    catch (Exception ex) { journalTechnique.LogWarning(ex, "Factures envoyées mais non marquées envoyées (FAC080)"); }
+                envoyees += groupe.Count;
+            }
+            return client with
+            {
+                Envoye = erreurs.Count == 0,
+                Resultat = erreurs.Count == 0 ? $"OK : {envoyees} facture{(envoyees > 1 ? "s" : "")} envoyée{(envoyees > 1 ? "s" : "")}{(etat.Redirection is { } r ? $" (test, reçu par {r})" : "")}"
+                    : $"KO ({envoyees} envoyée{(envoyees > 1 ? "s" : "")}) : {string.Join(" ; ", erreurs)}",
+            };
+        }
     }
 
     // Objet PRT057F.PFOBJM (variables du WinDev : &NOFAC n° de facture(s), &NOM client, &NBFAC nombre) ; sinon « Facture n° … »

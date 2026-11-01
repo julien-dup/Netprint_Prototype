@@ -57,3 +57,7 @@
 .titre-element .bouton-retirer { padding: 2px 8px; font-size: .85em; background: none; border: 1px dashed #b91c1c; color: #b91c1c; }
 .titre-element .champ-ligne { display: inline-flex; align-items: center; gap: 6px; font-size: .9em; }
 .remise-fin-annee { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 8px 10px; border: 1px dashed #93c5fd; border-radius: 6px; }
+.onglets-envoi { display: flex; gap: 4px; padding: 8px 16px 0; }
+.onglets-envoi button { border-radius: 6px 6px 0 0; border-bottom: none; }
+.onglets-envoi button.actif { background: #fff; font-weight: 600; }
+.ligne-ok td:last-child { color: #15803d; } .ligne-ko td:last-child { color: #b91c1c; }

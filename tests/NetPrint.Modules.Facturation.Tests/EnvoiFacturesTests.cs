@@ -59,6 +59,18 @@ public class EnvoiFacturesBaseTests(ITestOutputHelper sortie)
         Assert.Equal(cles.Order(), relues.Select(f => (f.Numero, f.Date)).Order());
     }
 
+    [FactDb2]
+    public async Task Selection_de_l_envoi_automatique()
+    {
+        // Société 8 : clients « envoi automatique » (PRT057F.PFAUTO = O) ; factures de 2023 pas encore envoyées, triées par client
+        var (lignes, _) = await Donnees.FacturesAutoAsync(8, new CriteresEnvoiAuto { Du = new DateOnly(2023, 1, 1), Au = new DateOnly(2023, 12, 31) },
+            null, 200, default);
+        sortie.WriteLine($"{lignes.Count} factures, {lignes.Select(l => (l.General, l.Client)).Distinct().Count()} clients");
+        Assert.All(lignes, l => Assert.True(l.Parametres.Automatique));
+        var cles = lignes.Select(l => (l.General, l.Client)).ToList();
+        Assert.Equal(cles.OrderBy(k => k.General).ThenBy(k => k.Client), cles);
+    }
+
     [FactDb2Ecriture]
     public async Task Marque_d_envoi_puis_remise_a_l_identique()
     {

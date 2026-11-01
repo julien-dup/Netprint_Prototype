@@ -5,7 +5,8 @@
    ses contacts « facture » (PRT051F), plus des adresses saisies ; le premier en destinataire, les autres en copie. Brouillon
    Outlook (.eml) puis « Marquer envoyées », ou envoi par le serveur de la société (factures marquées envoyées après l'envoi).
    Ouvert avec ?general=&client=&facture=&jour= depuis la fiche d'une facture : client cherché, facture cochée.
-   Rien n'est lu à l'ouverture sans ces paramètres.
+   Rien n'est lu à l'ouverture sans ces paramètres. Onglet « Automatique » (droit PCFACAUTO) : clients « envoi automatique » et
+   leurs factures à envoyer, puis envoi de tout le lot (un message par client, ou par facture), résultat client par client.
    ===================================================================== *@
 @using System.Globalization
 @using NetPrint.Modules.Facturation.Services
@@ -18,6 +19,74 @@
 <PageTitle>Envoi des factures · NetPrint</PageTitle>
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
 
+<nav class="onglets-envoi">
+    <button type="button" class="@(auto ? "" : "actif")" @onclick="() => auto = false">✉ Manuel</button>
+    <button type="button" class="@(auto ? "actif" : "")" @onclick="() => auto = true" title="Clients en envoi automatique (paramétrage d'envoi)">⚙ Automatique</button>
+</nav>
+
+@if (auto)
+{
+    <form class="panneau-criteres" @onsubmit="PreparerAutoAsync">
+        <label class="champ"><span>Factures du</span><input type="date" class="@ErrAuto(nameof(A.Du))" @bind="A.Du" /></label>
+        <label class="champ"><span>au</span><input type="date" @bind="A.Au" /></label>
+        <label class="champ"><span>N° du</span><input type="number" class="num6 @ErrAuto(nameof(A.NumeroDu))" @bind="A.NumeroDu" /></label>
+        <label class="champ"><span>au</span><input type="number" class="num6" @bind="A.NumeroAu" /></label>
+        <div class="champ">
+            <span>Client facturé (facultatif)</span>
+            <div class="ligne-champs">
+                <input type="number" class="num6 @ErrAuto(nameof(A.CompteGeneral))" @bind="A.CompteGeneral" />
+                <input type="number" class="num7" @bind="A.CompteClient" />
+            </div>
+        </div>
+        <div class="boutons-criteres"><button type="submit" class="bouton-principal" disabled="@occupe">🔍 Préparer la liste</button></div>
+    </form>
+    <div class="contenu facturation-auto">
+        @if (lot is null)
+        {
+            <p class="discret">@(occupe ? "Recherche en cours…" : "Les factures éditées et pas encore envoyées des clients en envoi automatique seront listées par client.")</p>
+        }
+        else if (lot.Erreurs.Count > 0)
+        {
+            <ul class="erreurs-saisie">@foreach (var e in lot.Erreurs) {<li>@e.Message</li>}</ul>
+        }
+        else
+        {
+            var clients = resultatsAuto ?? lot.Clients;
+            <p class="compteur">
+                <strong>@lot.Clients.Count</strong> client@(lot.Clients.Count > 1 ? "s" : "") · <strong>@lot.Clients.Sum(c => c.Factures.Count)</strong> facture(s) à envoyer
+                @if (lot.Tronque) {<span class="avertissement"> · liste coupée : affinez les critères</span>}
+            </p>
+            @if (!lot.MessagerieDisponible) {<p class="avertissement-saisie">Envoi impossible : @lot.RaisonIndisponible</p>}
+            @if (lot.Redirection is { } test) {<p class="avertissement-saisie">Envoi de test : tout part vers @test ; les factures ne sont pas marquées envoyées.</p>}
+            @if (clients.Count > 0)
+            {
+                <div class="zone-defilement-liste">
+                    <table class="grille grille-factures">
+                        <thead><tr><th>Client facturé</th><th class="nombre">Factures</th><th>Canal</th><th>Destinataires</th><th>Résultat</th></tr></thead>
+                        <tbody>
+                            @foreach (var c in clients)
+                            {
+                                <tr class="@(c.Resultat is null ? "" : c.Envoye ? "ligne-ok" : "ligne-ko")">
+                                    <td><b>@c.CompteGeneral @c.CompteClient</b> @c.Nom</td>
+                                    <td class="nombre" title="@string.Join(", ", c.Factures.Select(f => f.Numero))">@c.Factures.Count@(c.UnParFacture ? " (1 message chacune)" : "")</td>
+                                    <td>@if (c.PrisEnCharge) {<span>e-mail @(c.Format == "" ? "PDF" : c.Format)</span>} else {<span class="avertissement">@EnvoiFacturesService.CanalLisible(c.Canal, c.Format) : pas encore</span>}</td>
+                                    <td>@if (c.Destinataires.Count == 0) {<span class="avertissement">aucun</span>} else {<span>@string.Join(", ", c.Destinataires)</span>}</td>
+                                    <td>@c.Resultat</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="boutons-criteres">
+                    <button type="button" class="bouton-principal" disabled="@(occupe || !lot.MessagerieDisponible || resultatsAuto is not null || lot.Tronque || Envoyables == 0)" @onclick="EnvoyerAutoAsync"
+                            title="@(lot.MessagerieDisponible ? $"Envoyer par le serveur de la société (expéditeur {lot.Expediteur})" : lot.RaisonIndisponible)">📤 Envoyer tout</button>
+                </div>
+            }
+        }
+    </div>
+}
+else
+{
 <form class="panneau-criteres" @onsubmit="ChercherAsync">
     <div class="champ">
         <span>Client facturé</span>
@@ -134,6 +203,7 @@
         }
     }
 </div>
+}
 
 @code {
     [SupplyParameterFromQuery(Name = "general")] public int? General { get; set; }
@@ -147,6 +217,49 @@
     private readonly HashSet<string> coches = new(StringComparer.OrdinalIgnoreCase);
     private string autres = "";
     private bool occupe;
+
+    // ---------- Automatique ----------
+    private bool auto;
+    private CriteresEnvoiAuto A { get; set; } = new();
+    private LotEnvoiAuto? lot;
+    private IReadOnlyList<ClientEnvoiAuto>? resultatsAuto;
+    private CriteresEnvoiAuto? criteresLot;   // critères de la liste affichée
+    private int Envoyables => lot?.Clients.Count(c => c.PrisEnCharge && c.Destinataires.Count > 0) ?? 0;
+
+    private string ErrAuto(string champ) => lot?.Erreurs.Any(e => e.Champ == champ) == true ? "en-erreur" : "";
+
+    private async Task PreparerAutoAsync()
+    {
+        if (occupe) return;
+        occupe = true;
+        try
+        {
+            // Critères figés avec la liste : « Envoyer tout » envoie ce qui a été préparé, même si les zones changent ensuite
+            criteresLot = new CriteresEnvoiAuto { Du = A.Du, Au = A.Au, NumeroDu = A.NumeroDu, NumeroAu = A.NumeroAu, CompteGeneral = A.CompteGeneral, CompteClient = A.CompteClient };
+            (lot, resultatsAuto) = (await Envoi.PreparerAutoAsync(criteresLot), null);
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Préparation de l'envoi automatique impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task EnvoyerAutoAsync()
+    {
+        if (occupe || lot is null) return;
+        var a = Envoyables;
+        occupe = true;
+        try
+        {
+            if (!await Dialogues.ConfirmerAsync($"Envoyer les factures de {a} client{(a > 1 ? "s" : "")} par le serveur de la société ({lot.Expediteur}) ?"
+                    + "\nLes clients sans destinataire ou hors e-mail PDF sont signalés et sautés.", "Envoi automatique", "Envoyer")) return;
+            resultatsAuto = await Envoi.EnvoyerAutoAsync(criteresLot!);
+            var ok = resultatsAuto.Count(r => r.Envoye);
+            Notifications.Succes($"{ok} client{(ok > 1 ? "s" : "")} sur {resultatsAuto.Count} envoyé{(ok > 1 ? "s" : "")}.");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Envoi automatique impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
 
     protected override async Task OnInitializedAsync()
     {

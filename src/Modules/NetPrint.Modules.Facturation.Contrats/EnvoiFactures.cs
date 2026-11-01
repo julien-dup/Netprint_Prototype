@@ -22,7 +22,32 @@ public interface IEnvoiFactures
 
     // Après un brouillon parti depuis Outlook : marquer les factures envoyées (manuel, mail), relues comme pour l'envoi
     Task MarquerEnvoyeesAsync(EnvoiFactures envoi, CancellationToken ct = default);
+
+    // Envoi automatique (onglet « automatique » du WinDev) : clients « envoi automatique » (PRT057F.PFAUTO) et leurs factures à envoyer,
+    // destinataires PRT057F.PFDEST1-5 seulement, expéditeur la société ; droit PRT000P1 PCFACAUTO
+    Task<LotEnvoiAuto> PreparerAutoAsync(CriteresEnvoiAuto criteres, CancellationToken ct = default);
+
+    // Un message par client (ou par facture si PFOPT1 = O) ; le résultat de chaque client est rendu (OK / KO et pourquoi), l'envoi
+    // continue après un échec ; factures marquées envoyées (automatique) client par client
+    Task<IReadOnlyList<ClientEnvoiAuto>> EnvoyerAutoAsync(CriteresEnvoiAuto criteres, CancellationToken ct = default);
 }
+
+public sealed class CriteresEnvoiAuto
+{
+    public DateOnly? Du { get; set; }
+    public DateOnly? Au { get; set; }
+    public int? NumeroDu { get; set; }
+    public int? NumeroAu { get; set; }
+    public int? CompteGeneral { get; set; }
+    public int? CompteClient { get; set; }
+}
+
+// Résultat : null avant l'envoi ; Envoye : toutes les factures du client sont parties
+public sealed record ClientEnvoiAuto(int CompteGeneral, int CompteClient, string Nom, string Canal, string Format, bool PrisEnCharge,
+    IReadOnlyList<string> Destinataires, bool UnParFacture, IReadOnlyList<FactureAEnvoyer> Factures, string? Resultat = null, bool Envoye = false);
+
+public sealed record LotEnvoiAuto(IReadOnlyList<ErreurLancement> Erreurs, IReadOnlyList<ClientEnvoiAuto> Clients, bool Tronque,
+    bool MessagerieDisponible, string RaisonIndisponible, string Expediteur, string? Redirection);
 
 public sealed class CriteresEnvoiFactures
 {

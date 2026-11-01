@@ -88,6 +88,49 @@ internal sealed class EnvoiFacturesDb2(IConfiguration config)
         return (factures, false);
     }
 
+    // Client facturé : FDGENF / FDCLIF, ou le donneur d'ordre s'il n'est pas renseigné (FAC150 R7)
+    private const string GeneralFacture = "CASE WHEN a.FDCLIF = 0 THEN a.FDGEND ELSE a.FDGENF END";
+    private const string ClientFacture = "CASE WHEN a.FDCLIF = 0 THEN a.FDCLID ELSE a.FDCLIF END";
+
+    // Envoi automatique : factures à envoyer des clients « envoi automatique » (PRT057F.PFAUTO = O), triées par client facturé
+    public async Task<(List<(int General, int Client, string Nom, ParametresEnvoiClient Parametres, FactureAEnvoyer Facture)> Factures, bool Tronque)>
+        FacturesAutoAsync(int societe, CriteresEnvoiAuto c, int? representant, int maxi, CancellationToken ct)
+    {
+        var v = new List<object?> { societe };
+        var filtre = "";
+        if (c.Du is not null || c.Au is not null)
+        {
+            filtre += " AND a.FDANNE * 10000 + a.FDMOIS * 100 + a.FDJOUR BETWEEN ? AND ?";
+            v.Add(c.Du is { } du ? BaseDb2.AAAAMMJJ(du) : 0);
+            v.Add(c.Au is { } au ? BaseDb2.AAAAMMJJ(au) : 99999999);
+        }
+        if (c.NumeroDu is not null || c.NumeroAu is not null) { filtre += " AND a.RNFAC BETWEEN ? AND ?"; v.Add(c.NumeroDu ?? 0); v.Add(c.NumeroAu ?? 999999); }
+        if (c.CompteGeneral is { } g && c.CompteClient is { } k) { filtre += $" AND {GeneralFacture} = ? AND {ClientFacture} = ?"; v.Add(g); v.Add(k); }
+        if (representant is { } r) { filtre += " AND a.FDREP = ?"; v.Add(r); }
+        await using var cnx = await OuvrirAsync(ct);
+        var lignes = new List<(int, int, string, ParametresEnvoiClient, FactureAEnvoyer)>();
+        await using var rd = await Lire(cnx, $"""
+            SELECT {GeneralFacture}, {ClientFacture}, COALESCE(c.CNOM, ''), b.PFFTP, b.PFFMT, b.PFDEST1, b.PFDEST2, b.PFDEST3, b.PFDEST4, b.PFDEST5,
+                   b.PFOBJM, b.PFOPT1, b.PFOPT2, a.RNFAC, a.FDANNE, a.FDMOIS, a.FDJOUR, a.FDTYPE, COALESCE(d.CNOM, ''), a.FDMTN, b.PFAUTO
+            FROM {"{b}"}.FAC080 a
+            JOIN {"{b}"}.PRT057F b ON b.RSOC = a.RSOC AND b.RGEN = {GeneralFacture} AND b.RCLI = {ClientFacture} AND b.PFAUTO = 'O'
+            LEFT OUTER JOIN {"{b}"}.AA0003 c ON c.RSOC = a.RSOC AND c.RGEN = {GeneralFacture} AND c.RCLI = {ClientFacture}
+            LEFT OUTER JOIN {"{b}"}.AA0003 d ON d.RSOC = a.RSOC AND d.RGEN = a.FDGEND AND d.RCLI = a.FDCLID
+            WHERE a.RSOC = ? AND a.FDEDT = 'O' AND a.FDEDIT <> 'S' AND a.FDNONE <> 'O' AND a.FDTAGE <> 'O'{filtre}
+            ORDER BY 1, 2, a.FDANNE, a.FDMOIS, a.FDJOUR, a.RNFAC
+            FETCH FIRST {maxi + 1} ROWS ONLY
+            """, ct, [.. v]);
+        while (await rd.ReadAsync(ct))
+        {
+            if (lignes.Count == maxi) return (lignes, true);
+            var p = new ParametresEnvoiClient(rd.Texte(3).Trim(), rd.Texte(4).Trim(), [.. Enumerable.Range(5, 5).Select(i => rd.Texte(i).Trim()).Where(x => x != "")],
+                rd.Texte(10).Trim(), rd.Texte(11) == "O", rd.Texte(12) == "O", rd.Texte(20) == "O");
+            lignes.Add((rd.Entier(0), rd.Entier(1), rd.Texte(2).Trim(), p, new FactureAEnvoyer(rd.Entier(13),
+                new DateOnly(rd.Entier(14), rd.Entier(15), rd.Entier(16)), rd.Texte(17) == "A", rd.Texte(18).Trim(), rd.Nombre(19), "")));
+        }
+        return (lignes, false);
+    }
+
     // Marque d'envoi (MAJFAC080) : manuel M / automatique A, méthode M (mail), format (PDF…), date et heure de l'envoi
     // En une transaction : toutes les factures sont marquées, ou aucune (une facture introuvable annule tout)
     public async Task MarquerAsync(int societe, IEnumerable<(int Numero, DateOnly Date)> factures, bool manuel, string methode, string format,
