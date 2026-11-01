@@ -22,8 +22,9 @@ namespace NetPrint.Modules.Facturation.Donnees;
 // rattachés de nouveau à la facture si l'avoir est supprimé.
 // =====================================================================
 
-// Avoir demandé : Bl null = avoir total
-internal sealed record AvoirDemande(int? Bl);
+// Avoir demandé : Bl null = avoir total ; NePlusFacturer : annulation définitive, les BL libérés deviennent non facturables
+// (EXP010.HFACTU = N : ni la saisie ni la facturation automatique ne les reprennent ; proposé à David et accepté le 01/11)
+internal sealed record AvoirDemande(int? Bl, bool NePlusFacturer = false);
 internal sealed partial class FacturationAutoDb2
 {
     // En-tête : zones remises à zéro (0 ou blanc selon le type)
@@ -146,7 +147,7 @@ internal sealed partial class FacturationAutoDb2
                 var filtreBl = avoir.Bl is null ? "" : " AND HNOBL = ?";
                 object?[] p = avoir.Bl is { } x ? [.. cle, x] : cle;
                 await Executer($"""
-                    UPDATE {"{b}"}.EXP010 SET HBLFAC = 'N', HNOFAC = 0, HNOELT = 0, HDAFAA = 0, HDAFAM = 0, HDAFAJ = 0
+                    UPDATE {"{b}"}.EXP010 SET HBLFAC = 'N', HNOFAC = 0, HNOELT = 0, HDAFAA = 0, HDAFAM = 0, HDAFAJ = 0{(avoir.NePlusFacturer ? ", HFACTU = 'N'" : "")}
                     WHERE RSOC = ? AND HNOFAC = ? AND HDAFAA = ? AND HDAFAM = ? AND HDAFAJ = ?{filtreBl}
                     """, p);
                 await Executer($"""

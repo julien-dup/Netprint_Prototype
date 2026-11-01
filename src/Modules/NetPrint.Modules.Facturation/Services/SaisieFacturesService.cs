@@ -337,8 +337,8 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
 
     public Task<FactureCreee> CopierAsync(int numero, DateOnly date, CancellationToken ct = default) => DupliquerAsync(numero, date, null, ct);
 
-    public Task<FactureCreee> CreerAvoirAsync(int numero, DateOnly date, int? bl = null, CancellationToken ct = default) =>
-        DupliquerAsync(numero, date, new AvoirDemande(bl), ct);
+    public Task<FactureCreee> CreerAvoirAsync(int numero, DateOnly date, int? bl = null, bool nePlusFacturer = false, CancellationToken ct = default) =>
+        DupliquerAsync(numero, date, new AvoirDemande(bl, nePlusFacturer), ct);
 
     // Copie ou avoir (FAC150 mode D, FAC080S option SA) : document du jour, n° au compteur, ouvert ensuite en modification
     private async Task<FactureCreee> DupliquerAsync(int numero, DateOnly date, AvoirDemande? avoir, CancellationToken ct)

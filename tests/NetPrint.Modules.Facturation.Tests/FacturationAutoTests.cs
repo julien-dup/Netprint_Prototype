@@ -176,7 +176,7 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
         var dossiers = $"(RDOSS, {{0}}) IN (SELECT HNODOS, HCLEF FROM {bib}.EXP010 WHERE RSOC = {societe} AND HNOBL = {bl})";
         var releves = new (string Table, string Colonnes, string Condition)[]
         {
-            ("EXP010", "HBLFAC, HNOFAC, HDAFAA, HDAFAM, HDAFAJ, HNOELT", $"RSOC = {societe} AND HNOBL = {bl}"),
+            ("EXP010", "HBLFAC, HNOFAC, HDAFAA, HDAFAM, HDAFAJ, HNOELT, HFACTU", $"RSOC = {societe} AND HNOBL = {bl}"),
             ("EXP011", "HPFACT, HPNFAC, HPNELT, HPDFAA, HPDFAM, HPDFAJ", $"RSOC = {societe} AND HNOBL = {bl}"),
             ("AB004", "F4FACT, F4NFAC, F4NELT, F4DFAA, F4DFAM, F4DFAJ", $"RSOC = {societe} AND " + string.Format(dossiers, "F4DCLE")),
             ("AB001", "CCNOFA, CCFCTA, CCFCTM, CCFCTJ, CCQTEP", $"RSOC = {societe} AND " + string.Format(dossiers, "CCDCLE")),

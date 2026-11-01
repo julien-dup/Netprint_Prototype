@@ -25,7 +25,7 @@
            title="Facture en PDF, recalculée (FAC202P5) ; « BROUILLON » tant qu'elle n'est pas éditée en définitif">🖨 Imprimer</a>
         @if (!fiche.Facture.Avoir && fiche.Facture.Statut is StatutsFacture.Editee or StatutsFacture.Comptabilisee)
         {
-            <button disabled="@enCours" @onclick="() => (choixAvoir, blAvoir) = (!choixAvoir, null)"
+            <button disabled="@enCours" @onclick="() => (choixAvoir, blAvoir, nePlusFacturer) = (!choixAvoir, null, false)"
                     title="Avoir de toute la facture ou d'un de ses BL, à ajuster ensuite">↩ Avoir</button>
         }
         <button disabled="@enCours" @onclick="CopierAsync"
@@ -69,11 +69,13 @@
                     <select @bind="blAvoir">@foreach (var b in bls) {<option value="@b">BL @b</option>}</select>
                 }
             }
+            <label class="champ-case" title="Annulation définitive : les BL ne seront repris ni par la saisie ni par la facturation automatique">
+                <input type="checkbox" @bind="nePlusFacturer" /><span>Ne plus facturer @(blAvoir is null ? "ces BL" : "ce BL") (annulation définitive)</span></label>
             <p class="discret">L'avoir est daté d'aujourd'hui, « à éditer », et s'ouvre en modification pour ajuster les quantités et les prix.
                 Les BL sont libérés dès sa création : supprimer l'avoir ne les rattache pas de nouveau à la facture.</p>
             <div class="boutons-criteres">
                 <button class="bouton-principal" disabled="@enCours" @onclick="CreerAvoirAsync">↩ Créer l'avoir</button>
-                <button @onclick="() => (choixAvoir, blAvoir) = (false, null)">Annuler</button>
+                <button @onclick="() => (choixAvoir, blAvoir, nePlusFacturer) = (false, null, false)">Annuler</button>
             </div>
         </section>
     }
@@ -271,6 +273,7 @@
     private CompteurFacturesAbsentException? compteurAbsent;   // copie refusée faute de compteur : proposé à la création
     private bool choixAvoir;
     private int? blAvoir;   // null : avoir total
+    private bool nePlusFacturer;   // annulation définitive : BL non facturables
 
     // Avoir (FAC080S option SA) : créé, puis ouvert en modification pour l'ajuster
     private async Task CreerAvoirAsync()
@@ -280,7 +283,7 @@
         try
         {
             var f = fiche.Facture;
-            var a = await Saisie.CreerAvoirAsync(f.Numero, f.Date, blAvoir);
+            var a = await Saisie.CreerAvoirAsync(f.Numero, f.Date, blAvoir, nePlusFacturer);
             Notifications.Succes($"Avoir {a.Numero} du {a.Date:dd/MM/yyyy} créé{(blAvoir is { } b ? $" pour le BL {b}" : "")} : ajustez-le puis éditez-le.");
             Navigation.NavigateTo($"facturation/factures/{a.Numero}/{a.Date:yyyyMMdd}/modifier");
         }

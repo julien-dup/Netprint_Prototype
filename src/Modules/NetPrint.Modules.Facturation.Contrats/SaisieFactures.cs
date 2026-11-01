@@ -171,6 +171,7 @@ public interface ISaisieFactures
     Task<FactureCreee> CopierAsync(int numero, DateOnly date, CancellationToken ct = default);
 
     // Avoir d'une facture éditée (FAC080S option SA) : avoir du jour, « à éditer », facture d'origine renseignée ; total (bl null :
-    // toute la facture, ses BL redeviennent à facturer) ou d'un BL (ses lignes, ce BL redevient à facturer) ; à ajuster en modification
-    Task<FactureCreee> CreerAvoirAsync(int numero, DateOnly date, int? bl = null, CancellationToken ct = default);
+    // toute la facture, ses BL redeviennent à facturer) ou d'un BL (ses lignes, ce BL redevient à facturer) ; à ajuster en modification.
+    // nePlusFacturer : annulation définitive, les BL libérés deviennent « non facturables » au lieu de « à facturer »
+    Task<FactureCreee> CreerAvoirAsync(int numero, DateOnly date, int? bl = null, bool nePlusFacturer = false, CancellationToken ct = default);
 }

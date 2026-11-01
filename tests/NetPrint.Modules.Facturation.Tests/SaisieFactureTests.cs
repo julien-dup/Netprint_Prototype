@@ -557,13 +557,13 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
             await service.ModifierAsync(await service.OuvrirAsync(facture.Numero, date), editerDefinitif: true);
             var compte = await CompterAsync(cnx, societe, facture.Numero, date);
 
-            // Avoir d'un BL : ses lignes seulement, ce BL de nouveau à facturer
-            var parBl = await service.CreerAvoirAsync(facture.Numero, date, bl);
+            // Avoir d'un BL, annulation définitive : ses lignes seulement, ce BL libéré mais non facturable
+            var parBl = await service.CreerAvoirAsync(facture.Numero, date, bl, nePlusFacturer: true);
             numeros.Add(parBl.Numero);
             var lu = await service.OuvrirAsync(parBl.Numero, date);
             Assert.True(lu.Avoir);
             Assert.All(lu.Elements.SelectMany(e => e.Lignes), l => Assert.Equal(bl, l.Bl));
-            Assert.Contains((await service.ChercherBlsAsync(new CleFacturation { Bl = bl })).Bls, b => b.Bl == bl);
+            Assert.Contains("n'est pas facturable", (await service.ChercherBlsAsync(new CleFacturation { Bl = bl })).Erreurs.Single().Message);
             await Assert.ThrowsAsync<RegleMetierException>(() => service.CreerAvoirAsync(parBl.Numero, date));   // pas d'avoir d'un avoir
             // Déjà un avoir de ce BL : ni un autre, ni un avoir total, tant qu'il n'est pas supprimé
             await Assert.ThrowsAsync<RegleMetierException>(() => service.CreerAvoirAsync(facture.Numero, date, bl));
