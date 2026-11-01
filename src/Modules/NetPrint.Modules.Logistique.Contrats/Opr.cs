@@ -114,3 +114,41 @@ public interface IEditionOpr
     // Seulement les lignes jamais éditées : PDF produit, puis exactement ces lignes marquées éditées
     Task<NetPrint.Socle.Documents.DocumentGenere> ImprimerAjoutsAsync(int numeroOpr, CancellationToken ct = default);
 }
+
+// =====================================================================
+// Livraison d'un OPR (WinDev OPR : FEN_BonLivraison, FEN_DetailColis, FEN_CreationBL, FEN_DetailBL) : situation de la
+// préparation (palettes conditionnées, cartons clôturés), génération des BL depuis les palettes conditionnées selon le mode
+// du client (AA0003.CDRES1 : 1 par colis, 2 par commande, 3 par article, 4 total), puis palettes, poids et pied des BL.
+// =====================================================================
+public interface ILivraisonOpr
+{
+    Task<SituationOpr> SituationAsync(int numeroOpr, CancellationToken ct = default);
+    Task<GenerationOprResultat> GenererBlAsync(GenerationBlOpr generation, CancellationToken ct = default);
+    Task FinaliserBlAsync(int numeroOpr, IReadOnlyList<FinalisationBlOpr> bls, CancellationToken ct = default);
+}
+
+// PeutGenerer : toutes les lignes prêtes (ou frais) et au moins une palette conditionnée ou un frais ; Refus sinon
+public sealed record SituationOpr(
+    int Numero, string Mode, string LibelleMode, bool PeutGenerer, string Refus, IReadOnlyList<LigneSituationOpr> Lignes, DefautsBlOpr Defauts);
+
+// Valeurs proposées pour les BL : transporteur de l'OPR s'il est unique, port et mode de livraison de la société (EXP005),
+// observations de l'adresse de livraison, poids d'une palette (EXP005.FPDSP)
+public sealed record DefautsBlOpr(int Transporteur, string TypePort, string ModeLivraison, IReadOnlyList<string> Observations, int PoidsPalette);
+
+// Quantités : à préparer (ODQTEA), préparée (ODQPREP), conditionnée (palettes au statut 4 ou 5) ; Bloquante : empêche le BL
+public sealed record LigneSituationOpr(
+    int NumeroLigne, int Dossier, string Cle, string Article, string Indice, string RefImprime, int Quantite, int Preparee, int Conditionnee,
+    string Etat, bool Bloquante, bool Frais, IReadOnlyList<ColisOpr> Colis);
+
+public sealed record ColisOpr(string Sscc, string Lot, int Quantite, string Statut, int Carton, bool CartonClos, string Operateur, string Matiere);
+
+// Observations : 3 lignes de 40 caractères ; transporteur obligatoire sauf enlèvement (port « E »)
+public sealed record GenerationBlOpr(
+    int Numero, DateOnly Date, int Transporteur, string TypePort, string ModeLivraison, IReadOnlyList<string> Observations, string Incoterm);
+
+public sealed record GenerationOprResultat(IReadOnlyList<BlGenereOpr> Bls, IReadOnlyList<string> Avertissements);
+
+public sealed record BlGenereOpr(int NumeroBl, string Enseigne, int Colis, int PoidsCartons, IReadOnlyList<string> TextePied);
+
+// Poids du BL = poids des cartons + palettes × poids d'une palette
+public sealed record FinalisationBlOpr(int NumeroBl, int Palettes, int PoidsPalette, IReadOnlyList<string> TextePied);

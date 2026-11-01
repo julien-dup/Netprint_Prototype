@@ -29,6 +29,8 @@
     {
         <button disabled="@(!droits.Creer)" title="Ajouter des lignes de commande du même client, à la même adresse"
                 @onclick='() => Navigation.NavigateTo($"logistique/opr/{Numero}/ajout")'>➕ Ajouter des lignes</button>
+        <button title="Situation de la préparation (palettes, colis) et génération des BL (droit de modification)" disabled="@(!droits.Modifier)"
+                @onclick='() => Navigation.NavigateTo($"logistique/opr/{Numero}/livraison")'>📦 Situation et BL</button>
         <button class="bouton-danger" disabled="@(!droits.Supprimer || fiche.Etat != EtatsOpr.APreparer)" @onclick="SupprimerAsync">🗑 Supprimer l'OPR</button>
         <span class="espace"></span>
         <button class="bouton-principal" disabled="@(!droits.Modifier || occupe)" @onclick="EnregistrerAsync">💾 Enregistrer</button>

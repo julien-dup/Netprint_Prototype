@@ -71,3 +71,4 @@ tr.client-bloque td { background: #fdecec; }
 .lignes-opr .discret { display: block; max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85em; }
 .lignes-opr input[type=date] { width: 8.5em; }
 .lignes-opr .observation-opr { width: 11em; }
+tr.ligne-bloquante td { background: #fff4e5; }

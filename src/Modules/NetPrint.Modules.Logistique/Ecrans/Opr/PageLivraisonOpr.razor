@@ -1,0 +1,213 @@
+@page "/logistique/opr/{Numero:int}/livraison"
+@* =====================================================================
+   Livraison d'un OPR (WinDev FEN_BonLivraison, FEN_DetailColis, FEN_CreationBL, FEN_DetailBL réunis) : situation de la
+   préparation ligne par ligne (palettes conditionnées, cartons clôturés, détail des colis), puis génération des BL selon
+   le mode du client et finalisation (palettes, poids, texte de pied) avec impression.
+   ===================================================================== *@
+@inject ILivraisonOpr Livraison
+@inject IEditionBl EditionBl
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Livraison de l'OPR @Numero · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo($"logistique/opr/{Numero}")'>← OPR @Numero</button>
+    <span class="espace"></span>
+    @if (situation is not null && generes is null)
+    {
+        <button class="bouton-principal" disabled="@(!situation.PeutGenerer || occupe)" title="@situation.Refus" @onclick="GenererAsync">🚚 Générer les BL</button>
+    }
+    @if (generes is not null)
+    {
+        <button class="bouton-principal" disabled="@occupe" @onclick="FinaliserAsync">💾 Enregistrer palettes et poids</button>
+    }
+</fieldset>
+
+<div class="contenu contenu-detail saisie-bl">
+    @if (situation is null)
+    {
+        <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreur)</p>
+    }
+    else if (generes is not null)
+    {
+        <section class="carte">
+            <h2>@generes.Count BL créé@(generes.Count > 1 ? "s" : "") pour l'OPR @Numero</h2>
+            @foreach (var a in avertissements) {<p class="avertissement-saisie">@a</p>}
+            <table class="grille grille-fiche">
+                <thead><tr><th>BL</th><th class="nombre">Colis</th><th class="nombre">Poids cartons</th><th class="nombre">Palettes</th><th class="nombre">Poids palette</th>
+                    <th class="nombre">Poids total</th><th>Texte de pied</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var f in finalisations)
+                    {
+                        <tr>
+                            <td><a href="@($"logistique/bl/{f.Bl.NumeroBl}")"><b>@f.Bl.NumeroBl</b></a>@if (f.Bl.Enseigne != "") {<span class="discret"> enseigne @f.Bl.Enseigne</span>}</td>
+                            <td class="nombre">@f.Bl.Colis</td>
+                            <td class="nombre">@f.Bl.PoidsCartons kg</td>
+                            <td class="nombre"><input type="number" class="num3" min="0" max="99" @bind="f.Palettes" /></td>
+                            <td class="nombre"><input type="number" class="num6" min="0" @bind="f.PoidsPalette" /></td>
+                            <td class="nombre"><b>@(f.Bl.PoidsCartons + f.Palettes * f.PoidsPalette) kg</b></td>
+                            <td><textarea rows="2" cols="40" @bind="f.Pied"></textarea></td>
+                            <td><a class="bouton-ancre" href="@($"api/logistique/bl/{f.Bl.NumeroBl}/pdf")" target="_blank" rel="noopener"
+                                   @onclick="() => MarquerEditeAsync(f.Bl.NumeroBl)" title="Imprimer le BL (enregistrez d'abord palettes et poids)">🖨 Imprimer</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+    else
+    {
+        <section class="carte">
+            <div class="titre-fiche">
+                <span class="type-fiche">LIVRAISON DE L'OPR</span> <b class="numero-fiche">@Numero</b>
+                <span class="badge">@(situation.LibelleMode != "" ? situation.LibelleMode : "mode de génération non paramétré")</span>
+            </div>
+            @if (!situation.PeutGenerer) {<p class="avertissement-saisie">@situation.Refus</p>}
+            <table class="grille grille-fiche">
+                <thead><tr><th>L.</th><th>Commande</th><th>Article</th><th class="nombre">À préparer</th><th class="nombre">Préparé</th><th class="nombre">Conditionné</th><th>État</th></tr></thead>
+                <tbody>
+                    @foreach (var l in situation.Lignes)
+                    {
+                        <tr class="@(l.Bloquante ? "ligne-bloquante" : "")" @onclick="() => detail = detail == l.NumeroLigne ? 0 : l.NumeroLigne" title="Voir les colis">
+                            <td>@l.NumeroLigne</td>
+                            <td>@l.Dossier/@l.Cle</td>
+                            <td><b>@l.Article</b>@if (l.Indice != "") {<span class="discret"> @l.Indice</span>}@if (l.RefImprime != "") {<span class="discret"> · @l.RefImprime</span>}</td>
+                            <td class="nombre">@l.Quantite.ToString("#,##0")</td>
+                            <td class="nombre">@l.Preparee.ToString("#,##0")</td>
+                            <td class="nombre">@l.Conditionnee.ToString("#,##0")</td>
+                            <td><span class="badge @(l.Bloquante ? "badge-bl-r" : "")">@l.Etat</span>@if (l.Colis.Count > 0) {<span class="discret"> · @l.Colis.Count colis ▾</span>}</td>
+                        </tr>
+                        @if (detail == l.NumeroLigne && l.Colis.Count > 0)
+                        {
+                            <tr><td></td><td colspan="6">
+                                <table class="tableau-envois">
+                                    <tbody>
+                                        @foreach (var c in l.Colis)
+                                        {
+                                            <tr><td>…@(c.Sscc.Length > 9 ? c.Sscc[^9..] : c.Sscc)</td><td>lot @c.Lot</td><td class="nombre">@c.Quantite.ToString("#,##0")</td>
+                                                <td>@StatutPalette(c.Statut)</td><td>@(c.Carton != 0 ? $"carton {c.Carton} · {(c.CartonClos ? "clôturé" : "en cours")}" : "sans carton")</td>
+                                                <td>@c.Operateur</td><td>@c.Matiere</td></tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </td></tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </section>
+        @if (situation.PeutGenerer)
+        {
+            <section class="carte">
+                <h3>BL à générer</h3>
+                <div class="cartes-saisie">
+                    <div class="info">
+                        <label class="champ"><span>Date du BL</span><input type="date" @bind="date" /></label>
+                        <label class="champ"><span>Port</span>
+                            <select @bind="port"><option value="F">F · Franco</option><option value="D">D · Dû</option><option value="A">A · Avancé</option><option value="E">E · Enlèvement</option></select></label>
+                        <label class="champ"><span>Mode de livraison</span>
+                            <select @bind="modeLivraison"><option value=""></option><option value="M">M · Messagerie</option><option value="E">E · Express</option>
+                                <option value="A">A · Affrètement</option><option value="I">I · International</option><option value="P">P · Multi-palettes</option></select></label>
+                        <label class="champ"><span>Transporteur</span><input type="number" class="num3" min="0" disabled="@(port == "E")" @bind="transporteur" /></label>
+                    </div>
+                    <div class="info">
+                        <h3>Observations</h3>
+                        @for (var i = 0; i < 3; i++)
+                        {
+                            var n = i;
+                            <input class="large" maxlength="40" value="@observations[n]" @onchange="e => observations[n] = e.Value?.ToString() ?? string.Empty" />
+                        }
+                        <label class="champ large"><span>Incoterm</span><input maxlength="40" @bind="incoterm" /></label>
+                    </div>
+                </div>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+
+    private sealed class Finalisation(BlGenereOpr bl, int poidsPalette)
+    {
+        public BlGenereOpr Bl { get; } = bl;
+        public int Palettes { get; set; }
+        public int PoidsPalette { get; set; } = poidsPalette;
+        public string Pied { get; set; } = string.Join("\n", bl.TextePied);
+    }
+
+    private SituationOpr? situation;
+    private string? erreur;
+    private bool occupe;
+    private int detail;
+    private DateOnly date = DateOnly.FromDateTime(DateTime.Today);
+    private int transporteur;
+    private string port = "F", modeLivraison = "", incoterm = "";
+    private readonly string[] observations = ["", "", ""];
+    private List<BlGenereOpr>? generes;
+    private List<Finalisation> finalisations = [];
+    private IReadOnlyList<string> avertissements = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        occupe = true;
+        try
+        {
+            situation = await Livraison.SituationAsync(Numero);
+            var d = situation.Defauts;
+            (transporteur, port, modeLivraison) = (d.Transporteur, d.TypePort == "" ? "F" : d.TypePort, d.ModeLivraison);
+            for (var i = 0; i < 3; i++) observations[i] = d.Observations.ElementAtOrDefault(i) ?? "";
+        }
+        catch (RegleMetierException ex) { erreur = ex.Message; }
+        catch (Exception ex) { erreur = $"Lecture de l'OPR impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private static string StatutPalette(string s) => s switch
+    {
+        "0" => "Déclaré", "1" => "Fabriqué", "2" => "En stock", "3" => "En prépa", "4" => "Conditionné", "5" => "Expédié", _ => s,
+    };
+
+    private async Task GenererAsync()
+    {
+        if (situation is null) return;
+        if (!await Dialogues.ConfirmerAsync($"Générer les BL de l'OPR {Numero} ({situation.LibelleMode}) ?\nLes palettes conditionnées sortent du stock.",
+                "Génération des BL", "Générer")) return;
+        occupe = true;
+        try
+        {
+            var r = await Livraison.GenererBlAsync(new GenerationBlOpr(Numero, date, port == "E" ? 0 : transporteur, port, modeLivraison, observations, incoterm));
+            generes = [.. r.Bls];
+            avertissements = r.Avertissements;
+            finalisations = [.. r.Bls.Select(b => new Finalisation(b, situation.Defauts.PoidsPalette))];
+            Notifications.Succes(r.Bls.Count == 1 ? $"BL {r.Bls[0].NumeroBl} créé." : $"{r.Bls.Count} BL créés.");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Génération impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task FinaliserAsync()
+    {
+        occupe = true;
+        try
+        {
+            await Livraison.FinaliserBlAsync(Numero, [.. finalisations.Select(f => new FinalisationBlOpr(f.Bl.NumeroBl, f.Palettes, f.PoidsPalette,
+                [.. (f.Pied ?? "").Replace("\r", "").Split('\n')]))]);
+            Notifications.Succes("Palettes, poids et textes enregistrés.");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Enregistrement impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task MarquerEditeAsync(int numeroBl)
+    {
+        try { await EditionBl.MarquerEditeAsync(numeroBl); }
+        catch (RegleMetierException ex) { Notifications.Info(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Le BL n'a pas pu être marqué édité : {ex.Message}"); }
+    }
+}

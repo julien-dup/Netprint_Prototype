@@ -98,7 +98,7 @@ internal sealed partial class SaisieBlDb2
     internal static string CleVerrouBl(int societe, int numeroBl) => $"{societe:0000}{numeroBl:000000}";
 
     // Annule ce que l'élément avait mis à jour : NEG100 (livré, reste, soldé), OPR015 / OPR010, AB001 (quantité livrée, solde),
-    // mouvements A700F (sorties EX et transferts TR de l'élément), palettes PROD_ENTITE détachées du BL
+    // mouvements A700F (sorties EX, transferts TR, cartons SS de l'élément), palettes PROD_ENTITE et cartons PROD_COLISAGE détachés du BL
     private async Task AnnulerElementAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, ElementEnregistre el, CancellationToken ct)
     {
         var lignes = new List<(int LigneCommande, int Quantite)>();
@@ -142,6 +142,9 @@ internal sealed partial class SaisieBlDb2
             UPDATE {b}.PROD_ENTITE SET NUMERO_BL = 0, ELEMENT_BL = 0, NUMERO_LIGNE_BL = 0, STATUT = '4'
             WHERE SOCIETE = ? AND NUMERO_BL = ? AND ELEMENT_BL = ?
             """, ct, societe, el.NumeroBl, el.Element);
+        // Cartons des BL d'OPR : détachés du BL (leur sortie de stock d'emballage SS, imputée à l'élément, est supprimée ci-dessus)
+        await Executer(cnx, tx, "UPDATE {b}.PROD_COLISAGE SET NUMERO_BL = 0, ELEMENT_BL = 0 WHERE SOCIETE = ? AND NUMERO_BL = ? AND ELEMENT_BL = ?", ct,
+            societe, el.NumeroBl, el.Element);
     }
 
     // Supprime les lignes de l'élément puis l'élément ; le BL entier s'il n'en reste aucun, sinon ses totaux recalculés

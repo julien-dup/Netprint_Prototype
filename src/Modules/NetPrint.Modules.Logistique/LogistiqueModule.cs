@@ -61,6 +61,7 @@ public static class LogistiqueModule
         services.AddScoped<OprDb2>();
         services.AddScoped<IOpr, OprService>();                             // WinDev OPR (ordres de préparation)
         services.AddScoped<IEditionOpr, EditionOprService>();               // OPR150
+        services.AddScoped<ILivraisonOpr, LivraisonOprService>();           // FEN_BonLivraison, FEN_CreationBL, FEN_DetailBL
         services.AddScoped<Ecrans.Opr.EtatListeOpr>();
         return services;
     }

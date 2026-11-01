@@ -306,12 +306,8 @@ internal sealed partial class SaisieBlDb2
     // N° du retour : compteur de synchronisation (SYN005) si le BL d'origine est en sous-traitance synchronisée, sinon celui des BL
     private async Task<int> NumeroRetourAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, RetourAEcrire r, CancellationToken ct)
     {
-        if (!r.Origine.SousTraitanceSynchronisee) return await NumeroBlAsync(cnx, tx, societe, r.Origine.Enseigne, r.NumerotationParEnseigne, ct);
-        if (await Executer(cnx, tx, "UPDATE {b}.SYN005 SET PSSNUMB = PSSNUMB + 1 WHERE PSSSOCS = ?", ct, societe) == 0)
-            throw new RegleMetierException("Pas de compteur de BL de sous-traitance synchronisée (SYN005) pour cette société.");
-        await using var rd = await Lire(cnx, tx, "SELECT PSSNUMB FROM {b}.SYN005 WHERE PSSSOCS = ? FETCH FIRST 1 ROW ONLY", ct, societe);
-        await rd.ReadAsync(ct);
-        return rd.Entier(0);
+        return r.Origine.SousTraitanceSynchronisee ? await NumeroSynchroAsync(cnx, tx, societe, ct)
+            : await NumeroBlAsync(cnx, tx, societe, r.Origine.Enseigne, r.NumerotationParEnseigne, ct);
     }
 
     private async Task EcrireElementRetourAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, string profil, int numero, int element,
