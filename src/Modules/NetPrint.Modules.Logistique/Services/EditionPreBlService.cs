@@ -9,13 +9,12 @@ using NetPrint.Socle.Session;
 namespace NetPrint.Modules.Logistique.Services;
 
 // =====================================================================
-// Édition du pré-BL (EXP535P2) : données lues dans le modèle du BL, même document, titre « Pré-BL ». Droit d'accès des OPR
-// (comme la liste des pré-BL). EXP535P2 imprimait « Bon de livraison » : titre à confirmer par David (docs/points-en-attente.md).
+// Édition du pré-BL (EXP535P2) : données lues dans le modèle du BL, même document et même titre « Bon de livraison » (traduit) :
+// il est envoyé au client avant la livraison (David, 01/11). Droit d'accès des OPR (comme la liste des pré-BL).
 // =====================================================================
 internal sealed class EditionPreBlService(EditionBlDb2 donnees, PreBlDb2 preBl, OprDb2 opr, ISocietes societes, IUtilisateurCourant utilisateur)
     : IEditionPreBl
 {
-    public const string Titre = "Pré-BL";
     public const int MaxiCamion = 50;
 
     public async Task<DocumentGenere> EditerAsync(int numero, bool apercu, CancellationToken ct = default)
@@ -24,7 +23,7 @@ internal sealed class EditionPreBlService(EditionBlDb2 donnees, PreBlDb2 preBl, 
         var lues = await donnees.LirePreBlAsync(u.Societe, u.Profil, numero, ct)
                    ?? throw new RegleMetierException($"Le pré-BL {numero} n'existe pas ou ne vous est pas accessible.");
         var societe = await societes.LireIdentiteAsync(u.Societe, lues.Entete.Enseigne, DocumentBl.TypeLogo, ct);
-        return await Task.Run(() => DocumentsPdf.Generer($"Pré-BL {numero}.pdf", new DocumentBl(BonLivraison.Construire(lues), societe, apercu, Titre)), ct);
+        return await Task.Run(() => DocumentsPdf.Generer($"Pré-BL {numero}.pdf", new DocumentBl(BonLivraison.Construire(lues), societe, apercu)), ct);
     }
 
     public async Task<DocumentGenere> FeuillePreparationAsync(int numero, int? depot, bool codesBarres, CancellationToken ct = default)

@@ -66,7 +66,8 @@ internal static class EnTeteFeuille
 }
 
 // Feuille de préparation (ETAT_FeuilleKimmel) : palettes à prendre, par dépôt (un dépôt par page), emplacement, SSCC ; code-barres
-// du n° de pré-BL et, si demandé, de chaque palette ; total des palettes du dépôt (une seule par palette groupée)
+// Code 39 (presque toujours celui des terminaux, David 01/11) du n° de pré-BL et, si demandé, de chaque palette ; total des
+// palettes du dépôt (une seule par palette groupée)
 internal sealed class DocumentFeuillePreparation(FeuillePreparation f) : IDocument
 {
     public void Compose(IDocumentContainer conteneur)
@@ -118,7 +119,7 @@ internal sealed class DocumentFeuillePreparation(FeuillePreparation f) : IDocume
                 t.Cell().Element(EnTeteFeuille.Cellule).Column(x =>
                 {
                     x.Item().Text(p.Sscc).Bold();
-                    if (f.CodesBarres && p.Sscc != "") x.Item().Height(22).Svg(CodeBarres.Code128Svg(p.Sscc));
+                    if (f.CodesBarres && p.Sscc != "") x.Item().Height(22).Svg(CodeBarres.Code39Svg(p.Sscc));
                 });
                 t.Cell().Element(EnTeteFeuille.Cellule).Text($"{p.Article} {p.Indice}".Trim());
                 t.Cell().Element(EnTeteFeuille.Cellule).Text(p.RefImprime);

@@ -12,9 +12,6 @@ internal static class CodeBarres
     public static string Code39Svg(string valeur) =>
         Svg(new Code39Writer().encode(valeur.ToUpperInvariant(), BarcodeFormat.CODE_39, 0, 1));
 
-    // Code 128 (plus dense que le Code 39 pour les n° de palette SSCC de 18 chiffres : jeu C)
-    public static string Code128Svg(string valeur) => Svg(new Code128Writer().encode(valeur, BarcodeFormat.CODE_128, 0, 1));
-
     private static string Svg(ZXing.Common.BitMatrix matrice)
     {
         var largeur = matrice.Width;
