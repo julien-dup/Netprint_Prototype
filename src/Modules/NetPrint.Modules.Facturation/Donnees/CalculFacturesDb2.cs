@@ -1,3 +1,4 @@
+using System.Data.Odbc;
 using Microsoft.Extensions.Configuration;
 using NetPrint.Modules.Facturation.Services;
 using NetPrint.Socle.Donnees;
@@ -20,11 +21,18 @@ internal sealed class CalculFacturesDb2(IConfiguration config)
     {
         await using var cnx = BaseDb2.Connexion(config);
         await cnx.OpenAsync(ct);
+        return await LireAsync(cnx, null, societe, numero, date, ct);
+    }
+
+    // Lecture dans une transaction en cours (édition définitive : totaux recalculés sous le verrou de la facture)
+    public async Task<FacturePourCalcul?> LireAsync(OdbcConnection cnx, OdbcTransaction? tx, int societe, int numero, DateOnly date,
+        CancellationToken ct)
+    {
         var cle = new object[] { societe, numero, date.Year, date.Month, date.Day };
         ConditionsFacture conditions;
         bool editee;
         (decimal, decimal, decimal, decimal, decimal) enregistre;
-        await using (var rd = await Lecteur.ExecuterAsync(cnx, $"""
+        await using (var rd = await Lecteur.ExecuterAsync(cnx, tx, $"""
             SELECT FDTYPE, FDESC, FDCPT, FDNLE, FDNECH, FDART, FDECHA, FDECHM, FDECHJ, FDEDIT, FDMTN, FDPOT, FDPOE, FDMES, FDTVA
             FROM {Bib}.FAC080 WHERE RSOC = ? AND RNFAC = ? AND FDANNE = ? AND FDMOIS = ? AND FDJOUR = ?
             """, ct, cle))
@@ -36,7 +44,7 @@ internal sealed class CalculFacturesDb2(IConfiguration config)
             enregistre = (rd.Nombre(10), rd.Nombre(11), rd.Nombre(12), rd.Nombre(13), rd.Nombre(14));
         }
         var lignes = new List<LigneCalculFacture>();
-        await using (var rd = await Lecteur.ExecuterAsync(cnx, $"""
+        await using (var rd = await Lecteur.ExecuterAsync(cnx, tx, $"""
             SELECT COALESCE(t.LTYPE, ''), l.FGMTN,
                    COALESCE(CASE WHEN v.CTTVA2 <> 0 AND v.CTDAT2 <> 0 AND v.CTDAT2 <= ? THEN v.CTTVA2 ELSE v.CTXTVA END, 0)
             FROM {Bib}.FAC100 l

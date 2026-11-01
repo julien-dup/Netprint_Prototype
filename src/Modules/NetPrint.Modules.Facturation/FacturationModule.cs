@@ -31,6 +31,8 @@ public static class FacturationModule
         services.AddScoped<Ecrans.EtatListeFactures>();
         services.AddScoped<CalculFacturesDb2>();                                    // FAC199 / FAC201 (calcul)
         services.AddScoped<EditionFacturesDb2>();
+        services.AddScoped<EditionDefinitiveDb2>();
+        services.AddScoped<DroitsFacturationDb2>();                                 // PRT000P1                                 // FAC201 en définitif
         services.AddScoped<IEditionFactures, EditionFacturesService>();             // FAC202P5 (PDF)
         return services;
     }

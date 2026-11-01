@@ -42,7 +42,9 @@ public class EditionFacturesTests(ITestOutputHelper sortie)
     {
         var u = new Utilisateur();
         var service = new EditionFacturesService(new ConsultationFacturesService(new ConsultationFacturesDb2(BaseDeTest.Configuration), u),
-            new CalculFacturesDb2(BaseDeTest.Configuration), new EditionFacturesDb2(BaseDeTest.Configuration), new SansSociete(), u);
+            new CalculFacturesDb2(BaseDeTest.Configuration), new EditionFacturesDb2(BaseDeTest.Configuration),
+            new EditionDefinitiveDb2(BaseDeTest.Configuration, new CalculFacturesDb2(BaseDeTest.Configuration)),
+            new DroitsFacturationDb2(BaseDeTest.Configuration), new SansSociete(), u);
         foreach (var (numero, date) in new[] { (50001, new DateOnly(2026, 5, 1)), (110463, new DateOnly(2023, 11, 13)), (100476, new DateOnly(2026, 5, 12)) })
         {
             var pdf = await service.EditerAsync(numero, date);

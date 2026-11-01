@@ -2,9 +2,13 @@
 @* =====================================================================
    Fiche d'une facture ou d'un avoir (ConsultationFactures, tables des éléments et des lignes) : en-tête, totaux, envoi,
    éléments (commandes) et leurs lignes, textes rattachés à la ligne qui les précède, liens vers la commande et le BL.
+   Facture « à éditer » : édition définitive (FAC201), après confirmation.
    ===================================================================== *@
 @using System.Globalization
 @inject IConsultationFactures Factures
+@inject IEditionFactures Edition
+@inject Dialogues Dialogues
+@inject Notifications Notifications
 @inject NavigationManager Navigation
 
 <PageTitle>Facture @Numero · NetPrint</PageTitle>
@@ -16,6 +20,11 @@
     {
         <a class="bouton-ancre" href="@($"api/facturation/factures/{Numero}/{Jour}/pdf")" target="_blank" rel="noopener"
            title="Facture en PDF, recalculée (FAC202P5) ; « BROUILLON » tant qu'elle n'est pas éditée en définitif">🖨 Imprimer</a>
+        if (fiche.Facture.Statut == StatutsFacture.AEditer)
+        {
+            <button disabled="@enCours" @onclick="EditerDefinitivementAsync"
+                    title="Enregistre les totaux, marque les BL facturés et met à jour les commandes ; la facture ne sera plus modifiable">✔ Éditer en définitif</button>
+        }
     }
 </fieldset>
 
@@ -153,6 +162,30 @@
         catch (RegleMetierException ex) { erreur = ex.Message; }
         catch (Exception ex) { erreur = $"Lecture de la facture impossible : {ex.Message}"; }
         finally { occupe = false; }
+    }
+
+    private bool enCours;
+
+    // Édition définitive : confirmation (Échap / Annuler = non), puis fiche relue (statut « éditée », totaux enregistrés)
+    private async Task EditerDefinitivementAsync()
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;   // dès la question : un double clic n'ouvre pas deux confirmations
+        try
+        {
+            var f = fiche.Facture;
+            var quoi = f.Avoir ? "l'avoir" : "la facture";
+            var message = $"Éditer en définitif {quoi} {f.Numero} du {f.Date:dd/MM/yyyy} ?"
+                + "\nLes totaux seront enregistrés, les BL marqués facturés et les commandes mises à jour."
+                + "\nElle ne pourra plus être modifiée (correction par un avoir).";
+            if (!await Dialogues.ConfirmerAsync(message, "Édition définitive", "Éditer en définitif")) return;
+            await Edition.EditerDefinitivementAsync(f.Numero, f.Date);
+            Notifications.Succes(f.Avoir ? $"Avoir {f.Numero} édité en définitif." : $"Facture {f.Numero} éditée en définitif.");
+            await OnParametersSetAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Édition définitive impossible : {ex.Message}"); }
+        finally { enCours = false; }
     }
 
     private static string E(decimal v) => $"{v:#,##0.00} €";
