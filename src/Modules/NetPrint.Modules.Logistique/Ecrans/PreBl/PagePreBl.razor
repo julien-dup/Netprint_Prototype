@@ -14,6 +14,10 @@
 
 <fieldset class="barre-outils">
     <button @onclick='() => Navigation.NavigateTo("logistique/prebl")'>← Liste des pré-BL</button>
+    @if (fiche is not null)
+    {
+        <a class="bouton-ancre" href="@($"api/logistique/prebl/{Numero}/pdf")" target="_blank" rel="noopener" title="Pré-BL en PDF (EXP535P2)">🖨 Imprimer</a>
+    }
     @if (fiche?.Etat == EtatsPreBl.Livre)
     {
         <button title="Le BL porte le numéro du pré-BL" @onclick='() => Navigation.NavigateTo($"logistique/bl/{Numero}")'>🚚 Voir le BL @Numero</button>

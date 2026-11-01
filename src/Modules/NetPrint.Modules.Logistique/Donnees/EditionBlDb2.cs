@@ -46,7 +46,7 @@ internal sealed record DonneesEditionBl(
     IReadOnlyList<LotEditionBl> Lots, IReadOnlyList<string> TextesPied, IReadOnlyDictionary<(string Enseigne, string Code), IReadOnlyList<string>> Normes,
     LibellesBl Libelles);
 
-internal sealed class EditionBlDb2(IConfiguration config)
+internal sealed partial class EditionBlDb2(IConfiguration config)
 {
     private string Bib => BaseDb2.Bibliotheque(config);
 
@@ -195,38 +195,45 @@ internal sealed class EditionBlDb2(IConfiguration config)
             while (await rd.ReadAsync(ct)) pied.Add(rd.Texte(0));
         while (pied.Count > 0 && pied[^1] == "") pied.RemoveAt(pied.Count - 1);
 
-        // Mentions de norme (NOR010F) : enseigne de la commande, version la plus récente commencée à la date d'expédition
-        // (SETLL date / READPE d'EXP035P2)
-        var normes = new Dictionary<(string, string), IReadOnlyList<string>>();
         var demandes = liste.Where(e => e.NormeCommande != "").Select(e => (e.EnseigneCommande, e.NormeCommande))
-            .Concat(lignes.Where(l => l.Norme != "").Select(l => (liste.First(e => e.Numero == l.Element).EnseigneCommande, l.Norme)))
-            .Distinct().ToList();
-        var date = entete.DateExpedition is { } d ? BaseDb2.AAAAMMJJ(d) : 0;
-        foreach (var (ens, code) in demandes)
+            .Concat(lignes.Where(l => l.Norme != "").Select(l => (liste.First(e => e.Numero == l.Element).EnseigneCommande, l.Norme)));
+        var normes = await NormesAsync(cnx, societe, demandes, entete.DateExpedition, ct);
+        var libelles = await LibellesAsync(cnx, entete.Langue, ct);
+
+        return new DonneesEditionBl(ecartes, entete, liste, lignes, lots, pied, normes, libelles);
+    }
+
+    // Mentions de norme (NOR010F) : enseigne de la commande, version la plus récente commencée à la date d'expédition
+    // (SETLL date / READPE d'EXP035P2)
+    private async Task<Dictionary<(string, string), IReadOnlyList<string>>> NormesAsync(OdbcConnection cnx, int societe,
+        IEnumerable<(string Enseigne, string Code)> demandes, DateOnly? expedition, CancellationToken ct)
+    {
+        var normes = new Dictionary<(string, string), IReadOnlyList<string>>();
+        var date = expedition is { } d ? BaseDb2.AAAAMMJJ(d) : 0;
+        foreach (var (ens, code) in demandes.Distinct())
             await using (var rd = await Lire(cnx, """
                 SELECT NOBL1, NOBL2, NOBL3, NOBL4 FROM {b}.NOR010F
                 WHERE RSOC = ? AND NOENS = ? AND NOCOD = ? AND NODATED <= ?
                 ORDER BY NODATED DESC, NODATE DESC FETCH FIRST 1 ROW ONLY
                 """, ct, societe, ens, code, date))
                 normes[(ens, code)] = await rd.ReadAsync(ct) ? Enumerable.Range(0, 4).Select(rd.Texte).Where(x => x != "").ToList() : [];
+        return normes;
+    }
 
-        // Libellés dans la langue du client (PRT008 programme « BL », listes PRT009)
-        var libelles = LibellesBl.EnFrancais;
-        if (entete.Langue != "")
-        {
-            var traductions = new List<string>();
-            var colonnes = string.Join(", ", Enumerable.Range(1, 50).Select(i => $"TRADUC{i}"));
-            await using (var rd = await Lire(cnx, $"SELECT {colonnes} FROM {{b}}.PRT008 WHERE MLANGUE = ? AND MPGM = 'BL'", ct, entete.Langue))
-                if (await rd.ReadAsync(ct)) traductions.AddRange(Enumerable.Range(0, 50).Select(rd.Texte));
-            var listes = new Dictionary<(int, string), string>();
-            await using (var rd = await Lire(cnx, """
-                SELECT Y2LSNO, Y2EXVL, Y2CNTX FROM {b}.PRT009 WHERE LLANGUE = ? AND Y2LSNO IN (28, 30, 31, 32)
-                """, ct, entete.Langue))
-                while (await rd.ReadAsync(ct)) listes[(rd.Entier(0), rd.Texte(1))] = rd.Texte(2);
-            libelles = LibellesBl.Pour(traductions, listes);
-        }
-
-        return new DonneesEditionBl(ecartes, entete, liste, lignes, lots, pied, normes, libelles);
+    // Libellés dans la langue du client (PRT008 programme « BL », listes PRT009)
+    private async Task<LibellesBl> LibellesAsync(OdbcConnection cnx, string langue, CancellationToken ct)
+    {
+        if (langue == "") return LibellesBl.EnFrancais;
+        var traductions = new List<string>();
+        var colonnes = string.Join(", ", Enumerable.Range(1, 50).Select(i => $"TRADUC{i}"));
+        await using (var rd = await Lire(cnx, $"SELECT {colonnes} FROM {{b}}.PRT008 WHERE MLANGUE = ? AND MPGM = 'BL'", ct, langue))
+            if (await rd.ReadAsync(ct)) traductions.AddRange(Enumerable.Range(0, 50).Select(rd.Texte));
+        var listes = new Dictionary<(int, string), string>();
+        await using (var rd = await Lire(cnx, """
+            SELECT Y2LSNO, Y2EXVL, Y2CNTX FROM {b}.PRT009 WHERE LLANGUE = ? AND Y2LSNO IN (28, 30, 31, 32)
+            """, ct, langue))
+            while (await rd.ReadAsync(ct)) listes[(rd.Entier(0), rd.Texte(1))] = rd.Texte(2);
+        return LibellesBl.Pour(traductions, listes);
     }
 
     // Marque « édité » d'EXP035P2 (seule écriture de l'édition) : HEDBL = 'N' et date d'édition

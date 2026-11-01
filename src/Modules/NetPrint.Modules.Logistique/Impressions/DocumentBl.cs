@@ -12,12 +12,13 @@ namespace NetPrint.Modules.Logistique.Impressions;
 // Mise en page du bon de livraison (reprise modernisée d'EXP035P2) : en-tête société et logo, destinataire, transport,
 // lignes par élément (référence, quantité, désignation, état, colis, poids), puis colisage et zone de réception.
 // =====================================================================
-internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool apercu) : IDocument
+// titre : autre titre que « Bon de livraison » (pré-BL, même mise en page qu'EXP535P2)
+internal sealed class DocumentBl(ModeleBl m, IdentiteSociete? societe, bool apercu, string? titre = null) : IDocument
 {
     // Logos des éditions WinDev propres au BL : LogoBl<soc>…
     public const string TypeLogo = "Bl";
 
-    private string Titre => m.Retour ? m.L.TitreRetour : m.L.Titre;
+    private string Titre => titre ?? (m.Retour ? m.L.TitreRetour : m.L.Titre);
 
     public void Compose(IDocumentContainer conteneur) => conteneur.Page(page =>
     {

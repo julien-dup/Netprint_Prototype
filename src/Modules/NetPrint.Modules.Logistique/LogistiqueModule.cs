@@ -75,6 +75,7 @@ public static class LogistiqueModule
         services.AddScoped<PreBlDb2>();
         services.AddScoped<IPreBl, PreBlService>();                         // WinDev PreBL / PreBLSansPalette
         services.AddScoped<ISaisiePreBl, SaisiePreBlService>();             // FEN_CreationPREBL, FEN_SaisiePREBL
+        services.AddScoped<IEditionPreBl, EditionPreBlService>();           // EXP530NAV / EXP535P2
         services.AddScoped<Ecrans.PreBl.EtatListePreBl>();
         return services;
     }
@@ -128,6 +129,23 @@ public static class LogistiqueModule
             catch (System.Data.Odbc.OdbcException ex)
             {
                 return Results.Text($"Édition de l'OPR impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Pré-BL en PDF (EXP535P2), sans écriture : GET /api/logistique/prebl/29406/pdf
+        api.MapGet("/prebl/{numero:int}/pdf", async (int numero, HttpContext http, IEditionPreBl edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.EditerAsync(numero, false, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Édition du pré-BL impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
             }
         });
 
