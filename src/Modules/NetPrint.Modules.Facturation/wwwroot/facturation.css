@@ -54,3 +54,4 @@
 .resultat-saisie .boutons-criteres { display: flex; gap: 8px; }
 .compteur-absent { border-color: var(--orange, #d97706); background: var(--jaune-clair); }
 .compteur-absent .ligne-champs { display: flex; align-items: flex-end; gap: 10px; }
+.titre-element .bouton-retirer { padding: 2px 8px; font-size: .85em; background: none; border: 1px dashed #b91c1c; color: #b91c1c; }

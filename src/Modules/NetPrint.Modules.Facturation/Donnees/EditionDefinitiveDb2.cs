@@ -67,30 +67,7 @@ internal sealed class EditionDefinitiveDb2(IConfiguration config, CalculFactures
             await Executer("UPDATE {b}.FAC090 SET FEEDT = 'O' WHERE RSOC = ? AND RNFAC = ? AND FEANNE = ? AND FEMOIS = ? AND FEJOUR = ?", cle);
             await Executer("UPDATE {b}.EXP010 SET HBLFAC = 'O' WHERE RSOC = ? AND HNOFAC = ? AND HDAFAA = ? AND HDAFAM = ? AND HDAFAJ = ?", cle);
 
-            // Commandes : dernière facture et quantité facturée de l'élément ; lignes négoce (éléments de type 2 et 3)
-            var signe = avoir ? -1 : 1;
-            var elements = new List<(int Num, int Dossier, string Cle, int Type, decimal Qte)>();
-            await using (var rd = await Lire("""
-                SELECT FENUM, FEDOSS, FECLE, FETYP, FEQTE FROM {b}.FAC090 WHERE RSOC = ? AND RNFAC = ? AND FEANNE = ? AND FEMOIS = ? AND FEJOUR = ?
-                AND FEDOSS <> 0 ORDER BY FENUM
-                """, cle))
-                while (await rd.ReadAsync(ct)) elements.Add((rd.Entier(0), rd.Entier(1), rd.Texte(2), rd.Entier(3), rd.Nombre(4)));
-            foreach (var el in elements)
-            {
-                await Executer("""
-                    UPDATE {b}.AB001 SET CCNOFA = ?, CCFCTA = ?, CCFCTM = ?, CCFCTJ = ?, CCQTEP = CCQTEP + ?
-                    WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?
-                    """, numero, date.Year, date.Month, date.Day, signe * el.Qte, societe, el.Dossier, el.Cle);
-                if (el.Type is not (2 or 3)) continue;
-                await Executer("""
-                    UPDATE {b}.NEG100 n SET DNQTEF = DNQTEF + ? * (SELECT COALESCE(SUM(l.FGQTE), 0) FROM {b}.FAC100 l
-                        WHERE l.RSOC = ? AND l.RNFAC = ? AND l.FGANNE = ? AND l.FGMOIS = ? AND l.FGJOUR = ? AND l.FGNEL = ?
-                          AND l.FGLIGD = n.DNNLIG AND l.FGART = n.DNART)
-                    WHERE n.RSOC = ? AND n.RDOSS = ? AND n.DNDCLE = ?
-                      AND EXISTS (SELECT 1 FROM {b}.FAC100 l WHERE l.RSOC = ? AND l.RNFAC = ? AND l.FGANNE = ? AND l.FGMOIS = ? AND l.FGJOUR = ?
-                          AND l.FGNEL = ? AND l.FGLIGD = n.DNNLIG AND l.FGART = n.DNART AND l.FGART NOT LIKE '999%')
-                    """, [signe, .. cle, el.Num, societe, el.Dossier, el.Cle, .. cle, el.Num]);
-            }
+            await QuantitesFactureesAsync(cnx, tx, Bib, cle, avoir ? -1 : 1, derniereFacture: true, ct);
             await tx.CommitAsync(ct);
             valide = true;
             return t;
@@ -99,6 +76,48 @@ internal sealed class EditionDefinitiveDb2(IConfiguration config, CalculFactures
         {
             // Annulation sans masquer l'erreur d'origine (connexion perdue : la transaction est de toute façon abandonnée)
             if (!valide) try { await tx.RollbackAsync(CancellationToken.None); } catch (OdbcException) { }
+        }
+    }
+
+    // Commandes des éléments (FAC199 SPTOT8) : quantité facturée de l'élément (AB001.CCQTEP) et des lignes négoce des éléments de type
+    // 2 et 3 (NEG100.DNQTEF), ajoutée (signe 1) ou retirée (signe −1) ; à l'édition, n° et date de la dernière facture (AB001).
+    // Partagé avec la remise « à éditer » (FAC166), pour que l'une soit toujours l'inverse exact de l'autre. cle : société, n°, date.
+    internal static async Task QuantitesFactureesAsync(OdbcConnection cnx, OdbcTransaction tx, string bib, object[] cle, int signe,
+        bool derniereFacture, CancellationToken ct)
+    {
+        async Task Executer(string sql, params object?[] v)
+        {
+            await using var cmd = cnx.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = sql.Replace("{b}", bib);
+            foreach (var x in v) cmd.Parameters.Valeur(x is string t && t == "" ? " " : x);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        var societe = cle[0];
+        var elements = new List<(int Num, int Dossier, string Cle, int Type, decimal Qte)>();
+        await using (var rd = await Lecteur.ExecuterAsync(cnx, tx, """
+            SELECT FENUM, FEDOSS, FECLE, FETYP, FEQTE FROM {b}.FAC090 WHERE RSOC = ? AND RNFAC = ? AND FEANNE = ? AND FEMOIS = ? AND FEJOUR = ?
+            AND FEDOSS <> 0 ORDER BY FENUM
+            """.Replace("{b}", bib), ct, cle))
+            while (await rd.ReadAsync(ct)) elements.Add((rd.Entier(0), rd.Entier(1), rd.Texte(2), rd.Entier(3), rd.Nombre(4)));
+        foreach (var el in elements)
+        {
+            if (derniereFacture)
+                await Executer("""
+                    UPDATE {b}.AB001 SET CCNOFA = ?, CCFCTA = ?, CCFCTM = ?, CCFCTJ = ?, CCQTEP = CCQTEP + ?
+                    WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?
+                    """, [.. cle[1..], signe * el.Qte, societe, el.Dossier, el.Cle]);
+            else
+                await Executer("UPDATE {b}.AB001 SET CCQTEP = CCQTEP + ? WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ?", signe * el.Qte, societe, el.Dossier, el.Cle);
+            if (el.Type is not (2 or 3)) continue;
+            await Executer("""
+                UPDATE {b}.NEG100 n SET DNQTEF = DNQTEF + ? * (SELECT COALESCE(SUM(l.FGQTE), 0) FROM {b}.FAC100 l
+                    WHERE l.RSOC = ? AND l.RNFAC = ? AND l.FGANNE = ? AND l.FGMOIS = ? AND l.FGJOUR = ? AND l.FGNEL = ?
+                      AND l.FGLIGD = n.DNNLIG AND l.FGART = n.DNART)
+                WHERE n.RSOC = ? AND n.RDOSS = ? AND n.DNDCLE = ?
+                  AND EXISTS (SELECT 1 FROM {b}.FAC100 l WHERE l.RSOC = ? AND l.RNFAC = ? AND l.FGANNE = ? AND l.FGMOIS = ? AND l.FGJOUR = ?
+                      AND l.FGNEL = ? AND l.FGLIGD = n.DNNLIG AND l.FGART = n.DNART AND l.FGART NOT LIKE '999%')
+                """, [signe, .. cle, el.Num, societe, el.Dossier, el.Cle, .. cle, el.Num]);
         }
     }
 }

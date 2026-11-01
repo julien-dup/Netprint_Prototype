@@ -131,4 +131,11 @@ public interface ISaisieFactures
     // Enregistrement de la modification dans une transaction : en-tête, lignes réécrites, et changement de date reporté sur tous les
     // fichiers de la facture (FAC, BL, compléments) ; puis édition définitive si demandée et sans anomalie
     Task<FactureCreee> ModifierAsync(FactureSaisie facture, bool editerDefinitif, CancellationToken ct = default);
+
+    // Suppression d'une facture pas encore éditée, ou d'un seul de ses éléments (FAC160, FAC165) : ses BL, éléments en plus et
+    // compléments redeviennent à facturer. Renvoie vrai si toute la facture est supprimée (demandée entière ou dernier élément).
+    Task<bool> SupprimerAsync(int numero, DateOnly date, int? element = null, CancellationToken ct = default);
+
+    // Facture éditée mais pas comptabilisée remise « à éditer » (FAC166) pour pouvoir la modifier : édition définitive annulée
+    Task RemettreAEditerAsync(int numero, DateOnly date, CancellationToken ct = default);
 }

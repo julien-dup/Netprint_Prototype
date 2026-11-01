@@ -35,6 +35,17 @@ internal sealed class ConsultationFacturesDb2(IConfiguration config)
         return rd.Texte(1) == "O" ? rd.Entier(0) : null;
     }
 
+    // Représentant limité (B000F.ILIMIT) : seules ses factures (FDREP) lui sont accessibles, aussi pour les modifier (FAC080S *IN07) ;
+    // facture introuvable : vrai, l'appelant la dit inexistante
+    public async Task<bool> AccessibleAsync(int societe, string profil, int numero, DateOnly date, CancellationToken ct)
+    {
+        await using var cnx = await OuvrirAsync(ct);
+        if (await RepresentantImposeAsync(cnx, societe, profil, ct) is not { } r) return true;
+        await using var rd = await Lire(cnx, "SELECT FDREP FROM {b}.FAC080 WHERE RSOC = ? AND RNFAC = ? AND FDANNE = ? AND FDMOIS = ? AND FDJOUR = ?",
+            ct, societe, numero, date.Year, date.Month, date.Day);
+        return !await rd.ReadAsync(ct) || rd.Entier(0) == r;
+    }
+
     // En-tête : colonnes 0 à 33
     private const string ColonnesEnTete = """
         a.RNFAC, a.FDANNE, a.FDMOIS, a.FDJOUR, a.FDTYPE, a.FDGENF, a.FDCLIF, CASE WHEN a.FDNOM = ' ' THEN COALESCE(b.CNOM, '') ELSE a.FDNOM END,

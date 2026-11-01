@@ -10,24 +10,56 @@ namespace NetPrint.Modules.Facturation.Services;
 // facturation automatique, sans l'exigence « à prendre en automatique »), facture préparée par le moteur commun (une commande =
 // un élément), corrigée à l'écran, puis créée par la même écriture que la facturation automatique (une transaction, n° compris).
 // Modification d'une facture pas encore éditée (FAC150 mode M) : en-tête et lignes, changement de date reporté sur tous ses fichiers.
-// Droits : interdiction PRT000P1 sur FAC150 pour saisir (total ou création) ou modifier (total ou modification), sur FAC200 pour
-// éditer en définitif. Pas encore repris : facture sans BL, ajout d'élément ou de BL, copie, suppression.
+// Suppression d'une facture pas encore éditée ou d'un de ses éléments (FAC160 / FAC165) ; facture éditée non comptabilisée remise
+// « à éditer » (FAC166) pour la modifier. Droits : interdiction PRT000P1 sur FAC150 pour saisir (total ou création), modifier ou
+// remettre à éditer (total ou modification), supprimer (total ou suppression), sur FAC200 pour éditer en définitif ; représentant
+// limité : ses factures seulement. Pas encore repris : facture sans BL, ajout d'élément ou de BL, copie.
 // =====================================================================
 internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFacturesDb2 donnees, EditionDefinitiveDb2 definitive,
-    DroitsFacturationDb2 droits, IUtilisateurCourant utilisateur) : ISaisieFactures
+    DroitsFacturationDb2 droits, ConsultationFacturesDb2 consultation, IUtilisateurCourant utilisateur) : ISaisieFactures
 {
     public const string ProgrammeSaisie = "FAC150";
     public const int Maxi = 10000;
     public const int BlsMaxi = 500;   // BL d'une même facture (paramètres de la relecture)
 
-    // PRT000P1 : « ** » en option 1 (total) ou 2 (création) interdit la saisie, en option 3 (modification) la modification
-    private async Task<UtilisateurConnecte> ExigerDroitAsync(CancellationToken ct, bool modification = false)
+    private enum ActionFacture { Creation = 2, Modification = 3, Suppression = 4 }
+
+    // PRT000P1 : « ** » en option 1 (total) ou en option de l'action (2 création, 3 modification, 4 suppression) l'interdit
+    private async Task<UtilisateurConnecte> ExigerDroitAsync(CancellationToken ct, ActionFacture action = ActionFacture.Creation)
     {
         var u = await utilisateur.ExigerAsync();
-        if (await droits.OptionsProgrammeAsync(ProgrammeSaisie, u.Profil, ct) is [var total, var creation, var modif, ..]
-            && (total == "**" || (modification ? modif : creation) == "**"))
-            throw new RegleMetierException($"Vous n'avez pas le droit de {(modification ? "modifier" : "créer")} des factures (FAC150).");
+        if (await droits.OptionsProgrammeAsync(ProgrammeSaisie, u.Profil, ct) is { } o
+            && (o.ElementAtOrDefault(0) == "**" || o.ElementAtOrDefault((int)action - 1) == "**"))
+            throw new RegleMetierException($"Vous n'avez pas le droit de {action switch
+            {
+                ActionFacture.Modification => "modifier",
+                ActionFacture.Suppression => "supprimer",
+                _ => "créer",
+            }} des factures (FAC150).");
         return u;
+    }
+
+    // Facture existante : droit de l'action, puis accès (représentant limité : ses factures seulement)
+    private async Task<UtilisateurConnecte> ExigerFactureAsync(int numero, DateOnly date, ActionFacture action, CancellationToken ct)
+    {
+        var u = await ExigerDroitAsync(ct, action);
+        if (!await consultation.AccessibleAsync(u.Societe, u.Profil, numero, date, ct))
+            throw new RegleMetierException($"Vous n'avez pas accès à la facture {numero} (factures de votre représentant seulement).");
+        return u;
+    }
+
+    public async Task<bool> SupprimerAsync(int numero, DateOnly date, int? element = null, CancellationToken ct = default)
+    {
+        var u = await ExigerFactureAsync(numero, date, ActionFacture.Suppression, ct);
+        return await bls.SupprimerFactureAsync(u.Societe, numero, date, element, ct);
+    }
+
+    public async Task RemettreAEditerAsync(int numero, DateOnly date, CancellationToken ct = default)
+    {
+        var u = await ExigerFactureAsync(numero, date, ActionFacture.Modification, ct);
+        if (!await PeutEditerAsync(u, ct))   // annuler une édition définitive = droit d'éditer en définitif
+            throw new RegleMetierException("Vous n'avez pas le droit d'éditer les factures en définitif (FAC200) : vous ne pouvez pas annuler une édition.");
+        await bls.RemettreAEditerAsync(u.Societe, numero, date, ct);
     }
 
     private async Task<bool> PeutEditerAsync(UtilisateurConnecte u, CancellationToken ct) => !EditionFacturesService.EditionInterdite(
@@ -51,7 +83,7 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
 
     public async Task<FactureSaisie> OuvrirAsync(int numero, DateOnly date, CancellationToken ct = default)
     {
-        var u = await ExigerDroitAsync(ct, modification: true);
+        var u = await ExigerFactureAsync(numero, date, ActionFacture.Modification, ct);
         var f = await bls.LireFactureAsync(u.Societe, numero, date, ct)
                 ?? throw new RegleMetierException($"La facture {numero} du {date:dd/MM/yyyy} n'existe pas.");
         if (f.Edition == "E") throw new RegleMetierException($"La facture {numero} est déjà éditée : elle ne se modifie plus (faites un avoir).");
@@ -84,7 +116,7 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
     public async Task<FactureCreee> ModifierAsync(FactureSaisie s, bool editerDefinitif, CancellationToken ct = default)
     {
         if (s.Numero is not { } numero || s.DateOrigine is not { } origine) throw new RegleMetierException("Cette facture n'est pas une facture existante.");
-        var u = await ExigerDroitAsync(ct, modification: true);
+        var u = await ExigerFactureAsync(numero, origine, ActionFacture.Modification, ct);
         if (editerDefinitif && !await PeutEditerAsync(u, ct))
             throw new RegleMetierException("Vous n'avez pas le droit d'éditer les factures en définitif (FAC200).");
         var controle = SaisieFacture.Recalculer(s);

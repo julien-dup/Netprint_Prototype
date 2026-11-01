@@ -2,11 +2,13 @@
 @* =====================================================================
    Fiche d'une facture ou d'un avoir (ConsultationFactures, tables des éléments et des lignes) : en-tête, totaux, envoi,
    éléments (commandes) et leurs lignes, textes rattachés à la ligne qui les précède, liens vers la commande et le BL.
-   Facture « à éditer » : édition définitive (FAC201), après confirmation.
+   Facture « à éditer » : édition définitive (FAC201), après confirmation. Facture pas encore éditée : modification, suppression de la
+   facture ou d'un de ses éléments (FAC160 / FAC165). Facture éditée non comptabilisée : modification après remise « à éditer » (FAC166).
    ===================================================================== *@
 @using System.Globalization
 @inject IConsultationFactures Factures
 @inject IEditionFactures Edition
+@inject ISaisieFactures Saisie
 @inject Dialogues Dialogues
 @inject Notifications Notifications
 @inject NavigationManager Navigation
@@ -24,6 +26,13 @@
         {
             <button title="Modifier l'en-tête, les lignes ou la date (reportée sur tous les fichiers de la facture)"
                     @onclick='() => Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}/modifier")'>✏ Modifier</button>
+            <button disabled="@enCours" @onclick="() => SupprimerAsync(null)"
+                    title="Supprime la facture ; ses BL et compléments redeviennent à facturer">🗑 Supprimer</button>
+        }
+        else if (fiche.Facture.Statut == StatutsFacture.Editee)
+        {
+            <button disabled="@enCours" @onclick="RemettreAEditerAsync"
+                    title="Annule l'édition définitive (la facture n'est pas comptabilisée) pour pouvoir la modifier">✏ Modifier</button>
         }
         if (fiche.Facture.Statut == StatutsFacture.AEditer)
         {
@@ -113,6 +122,11 @@
                         <span>Élément @el.Numero</span>@if (el.Categorie != "") {<span class="discret">catégorie @el.Categorie</span>}
                     }
                     <span class="espace"></span>
+                    @if (!orphelines && fiche.Elements.Count > 1 && f.Statut is StatutsFacture.AEditer or StatutsFacture.Attente)
+                    {
+                        <button class="bouton-retirer" disabled="@enCours" @onclick="() => SupprimerAsync(el.Numero)"
+                                title="Retire cet élément de la facture ; ses BL et compléments redeviennent à facturer">🗑 Retirer</button>
+                    }
                     <b>@E(lignes.Sum(l => l.Montant))</b>
                 </div>
                 <table class="grille grille-fiche">
@@ -182,7 +196,7 @@
             var quoi = f.Avoir ? "l'avoir" : "la facture";
             var message = $"Éditer en définitif {quoi} {f.Numero} du {f.Date:dd/MM/yyyy} ?"
                 + "\nLes totaux seront enregistrés, les BL marqués facturés et les commandes mises à jour."
-                + "\nElle ne pourra plus être modifiée (correction par un avoir).";
+                + "\nElle ne sera plus modifiable, sauf à annuler son édition tant qu'elle n'est pas comptabilisée.";
             if (!await Dialogues.ConfirmerAsync(message, "Édition définitive", "Éditer en définitif")) return;
             await Edition.EditerDefinitivementAsync(f.Numero, f.Date);
             Notifications.Succes(f.Avoir ? $"Avoir {f.Numero} édité en définitif." : $"Facture {f.Numero} éditée en définitif.");
@@ -190,6 +204,51 @@
         }
         catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
         catch (Exception ex) { Notifications.Erreur($"Édition définitive impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    // Suppression de la facture (element null) ou d'un de ses éléments ; facture entière supprimée : retour à la liste
+    private async Task SupprimerAsync(int? element)
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;
+        try
+        {
+            var f = fiche.Facture;
+            var quoi = f.Avoir ? "l'avoir" : "la facture";
+            var message = element is { } el
+                ? $"Retirer l'élément {el} de {quoi} {f.Numero} ?\nSes BL et compléments de commande redeviendront à facturer."
+                : $"Supprimer {quoi} {f.Numero} du {f.Date:dd/MM/yyyy} ?\nSes BL et compléments de commande redeviendront à facturer ; son numéro ne sera pas réutilisé.";
+            if (!await Dialogues.ConfirmerAsync(message, element is null ? "Supprimer" : "Retirer un élément", element is null ? "Supprimer" : "Retirer")) return;
+            var toute = await Saisie.SupprimerAsync(f.Numero, f.Date, element);
+            Notifications.Succes(toute ? $"{(f.Avoir ? "Avoir" : "Facture")} {f.Numero} supprimé{(f.Avoir ? "" : "e")}." : $"Élément {element} retiré de {quoi} {f.Numero}.");
+            if (toute) Navigation.NavigateTo("facturation/factures");
+            else await OnParametersSetAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    // Facture éditée non comptabilisée : édition définitive annulée (FAC166), puis ouverte en modification
+    private async Task RemettreAEditerAsync()
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;
+        try
+        {
+            var f = fiche.Facture;
+            var quoi = f.Avoir ? "L'avoir" : "La facture";
+            var message = $"{quoi} {f.Numero} est éditée : pour la modifier, son édition définitive sera annulée."
+                + "\nElle redeviendra « à éditer » (totaux et quantités facturées des commandes retirés) et devra être rééditée."
+                + (f.Envoi.StartsWith("Envoyée") ? $"\nAttention : elle a déjà été envoyée au client ({f.Envoi})." : "");
+            if (!await Dialogues.ConfirmerAsync(message, "Modifier une facture éditée", "Annuler l'édition et modifier")) return;
+            await Saisie.RemettreAEditerAsync(f.Numero, f.Date);
+            Notifications.Info($"{quoi} {f.Numero} est de nouveau « à éditer ».");
+            Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}/modifier");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Remise « à éditer » impossible : {ex.Message}"); }
         finally { enCours = false; }
     }
 

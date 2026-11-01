@@ -165,7 +165,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
     {
         var config = BaseDeTest.Configuration;
         return new SaisieFacturesService(new FacturationAutoDb2(config), new SaisieFacturesDb2(config),
-            new EditionDefinitiveDb2(config, new CalculFacturesDb2(config)), new DroitsFacturationDb2(config),
+            new EditionDefinitiveDb2(config, new CalculFacturesDb2(config)), new DroitsFacturationDb2(config), new ConsultationFacturesDb2(config),
             new FacturationAutoBaseTests.Utilisateur(societe));
     }
 
@@ -223,6 +223,58 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
             // Le BL est facturé : il n'est plus proposé, et une deuxième création est refusée
             Assert.Contains("déjà facturé", (await service.ChercherBlsAsync(new CleFacturation { Bl = bl })).Erreurs.Single().Message);
             await Assert.ThrowsAsync<RegleMetierException>(() => service.CreerAsync(f, false));
+        }
+        finally
+        {
+            if (numero is { } n)
+                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
+                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
+                        societe, n, date.Year, date.Month, date.Day);
+            foreach (var (table, rrn, colonnes, valeurs) in avant)
+                await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
+                    [.. valeurs, rrn]);
+        }
+        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+    }
+
+    [FactDb2Ecriture]
+    public async Task Remise_a_editer_puis_suppression_puis_remise_a_l_identique()
+    {
+        const int societe = 29, bl = 29379;
+        var date = DateOnly.FromDateTime(DateTime.Today);
+        var service = Service(societe);
+        var f = await service.PreparerAsync([new ElementDeBl(bl, 1)]);
+        Assert.Empty(service.Recalculer(f).Anomalies);
+
+        await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
+        await cnx.OpenAsync();
+        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        // BL, éléments en plus, compléments, quantités facturées : comme avant la facture (seuls compteurs et « dernière facture » ont bougé)
+        string Etat(IEnumerable<(string Table, long Rrn, string Colonnes, object?[] Valeurs)> releve) => string.Join("\n", releve
+            .Where(x => x.Table is "EXP010" or "EXP011" or "AB004" or "NEG100" or "AB001")
+            .Select(x => $"{x.Table} {x.Rrn} " + string.Join("|", (x.Table == "AB001" ? x.Valeurs[4..] : x.Valeurs).Select(v => $"{v}".Trim()))));
+        int? numero = null;
+        try
+        {
+            var creee = await service.CreerAsync(f, editerDefinitif: true);
+            numero = creee.Numero;
+            Assert.True(creee.EditeeDefinitif);
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.SupprimerAsync(numero.Value, date));   // éditée : avoir
+
+            // Remise « à éditer » : édition annulée (quantités facturées retirées), la facture se modifie et se supprime de nouveau
+            await service.RemettreAEditerAsync(numero.Value, date);
+            Assert.Equal(numero, (await service.OuvrirAsync(numero.Value, date)).Numero);
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.RemettreAEditerAsync(numero.Value, date));
+
+            // Suppression de son seul élément = de la facture : BL de nouveau à facturer, en-tête gardé « supprimé »
+            Assert.True(await service.SupprimerAsync(numero.Value, date, element: 1));
+            Assert.Equal("FAC080=1 FAC081=0 FAC090=0 FAC100=0 EXP010=0", await CompterAsync(cnx, societe, numero.Value, date));
+            Assert.Equal(Etat(avant), Etat(await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date)));
+            Assert.Contains((await service.ChercherBlsAsync(new CleFacturation { Bl = bl })).Bls, b => b.Bl == bl && b.Propose);
+            Assert.Contains("supprimée", (await Assert.ThrowsAsync<RegleMetierException>(() => service.SupprimerAsync(numero.Value, date))).Message);
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.OuvrirAsync(numero.Value, date));
+            sortie.WriteLine($"BL {bl} → facture {numero} éditée, remise à éditer, puis supprimée ; BL de nouveau à facturer");
         }
         finally
         {
