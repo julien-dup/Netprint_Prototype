@@ -17,6 +17,16 @@
     <button disabled="@(!droits.Creer)" title="Préparer une expédition : client, adresse, lignes de commande, lots et palettes"
             @onclick='() => Navigation.NavigateTo("logistique/prebl/nouveau")'>➕ Nouveau pré-BL</button>
     <span class="espace"></span>
+    <label class="champ-case" title="Montants des frais sur la feuille camion"><input type="checkbox" @bind="valorisee" /> Valorisée</label>
+    @if (coches.Count == 0)
+    {
+        <button disabled title="Cochez les pré-BL d'un même chargement">🚛 Feuille camion</button>
+    }
+    else
+    {
+        <a class="bouton-ancre" href="@LienCamion" target="_blank" rel="noopener"
+           title="Feuille camion des pré-BL cochés (même client, départ, transporteur et adresse)">🚛 Feuille camion (@coches.Count)</a>
+    }
     <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche du pré-BL (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir le pré-BL</button>
 </fieldset>
 
@@ -73,13 +83,15 @@
             <div class="zone-defilement-liste">
                 <table class="grille grille-bl">
                     <thead>
-                        <tr><th class="nombre">Pré-BL</th><th>État</th><th>Client</th><th>Départ</th><th>Livrer à</th><th>Transporteur</th>
+                        <tr><th title="Pour la feuille camion"></th><th class="nombre">Pré-BL</th><th>État</th><th>Client</th><th>Départ</th><th>Livrer à</th><th>Transporteur</th>
                             <th class="nombre">Lignes</th><th title="Palettes pointées sur les terminaux / palettes du pré-BL">Palettes pointées</th><th>Créé</th></tr>
                     </thead>
                     <tbody>
                         @foreach (var e in Etat.Resultat.Lignes)
                         {
                             <tr class="@(e.Numero == Etat.Selection ? "selection" : "")" @onclick="() => Etat.Selection = e.Numero" @ondblclick="() => Ouvrir(e)">
+                                <td @onclick:stopPropagation="true"><input type="checkbox" checked="@coches.Contains(e.Numero)"
+                                       @onchange="ev => Cocher(e.Numero, ev.Value is true)" /></td>
                                 <td class="nombre"><b>@e.Numero</b></td>
                                 <td><span class="badge @BadgeEtat(e)">@(e.Pret ? "Prêt" : e.Etat)</span>@if (e.StockPaye) {<span class="badge" title="Stock payé : BL non facturable">SP</span>}</td>
                                 <td title="@($"{e.CompteGeneral} {e.CompteClient}")">@e.NomClient</td>
@@ -109,6 +121,17 @@
     private bool chargement;
     private DroitsOpr droits = new(true, false, false, false);
 
+    private readonly HashSet<int> coches = [];
+    private bool valorisee;
+
+    private string LienCamion => $"api/logistique/prebl/camion?{string.Join("&", coches.Order().Select(n => $"n={n}"))}{(valorisee ? "&valorisee=1" : "")}";
+
+    private void Cocher(int numero, bool coche)
+    {
+        if (coche) coches.Add(numero);
+        else coches.Remove(numero);
+    }
+
     private ElementPreBl? Selection => Etat.Resultat?.Lignes.FirstOrDefault(e => e.Numero == Etat.Selection);
 
     protected override async Task OnInitializedAsync()
@@ -131,6 +154,7 @@
         {
             Etat.Resultat = await PreBls.RechercherAsync(C);
             Etat.Selection = null;
+            coches.Clear();
         }
         catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
         catch (Exception ex) { Notifications.Erreur($"Recherche impossible : {ex.Message}"); }
@@ -142,6 +166,7 @@
         Etat.Criteres = new();
         Etat.Resultat = null;
         Etat.Selection = null;
+        coches.Clear();
     }
 
     private void ChoisirClient(LigneChoix l)

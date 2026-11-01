@@ -99,7 +99,7 @@ OPR015.ODQPREP).
 | L8a ✅ | **Consultation des pré-BL** (fait le 01/11 : menu « Pré-BL palettes ») : liste (client, date, état « à préparer / en cours / prêt / livré »), fiche avec lignes, lots, palettes pointées ou non | FEN_GestionPreBL (liste) |
 | L8b ✅ | **Transformation en BL** native (faite le 01/11 : bouton « Transformer en BL » de la fiche du pré-BL), en une transaction, avec le code de la saisie des BL : refus si une palette n'est pas pointée (statut 4), pré-BL déjà transformé ou vide ; sortie sur la quantité réelle des palettes | EXP540 / EXP540NAV |
 | L8c ✅ | **Saisie du pré-BL** (faite le 01/11, récapitulatif palettes compris) : création, en-tête, lignes de commande, lots et palettes réservées (ou quantité seule si FEPREB = O), récapitulatif des palettes, suppression (refusée si livré) | FEN_CreationPREBL, FEN_SaisiePREBL, FI_AjoutPalettes* |
-| L8d | **Éditions** : pré-BL en PDF, feuille de préparation, feuille camion | EXP535P2, éditions du WinDev |
+| L8d ✅ | **Éditions** (faites le 01/11 ; fiche `docs/logistique/fiches/Editions-PreBL.md`) : pré-BL en PDF, feuille de préparation, feuille camion | EXP535P2, éditions du WinDev |
 
 Anomalies à ne pas reproduire (détail dans les fiches) : aucune transaction (WinDev, EXP540, PHP), erreurs avalées (« BL créé »
 toujours annoncé), client facturé reporté d'un dossier à l'autre, valeurs reportées d'une ligne à l'autre, double transformation

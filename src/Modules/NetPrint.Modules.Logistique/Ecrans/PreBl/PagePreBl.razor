@@ -17,6 +17,10 @@
     @if (fiche is not null)
     {
         <a class="bouton-ancre" href="@($"api/logistique/prebl/{Numero}/pdf")" target="_blank" rel="noopener" title="Pré-BL en PDF (EXP535P2)">🖨 Imprimer</a>
+        <a class="bouton-ancre" href="@($"api/logistique/prebl/{Numero}/preparation")" target="_blank" rel="noopener"
+           title="Palettes à prendre, par dépôt et emplacement, avec leurs codes-barres">📋 Feuille de préparation</a>
+        <a class="bouton-ancre" href="@($"api/logistique/prebl/camion?n={Numero}")" target="_blank" rel="noopener"
+           title="Feuille camion de ce pré-BL (plusieurs pré-BL : depuis la liste)">🚛 Feuille camion</a>
     }
     @if (fiche?.Etat == EtatsPreBl.Livre)
     {

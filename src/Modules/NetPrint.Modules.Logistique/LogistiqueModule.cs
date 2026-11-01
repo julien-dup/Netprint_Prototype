@@ -132,6 +132,40 @@ public static class LogistiqueModule
             }
         });
 
+        // Feuille de préparation d'un pré-BL : GET /api/logistique/prebl/29406/preparation?depot=61&codes=1
+        api.MapGet("/prebl/{numero:int}/preparation", async (int numero, int? depot, int? codes, HttpContext http, IEditionPreBl edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.FeuillePreparationAsync(numero, depot is > 0 and < 1000 ? depot : null, codes != 0, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Feuille de préparation impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Feuille camion de pré-BL : GET /api/logistique/prebl/camion?n=29405&n=29406&valorisee=1
+        api.MapGet("/prebl/camion", async (int[] n, int? valorisee, HttpContext http, IEditionPreBl edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.FeuilleCamionAsync(n, valorisee == 1, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Feuille camion impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
         // Pré-BL en PDF (EXP535P2), sans écriture : GET /api/logistique/prebl/29406/pdf
         api.MapGet("/prebl/{numero:int}/pdf", async (int numero, HttpContext http, IEditionPreBl edition, CancellationToken ct) =>
         {
