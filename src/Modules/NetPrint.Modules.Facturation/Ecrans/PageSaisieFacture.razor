@@ -1,0 +1,380 @@
+@page "/facturation/saisie"
+@* =====================================================================
+   Saisie d'une facture à partir de BL (FAC085 → FAC150) : un BL, une commande ou un donneur d'ordre ; ses BL facturables pas
+   encore facturés sont listés (sans exiger la facturation automatique) ; les BL cochés donnent une facture préparée comme en
+   automatique (une commande = un élément), dont l'en-tête et les lignes se corrigent avant la création.
+   Ouverte avec ?bl=… depuis la fiche BL : le BL est cherché d'office. Sinon rien n'est lu à l'ouverture.
+   ===================================================================== *@
+@using System.Globalization
+@using NetPrint.Modules.Facturation.Services
+@inject ISaisieFactures Saisie
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Nouvelle facture · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo("facturation/factures")' title="Retour à la liste des factures">← Factures</button>
+    @if (facture is not null && creee is null)
+    {
+        <button @onclick="Abandonner" title="Revenir au choix des BL sans rien créer">✖ Abandonner</button>
+        <span class="espace"></span>
+        @if (facture.PeutEditerDefinitif)
+        {
+            <label class="champ-case" title="Seulement si la facture n'est pas « à contrôler »">
+                <input type="checkbox" @bind="editerDefinitif" /><span>Éditer en définitif</span>
+            </label>
+        }
+        <button class="bouton-principal" disabled="@(occupe || controle?.Erreurs.Count > 0)" @onclick="CreerAsync"
+                title="Crée la facture (n° pris au compteur) et marque les BL facturés">✔ Créer @(facture.Avoir ? "l'avoir" : "la facture")</button>
+    }
+</fieldset>
+
+@if (facture is null)
+{
+    <form class="panneau-criteres" @onsubmit="ChercherAsync">
+        <label class="champ"><span>N° BL</span><input type="number" class="num6 @Err(nameof(C.Bl))" @bind="C.Bl" /></label>
+        <div class="champ">
+            <span>ou commande</span>
+            <div class="ligne-champs">
+                <input type="number" class="num6 @Err(nameof(C.Commande))" @bind="C.Commande" />
+                <input class="code" maxlength="1" title="Clé" @bind="C.Cle" />
+            </div>
+        </div>
+        <div class="champ">
+            <span>ou donneur d'ordre</span>
+            <div class="ligne-champs">
+                <input type="number" class="num6 @Err(nameof(C.CompteGeneral))" title="Compte général" @bind="C.CompteGeneral" />
+                <input type="number" class="num7 @Err(nameof(C.CompteGeneral))" title="Compte client" @bind="C.CompteClient" />
+                <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher le donneur d'ordre" OnChoix="ChoisirDonneur" />
+            </div>
+        </div>
+        <div class="boutons-criteres">
+            <button type="submit" class="bouton-principal" disabled="@occupe">🔍 Chercher les BL à facturer</button>
+        </div>
+    </form>
+}
+
+<div class="contenu facturation-auto">
+    @if (creee is { } c)
+    {
+        <section class="carte resultat-saisie">
+            <h3>@(facture!.Avoir ? "Avoir" : "Facture") <a href="@($"facturation/factures/{c.Numero}/{c.Date:yyyyMMdd}")">@c.Numero</a> du @c.Date.ToString("dd/MM/yyyy") créé@(facture.Avoir ? "" : "e")</h3>
+            <p>
+                @if (c.EditeeDefinitif) {<span class="badge badge-bl-c">Éditée en définitif</span>}
+                else if (c.AControler) {<span class="badge badge-bl-v">À contrôler : @string.Join(", ", controle?.Anomalies ?? [])</span>}
+                else {<span class="badge badge-bl-v">À éditer</span>}
+                @if (c.Avertissement is not null) {<span class="badge badge-bl-r">@c.Avertissement</span>}
+            </p>
+            <div class="boutons-criteres">
+                <button class="bouton-principal" @onclick='() => Navigation.NavigateTo($"facturation/factures/{c.Numero}/{c.Date:yyyyMMdd}")'>🔎 Ouvrir la facture</button>
+                <button @onclick="Recommencer">➕ Autre facture</button>
+            </div>
+        </section>
+    }
+    else if (facture is null)
+    {
+        @if (bls is null)
+        {
+            <p class="discret">@(occupe ? "Recherche en cours…" : "Indiquez un BL, une commande ou un donneur d'ordre : ses BL livrés ou retournés, facturables et pas encore facturés, seront proposés.")</p>
+        }
+        else if (bls.Erreurs.Count > 0)
+        {
+            <ul class="erreurs-saisie">@foreach (var e in bls.Erreurs) {<li>@e.Message</li>}</ul>
+        }
+        else
+        {
+            var cochesRetour = bls.Bls.Where(Coche).Select(b => b.Retour).Distinct().Count() > 1;
+            <p class="compteur">
+                <b>@bls.CompteGeneral @bls.CompteClient</b> @bls.NomClient ·
+                <strong>@bls.Bls.Count</strong> élément@(bls.Bls.Count > 1 ? "s" : "") de BL à facturer
+                @if (bls.Ecartes.Count > 0) {<span class="avertissement"> · @bls.Ecartes.Count non facturable(s) : @string.Join(" ; ", bls.Ecartes.Select(e => $"BL {e.Bl} ({e.Raison})"))</span>}
+                @if (bls.Tronque) {<span class="avertissement"> · plus de 10 000 éléments de BL à facturer : rien n'est listé, cherchez par BL ou par commande</span>}
+            </p>
+            @if (bls.Bls.Count > 0)
+            {
+                <div class="zone-defilement-liste">
+                    <table class="grille grille-factures">
+                        <thead><tr><th><input type="checkbox" title="Tout cocher" checked="@(bls.Bls.All(Coche))" @onchange="ToutCocher" /></th>
+                            <th>BL</th><th>Élt</th><th>Expédié le</th><th>Commande</th><th>Désignation</th><th>Réf. commande</th><th class="nombre">Quantité</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var b in bls.Bls)
+                            {
+                                <tr class="@(b.Retour ? "bl-retour" : "")" @onclick="() => Basculer(b)">
+                                    <td><input type="checkbox" checked="@Coche(b)" @onclick:stopPropagation @onchange="() => Basculer(b)" /></td>
+                                    <td><a href="@($"logistique/bl/{b.Bl}")" @onclick:stopPropagation>@b.Bl</a></td>
+                                    <td>@b.Element</td>
+                                    <td>@b.Expedition?.ToString("dd/MM/yyyy")</td>
+                                    <td>@b.Commande/@b.Cle</td>
+                                    <td>@b.Designation</td>
+                                    <td>@b.Reference</td>
+                                    <td class="nombre">@b.Quantite.ToString("#,##0.###")</td>
+                                    <td>@if (b.Retour) {<span class="badge badge-bl-r">retour → avoir</span>}</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="barre-preparation">
+                    @if (cochesRetour) {<span class="avertissement">Les retours (avoir) et les BL livrés (facture) se facturent séparément.</span>}
+                    <span class="espace"></span>
+                    <button class="bouton-principal" disabled="@(occupe || coches.Count == 0 || cochesRetour)" @onclick="PreparerAsync">
+                        Préparer @(bls.Bls.Any(b => Coche(b) && b.Retour) ? "l'avoir" : "la facture") (@coches.Count élément@(coches.Count > 1 ? "s" : "") de BL) →
+                    </button>
+                </div>
+            }
+        }
+    }
+    else
+    {
+        var f = facture;
+        <section class="carte en-tete-saisie">
+            <h3>@(f.Avoir ? "Avoir" : "Facture") pour @f.CompteGeneral @f.CompteClient <span class="discret">@f.NomClient</span></h3>
+            <div class="grille-champs">
+                <label class="champ"><span>Date</span><input type="date" class="@Err(nameof(f.Date))" @bind="f.Date" @bind:after="Recalculer" /></label>
+                <div class="champ">
+                    <span>Client facturé (si autre)</span>
+                    <div class="ligne-champs">
+                        <input type="number" class="num6 @Err(nameof(f.CompteGeneralFacture))" title="Compte général" @bind="f.CompteGeneralFacture" @bind:after="Recalculer" />
+                        <input type="number" class="num7 @Err(nameof(f.CompteGeneralFacture))" title="Compte client" @bind="f.CompteClientFacture" @bind:after="Recalculer" />
+                        <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher le client facturé" OnChoix="ChoisirFacture" />
+                    </div>
+                </div>
+                <label class="champ">
+                    <span>Règlement</span>
+                    <select class="@Err(nameof(f.ModeReglement))" @bind="f.ModeReglement" @bind:after="Recalculer">
+                        @if (f.ModesReglement.All(m => m.Code != f.ModeReglement)) {<option value="@f.ModeReglement">@f.ModeReglement</option>}
+                        @foreach (var m in f.ModesReglement) {<option value="@m.Code">@m.Code · @m.Libelle</option>}
+                    </select>
+                </label>
+                <label class="champ">
+                    <span>Délai</span>
+                    <select class="@Err(nameof(f.NombreJours))" @bind="f.NombreJours" @bind:after="Recalculer">
+                        @if (!Delais.Contains(f.NombreJours)) {<option value="@f.NombreJours">@f.NombreJours j</option>}
+                        @foreach (var d in Delais) {<option value="@d">@(d == 0 ? "comptant" : $"{d} jours")</option>}
+                    </select>
+                </label>
+                <label class="champ"><span>Le</span><input type="number" class="num3 @Err(nameof(f.Le))" title="Jour d'échéance (31 = fin de mois)" @bind="f.Le" @bind:after="Recalculer" /></label>
+                <label class="champ"><span>Arrêté au</span><input type="number" class="num3 @Err(nameof(f.Arrete))" @bind="f.Arrete" @bind:after="Recalculer" /></label>
+                <label class="champ"><span>Escompte %</span><input type="number" class="num3 @Err(nameof(f.Escompte))" step="0.1" @bind="f.Escompte" @bind:after="Recalculer" /></label>
+                <label class="champ">
+                    <span>Représentant</span>
+                    <select class="@Err(nameof(f.Representant))" @bind="f.Representant" @bind:after="Recalculer">
+                        @if (f.Representant is null) {<option value="">—</option>}
+                        else if (f.Representants.All(r => r.Code != f.Representant.ToString())) {<option value="@f.Representant">@f.Representant</option>}
+                        @foreach (var r in f.Representants) {<option value="@r.Code">@r.Code · @r.Libelle</option>}
+                    </select>
+                </label>
+                <label class="champ"><span>Réf. commande</span><input maxlength="30" @bind="f.Reference" /></label>
+                <label class="champ"><span>À l'attention de</span><input maxlength="30" @bind="f.AlAttention" /></label>
+                @if (f.Acompte != 0) {<div class="champ"><span>Acompte déduit</span><b>@E(f.Acompte)</b></div>}
+            </div>
+        </section>
+
+        @foreach (var el in f.Elements)
+        {
+            <section class="carte element-saisie">
+                <div class="titre-element">
+                    <b>Commande <a href="@($"ventes/commandes/{el.Commande}/{el.Cle}")">@el.Commande/@el.Cle</a></b>
+                    <span class="discret">@el.Designation · BL @string.Join(", ", el.Bls)</span>
+                    <span class="espace"></span><b>@E(el.Ventes)</b>
+                </div>
+                <table class="grille grille-saisie-lignes">
+                    <thead><tr><th>Type</th><th>Désignation</th><th class="nombre">Quantité</th><th>Unité</th><th class="nombre">Prix / montant</th>
+                        <th class="nombre">Remise %</th><th class="nombre">Montant</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var l in el.Lignes)
+                        {
+                            var type = TypeDe(l.CodeLigne);
+                            <tr class="@(type == "T" ? "ligne-texte" : "")">
+                                <td>
+                                    <select @bind="l.CodeLigne" @bind:after="Recalculer" title="@Libelle(l.CodeLigne)">
+                                        @if (type == "") {<option value="@l.CodeLigne">@l.CodeLigne ?</option>}
+                                        @foreach (var x in f.CodesLigne) {<option value="@x.Code">@x.Code · @x.Libelle</option>}
+                                    </select>
+                                </td>
+                                <td><input class="designation" maxlength="40" @bind="l.Designation" /></td>
+                                @if (type is "T")
+                                {
+                                    <td colspan="5"></td>
+                                }
+                                else if (type is "R")
+                                {
+                                    <td></td><td></td>
+                                    <td class="nombre"><input type="number" step="0.01" class="num7" disabled="@(l.Remise != 0)" title="Montant de la remise (si pas de pourcentage)" @bind="l.Pu" @bind:after="Recalculer" /></td>
+                                    <td class="nombre"><input type="number" class="num3" @bind="l.Remise" @bind:after="Recalculer" /></td>
+                                    <td class="nombre">− @l.Montant.ToString("#,##0.00")</td>
+                                }
+                                else
+                                {
+                                    <td class="nombre"><input type="number" step="any" class="num7" @bind="l.Quantite" @bind:after="Recalculer" /></td>
+                                    <td><input class="code2" maxlength="2" list="unites-saisie" @bind="l.Unite" @bind:after="Recalculer" /></td>
+                                    <td class="nombre"><input type="number" step="any" class="num7" @bind="l.Pu" @bind:after="Recalculer" /></td>
+                                    <td></td>
+                                    <td class="nombre">@l.Montant.ToString("#,##0.00")</td>
+                                }
+                                <td><button class="bouton-icone" title="Supprimer la ligne" @onclick="() => Supprimer(el, l)">🗑</button></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <div class="boutons-lignes">
+                    <button @onclick="() => Ajouter(el, false)">＋ Ligne</button>
+                    <button @onclick="() => Ajouter(el, true)">＋ Texte</button>
+                </div>
+            </section>
+        }
+        <datalist id="unites-saisie">@foreach (var u in f.Unites.Keys.Order()) {<option value="@u"></option>}</datalist>
+
+        <section class="carte pied-saisie">
+            <p class="compteur">
+                Total HT <strong>@E(controle?.Ventes ?? 0)</strong>
+                @if (f.Acompte != 0) {<span class="separateur-compteur">·</span><span>acompte @E(f.Acompte)</span>}
+                @if (controle?.Anomalies.Count > 0) {<span class="badge badge-bl-v" title="La facture sera créée « à contrôler » : à corriger avant l'édition">À contrôler : @string.Join(", ", controle.Anomalies)</span>}
+            </p>
+            @if (controle?.Erreurs.Count > 0) {<ul class="erreurs-saisie">@foreach (var e in controle.Erreurs) {<li>@e.Message</li>}</ul>}
+        </section>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "bl")] public int? BlDemande { get; set; }
+
+    private CleFacturation C { get; set; } = new();
+    private BlsAFacturer? bls;
+    private readonly HashSet<ElementDeBl> coches = [];
+    private FactureSaisie? facture;
+    private ControleFactureSaisie? controle;
+    private FactureCreee? creee;
+    private bool occupe, editerDefinitif;
+
+    private static IReadOnlyList<int> Delais => SaisieFacture.Delais;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (BlDemande is not > 0) return;
+        C.Bl = BlDemande;
+        await ChercherAsync();
+    }
+
+    private string Err(string champ) => (facture is null ? bls?.Erreurs : controle?.Erreurs)?.Any(e => e.Champ == champ) == true ? "en-erreur" : "";
+
+    private bool Coche(BlAFacturer b) => coches.Contains(new ElementDeBl(b.Bl, b.Element));
+
+    private void Basculer(BlAFacturer b)
+    {
+        var e = new ElementDeBl(b.Bl, b.Element);
+        if (!coches.Remove(e)) coches.Add(e);
+    }
+
+    private void ToutCocher(ChangeEventArgs a)
+    {
+        coches.Clear();
+        if (a.Value is true) foreach (var b in bls!.Bls) coches.Add(new ElementDeBl(b.Bl, b.Element));
+    }
+
+    private void ChoisirDonneur(LigneChoix l)
+    {
+        if (l.Codes.Count < 2) return;
+        (C.CompteGeneral, C.CompteClient) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+        (C.Bl, C.Commande, C.Cle) = (null, null, "");
+    }
+
+    private void ChoisirFacture(LigneChoix l)
+    {
+        if (l.Codes.Count < 2 || facture is null) return;
+        (facture.CompteGeneralFacture, facture.CompteClientFacture) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+        Recalculer();
+    }
+
+    private async Task ChercherAsync()
+    {
+        if (occupe) return;
+        occupe = true;
+        try
+        {
+            bls = await Saisie.ChercherBlsAsync(C);
+            coches.Clear();
+            foreach (var b in bls.Bls.Where(b => b.Propose)) coches.Add(new ElementDeBl(b.Bl, b.Element));
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Recherche des BL impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task PreparerAsync()
+    {
+        if (occupe || bls is null) return;
+        occupe = true;
+        try
+        {
+            // Ordre de la liste, pour que la facture suive l'ordre des BL
+            facture = await Saisie.PreparerAsync([.. bls.Bls.Select(b => new ElementDeBl(b.Bl, b.Element)).Where(coches.Contains)]);
+            editerDefinitif = false;
+            Recalculer();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Préparation de la facture impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private void Recalculer()
+    {
+        if (facture is not null) controle = Saisie.Recalculer(facture);
+    }
+
+    private string TypeDe(string code) => facture?.CodesLigne.FirstOrDefault(c => c.Code == code)?.Type ?? "";
+    private string Libelle(string code) => facture?.CodesLigne.FirstOrDefault(c => c.Code == code)?.Libelle ?? "";
+
+    private void Ajouter(ElementSaisie el, bool texte)
+    {
+        var code = texte ? facture!.CodesLigne.FirstOrDefault(c => c.Type == "T")?.Code
+                         : el.Lignes.FirstOrDefault(l => TypeDe(l.CodeLigne) == "V")?.CodeLigne ?? facture!.CodesLigne.FirstOrDefault(c => c.Type == "V")?.Code;
+        el.Lignes.Add(new LigneSaisie { CodeLigne = code ?? "" });
+        Recalculer();
+    }
+
+    private void Supprimer(ElementSaisie el, LigneSaisie l)
+    {
+        el.Lignes.Remove(l);
+        Recalculer();
+    }
+
+    private void Abandonner()
+    {
+        (facture, controle) = (null, null);
+    }
+
+    private void Recommencer()
+    {
+        (facture, controle, creee, bls) = (null, null, null, null);
+        coches.Clear();
+        C = new();
+    }
+
+    private async Task CreerAsync()
+    {
+        if (occupe || facture is null) return;
+        Recalculer();
+        if (controle?.Erreurs.Count > 0) return;
+        occupe = true;   // dès la question : un double clic n'ouvre pas deux confirmations
+        try
+        {
+            var f = facture;
+            var message = $"Créer {(f.Avoir ? "l'avoir" : "la facture")} de {E(controle!.Ventes)} HT au {f.Date:dd/MM/yyyy} ?"
+                + "\nLe n° est pris sur le compteur et les BL sont marqués facturés."
+                + (controle.Anomalies.Count > 0 ? $"\nElle sera « à contrôler » : {string.Join(", ", controle.Anomalies)}." : "")
+                + (editerDefinitif && controle.Anomalies.Count == 0 ? "\nElle sera éditée en définitif." : "");
+            if (!await Dialogues.ConfirmerAsync(message, f.Avoir ? "Nouvel avoir" : "Nouvelle facture", "Créer")) return;
+            creee = await Saisie.CreerAsync(f, editerDefinitif);
+            Notifications.Succes($"{(f.Avoir ? "Avoir" : "Facture")} {creee.Numero} créé{(f.Avoir ? "" : "e")}.");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Création impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private static string E(decimal v) => v.ToString("#,##0.00 €", CultureInfo.GetCultureInfo("fr-FR"));
+}

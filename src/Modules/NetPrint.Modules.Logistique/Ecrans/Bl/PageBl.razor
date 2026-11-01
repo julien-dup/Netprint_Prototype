@@ -30,6 +30,12 @@
         <a class="bouton-ancre" href="@($"api/logistique/bl/{Numero}/pdf")" target="_blank" rel="noopener" @onclick="MarquerEdite"
            title="BL en PDF à imprimer ou envoyer ; le BL est marqué édité">🖨 Imprimer</a>
         <button title="Envoyer le BL en PDF par e-mail (contacts « bon de livraison » du client)" @onclick="() => envoi = true">✉ Envoyer</button>
+        @if (fiche.Elements.Any(x => x.Etat is "C" or "R" && x.NumeroFacture == 0 && x.Facturable))
+        {
+            @* Saisie de facture du module Facturation (FAC085 / option FA d'EXP010S), par son adresse : pas de référence entre modules *@
+            <a class="bouton-ancre" href="@($"facturation/saisie?bl={Numero}")"
+               title="Facturer ce BL tout de suite (avec d'autres BL du client si besoin), sans attendre la facturation automatique">🧾 Facturer</a>
+        }
         @if (fiche.Elements.Any(x => x.Etat == "C"))
         {
             <button title="Reprendre de la marchandise livrée par ce BL (lots, palettes ou quantité de fabrication)"

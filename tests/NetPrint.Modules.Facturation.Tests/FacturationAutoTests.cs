@@ -132,7 +132,7 @@ public class GenerationFacturesTests
 // Facturation automatique sur la base de test : simulation (lecture seule) puis génération d'une facture, base remise à l'identique
 public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
 {
-    private sealed class Utilisateur(int societe) : NetPrint.Socle.Session.IUtilisateurCourant
+    internal sealed class Utilisateur(int societe) : NetPrint.Socle.Session.IUtilisateurCourant
     {
         public Task<NetPrint.Socle.Session.UtilisateurConnecte> LireAsync() =>
             Task.FromResult(new NetPrint.Socle.Session.UtilisateurConnecte("NP11", societe, "TEST", 411100));
@@ -168,7 +168,7 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
     }
 
     // Lignes touchées par la génération et l'édition définitive, relevées par RRN pour être remises telles quelles
-    private static async Task<List<(string Table, long Rrn, string Colonnes, object?[] Valeurs)>> ReleverAsync(System.Data.Odbc.OdbcConnection cnx,
+    internal static async Task<List<(string Table, long Rrn, string Colonnes, object?[] Valeurs)>> ReleverAsync(System.Data.Odbc.OdbcConnection cnx,
         int societe, int bl, int annee)
     {
         var bib = NetPrint.Socle.Donnees.BaseDb2.Bibliotheque(BaseDeTest.Configuration);
@@ -198,7 +198,7 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
         return releve;
     }
 
-    private static async Task<int> ExecuterAsync(System.Data.Odbc.OdbcConnection cnx, string sql, params object?[] v)
+    internal static async Task<int> ExecuterAsync(System.Data.Odbc.OdbcConnection cnx, string sql, params object?[] v)
     {
         await using var cmd = cnx.CreateCommand();
         cmd.CommandText = sql.Replace("{b}", NetPrint.Socle.Donnees.BaseDb2.Bibliotheque(BaseDeTest.Configuration));

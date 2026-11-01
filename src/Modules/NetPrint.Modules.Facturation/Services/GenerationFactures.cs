@@ -1,3 +1,5 @@
+using NetPrint.Socle;
+
 namespace NetPrint.Modules.Facturation.Services;
 
 // =====================================================================
@@ -53,11 +55,13 @@ internal sealed record DossierAFacturer(
 }
 
 // Élément de BL à facturer (TFAC401) : donneur d'ordre (HGENE / HCLIE), client facturé du BL (HGENF / HCLIF, 0 possible),
-// mode du donneur d'ordre, conditions, adresse de livraison, représentant de la commande, retour (HETABL = R) ⇒ avoir
+// mode du donneur d'ordre (saisie manuelle : 6, un élément par commande), conditions, adresse de livraison, représentant de la
+// commande, retour (HETABL = R) ⇒ avoir ; date d'expédition et enseigne du BL (EXP009)
 internal sealed record ElementBlAFacturer(
     int Bl, int Element, int CompteGeneral, int CompteClient, int CompteGeneralFacture, int CompteClientFacture, int Mode,
     ConditionsReglement Conditions, AdresseEnvoi Livraison, int Representant, bool Retour, decimal QuantiteLivree,
-    DossierAFacturer Dossier, IReadOnlyList<LigneBl> Lignes, IReadOnlyList<LigneEnPlus> EnPlus, string NomClient = "");
+    DossierAFacturer Dossier, IReadOnlyList<LigneBl> Lignes, IReadOnlyList<LigneEnPlus> EnPlus, string NomClient = "",
+    DateOnly? Expedition = null, string Enseigne = "");
 
 // Paramètres de la société : types de ligne FAC020 (code → type, libellé) et diviseurs des unités de vente (AA0008 « UV »)
 internal sealed record ParametresGeneration(IReadOnlyDictionary<string, (string Type, string Libelle)> TypesLigne,
@@ -70,11 +74,16 @@ internal sealed record ParametresGeneration(IReadOnlyDictionary<string, (string 
         .Select(t => (t.Key, t.Value.Libelle)).FirstOrDefault(("", ""));
 }
 
-// Ligne de facture (FAC100) ; LigneBl : FGLBL (O / N / blanc) ; Bl / ElementBl / LigneDuBl : FGBL, FGBLEL, FGBLLG
+// Ligne de facture (FAC100) ; LigneBl : FGLBL (O / N / blanc) ; Bl / ElementBl / LigneDuBl : FGBL, FGBLEL, FGBLLG ;
+// PrixLibre : prix et unité non contrôlés (article gratuit de la commande, complément du dossier, élément en plus du BL) ;
+// Origine : complément AB004 (C + n° de ligne) ou élément en plus EXP011 (X + BL.élément.ligne) dont la ligne vient
 internal sealed record LignePrevue(
     int Numero, string CodeLigne, decimal Quantite, string Designation, decimal Pu, int Remise, string Unite, string Article, string Indice,
-    decimal Montant, decimal TauxCommission, string LigneBl, string Monnaie, int LigneCommande, int Bl, int ElementBl, int LigneDuBl)
+    decimal Montant, decimal TauxCommission, string LigneBl, string Monnaie, int LigneCommande, int Bl, int ElementBl, int LigneDuBl,
+    bool PrixLibre = false, string Origine = "")
 {
+    public static string DeComplement(int ligne) => $"C{ligne}";
+    public static string DEnPlus(int bl, int element, int ligne) => $"X{bl}.{element}.{ligne}";
     public bool Texte => CodeLigne == "9";
 }
 
@@ -120,6 +129,24 @@ internal static class GenerationFactures
                 factures.Add(Facture(morceau, p, deja));
         }
         return factures;
+    }
+
+    // Saisie manuelle (FAC085 / FAC150) : une seule facture pour les éléments de BL choisis, un élément par commande
+    public static FacturePrevue Regrouper(IReadOnlyList<ElementBlAFacturer> elements, ParametresGeneration p)
+    {
+        if (elements.Count == 0) throw new RegleMetierException("Choisissez au moins un BL à facturer.");
+        if (elements.Select(e => e.Retour).Distinct().Count() > 1)
+            throw new RegleMetierException("Les BL de retour (avoir) et les BL livrés (facture) se facturent séparément.");
+        if (elements.Select(e => (e.CompteGeneral, e.CompteClient)).Distinct().Count() > 1)
+            throw new RegleMetierException("Les BL choisis n'ont pas tous le même donneur d'ordre.");
+        // Client facturé du BL (0 : le donneur d'ordre) : une facture n'en a qu'un ; les conditions, elles, se corrigent à l'écran
+        if (elements.Select(e => e.CompteClientFacture == 0 ? (e.CompteGeneral, e.CompteClient) : (e.CompteGeneralFacture, e.CompteClientFacture))
+                .Distinct().Count() > 1)
+            throw new RegleMetierException("Les BL choisis ne sont pas tous facturés au même client : faites une facture par client facturé.");
+        var groupes = elements.Select(e => e with { Mode = 6 }).OrderBy(Dossier, StringComparer.Ordinal).ThenBy(e => e.Bl).ThenBy(e => e.Element)
+            .GroupBy(Dossier).ToList();
+        if (groupes.Count > ElementsMaxi) throw new RegleMetierException($"Une facture ne peut pas porter plus de {ElementsMaxi} commandes.");
+        return Facture(groupes, p, new Facturees());
     }
 
     // ---------- Regroupements par mode (fiche § 2) ----------
@@ -199,6 +226,7 @@ internal static class GenerationFactures
         var enPlus = new List<(int, int, int)>();
         var complements = new List<int>();
         decimal ca = 0, ventes = 0, quantite = 0;
+        var origine = "";   // complément ou élément en plus en cours (saisie : sa suppression le laisse à facturer)
 
         void Ajouter(string code, decimal qte, string des, decimal pu, string unite, string article, string indice, decimal taux,
             string ligneBl, int ligneCommande, int bl, int elementBl, int ligneDuBl, bool controler, bool prixADefinir = false)
@@ -206,7 +234,7 @@ internal static class GenerationFactures
             var montant = Montant(qte, pu, unite, p, out var uniteInconnue);
             var type = Type(p, code);
             lignes.Add(new LignePrevue(lignes.Count + 1, code, qte, des, pu, 0, unite, article, indice, montant, taux, ligneBl, d.Monnaie,
-                ligneCommande, bl, elementBl, ligneDuBl));
+                ligneCommande, bl, elementBl, ligneDuBl, !controler, origine));
             ventes += montant;
             if (type is not ("E" or "P") && type != "") ca += montant;
             if (code.Trim() == "") anomalies.Add("Code vente");
@@ -217,7 +245,7 @@ internal static class GenerationFactures
         void Texte(string texte)
         {
             if (texte.Trim() == "") return;
-            lignes.Add(new LignePrevue(lignes.Count + 1, "9", 0, texte, 0, 0, "", "", "", 0, 0, "", "", 0, 0, 0, 0));
+            lignes.Add(new LignePrevue(lignes.Count + 1, "9", 0, texte, 0, 0, "", "", "", 0, 0, "", "", 0, 0, 0, 0, Origine: origine));
         }
         void LigneDossier(decimal qte, int bl, int elementBl)
         {
@@ -231,15 +259,17 @@ internal static class GenerationFactures
             foreach (var c in d.Complements)
             {
                 complements.Add(c.Ligne);
+                origine = LignePrevue.DeComplement(c.Ligne);
                 if (c.CodeLigne == "9") { Texte(c.Designation); continue; }
                 if (Type(p, c.CodeLigne) == "R") Remise(c.CodeLigne, c.Designation, c.Remise, c.Pu);
                 else Ajouter(c.CodeLigne, c.Quantite, c.Designation, c.Pu, c.Unite, "", "", 0, "N", 0, 0, 0, 0, controler: false);
             }
+            origine = "";
         }
         void Remise(string code, string libelle, int taux, decimal montantFixe)
         {
             var montant = taux != 0 ? Math.Truncate(ca * taux / 100m * 100m) / 100m : montantFixe;
-            lignes.Add(new LignePrevue(lignes.Count + 1, code, 0, libelle, 0, taux, "", "", "", montant, 0, "", "", 0, 0, 0, 0));
+            lignes.Add(new LignePrevue(lignes.Count + 1, code, 0, libelle, 0, taux, "", "", "", montant, 0, "", "", 0, 0, 0, 0, Origine: origine));
             ca -= montant;
             ventes -= montant;
         }
@@ -267,9 +297,11 @@ internal static class GenerationFactures
             foreach (var x in e.EnPlus)
             {
                 enPlus.Add((e.Bl, e.Element, x.Ligne));
+                origine = LignePrevue.DEnPlus(e.Bl, e.Element, x.Ligne);
                 if (x.CodeLigne == "9") Texte(x.Designation);
                 else Ajouter(x.CodeLigne, x.Quantite, x.Designation, x.Pu, x.Unite, x.Article, x.Indice, x.TauxCommission,
                     d.Fabrication ? "N" : "O", 0, 0, 0, 0, controler: false);
+                origine = "";
             }
         }
         if (cumul)

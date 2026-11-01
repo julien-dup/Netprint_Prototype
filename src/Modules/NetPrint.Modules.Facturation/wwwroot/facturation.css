@@ -40,3 +40,15 @@
 .detail-facture-auto .grille-fiche { margin: 4px 0 10px; }
 .erreurs-saisie { color: var(--danger); }
 .contenu.facturation-auto .carte .zone-defilement-liste { max-height: 30vh; }
+
+/* Saisie d'une facture à partir de BL */
+.grille-champs { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.barre-preparation { display: flex; align-items: center; gap: 10px; }
+.barre-preparation .espace { flex: 1; }
+.grille-saisie-lignes td { padding: 2px 4px; vertical-align: middle; }
+.grille-saisie-lignes select { max-width: 190px; }
+.grille-saisie-lignes input.designation { width: 100%; min-width: 260px; }
+.grille-saisie-lignes input.code2 { width: 64px; }
+.grille-saisie-lignes tr.ligne-texte input.designation { font-style: italic; }
+.boutons-lignes { display: flex; gap: 8px; }
+.resultat-saisie .boutons-criteres { display: flex; gap: 8px; }

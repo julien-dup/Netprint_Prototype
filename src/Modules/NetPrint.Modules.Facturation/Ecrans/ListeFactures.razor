@@ -14,6 +14,7 @@
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
 
 <fieldset class="barre-outils">
+    <button title="Facturer des BL : choix d'un BL, d'une commande ou d'un client" @onclick='() => Navigation.NavigateTo("facturation/saisie")'>➕ Nouvelle facture</button>
     <span class="espace"></span>
     <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche de la facture (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir la facture</button>
 </fieldset>

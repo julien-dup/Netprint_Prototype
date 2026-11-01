@@ -86,12 +86,32 @@ internal sealed partial class FacturationAutoDb2(IConfiguration config)
         {b}.EXP010 e JOIN {b}.EXP009 b ON b.RSOC = e.RSOC AND b.HNOBL = e.HNOBL
         """;
 
-    public async Task<(List<ElementBlAFacturer> Retenus, List<ElementEcarte> Ecartes, bool Tronque)> LireAsync(int societe,
+    public Task<(List<ElementBlAFacturer> Retenus, List<ElementEcarte> Ecartes, bool Tronque)> LireAsync(int societe,
         CriteresFacturationAuto c, int maxi, CancellationToken ct)
     {
-        await using var cnx = await OuvrirAsync(ct);
         var v = new List<object?>();
-        var filtre = Filtre(c, v, societe);
+        return LireAsync(societe, Filtre(c, v, societe), v, c, maxi, ct);
+    }
+
+    // Saisie manuelle (FAC085 / FAC150) : éléments de BL facturables et pas encore facturés d'un donneur d'ordre, d'une commande
+    // ou de BL donnés, qu'ils soient ou non à prendre en facturation automatique
+    public Task<(List<ElementBlAFacturer> Retenus, List<ElementEcarte> Ecartes, bool Tronque)> LireManuelAsync(int societe,
+        (int General, int Client)? donneur, (int Numero, string Cle)? commande, IReadOnlyCollection<int>? bls, int maxi, CancellationToken ct)
+    {
+        var f = "e.RSOC = ? AND e.HETABL IN ('C', 'R') AND e.HFACTU = 'O' AND e.HNOFAC = 0";
+        var v = new List<object?> { societe };
+        if (donneur is { } d) { f += " AND b.HGENE = ? AND b.HCLIE = ?"; v.Add(d.General); v.Add(d.Client); }
+        if (commande is { } c) { f += " AND e.HNODOS = ? AND e.HCLEF = ?"; v.Add(c.Numero); v.Add(c.Cle); }
+        if (bls is { Count: > 0 }) { f += $" AND e.HNOBL IN ({string.Join(", ", bls.Select(_ => "?"))})"; v.AddRange(bls.Cast<object?>()); }
+        return LireAsync(societe, f, v, null, maxi, ct);
+    }
+
+    // auto : critères de la facturation automatique (éléments à prendre en automatique, mode et fréquence du client contrôlés),
+    // null en saisie manuelle
+    private async Task<(List<ElementBlAFacturer> Retenus, List<ElementEcarte> Ecartes, bool Tronque)> LireAsync(int societe, string filtre,
+        List<object?> v, CriteresFacturationAuto? auto, int maxi, CancellationToken ct)
+    {
+        await using var cnx = await OuvrirAsync(ct);
         // Garde-fou avant de lire les lignes : au-delà de maxi éléments de BL, rien n'est chargé
         await using (var rd = await Lire(cnx, null, $"SELECT COUNT(*) FROM {Jointure} WHERE {filtre}", ct, [.. v]))
             if (await rd.ReadAsync(ct) && rd.Entier(0) > maxi) return ([], [], true);
@@ -147,7 +167,7 @@ internal sealed partial class FacturationAutoDb2(IConfiguration config)
                    COALESCE(x.FATPC, ''), COALESCE(x.FAFJ, ''), COALESCE(x.FANOM, ''), COALESCE(x.FARUE1, ''), COALESCE(x.FARUE2, ''),
                    COALESCE(x.FAPOST, ''), COALESCE(x.FAVILL, ''), COALESCE(ad.ALFJ, ''), COALESCE(ad.ALRS, ''), COALESCE(ad.ALRUE1, ''),
                    COALESCE(ad.ALRUE2, ''), COALESCE(ad.ALPOST, ''), COALESCE(ad.ALVILL, ''), COALESCE(ad.ALPAY, ''),
-                   COALESCE(d.CRELVE, ''), COALESCE(d.CDOPT7, '')
+                   COALESCE(d.CRELVE, ''), COALESCE(d.CDOPT7, ''), b.HDEXAA, b.HDEXMM, b.HDEXJJ, b.HENS
             FROM {Jointure}
             LEFT OUTER JOIN {"{b}"}.AB001 a ON a.RSOC = e.RSOC AND a.RDOSS = e.HNODOS AND a.CCDCLE = e.HCLEF
             LEFT OUTER JOIN {"{b}"}.AB001FA x ON x.RSOC = e.RSOC AND x.RDOSS = e.HNODOS AND x.CCDCLE = e.HCLEF
@@ -167,19 +187,23 @@ internal sealed partial class FacturationAutoDb2(IConfiguration config)
                 int bl = rd.Entier(0), num = rd.Entier(1), gen = rd.Entier(2), cli = rd.Entier(3), dossier = rd.Entier(9);
                 string cle = rd.Texte(10), nom = rd.Texte(17);
                 ElementEcarte Ecarte(string raison) => new(bl, num, dossier, cle, gen, cli, nom, raison);
-                if (rd.Texte(8) != "O") { ecartes.Add(Ecarte("Pas à prendre en facturation automatique (élément de BL)")); continue; }
+                if (auto is not null && rd.Texte(8) != "O") { ecartes.Add(Ecarte("Pas à prendre en facturation automatique (élément de BL)")); continue; }
                 if (rd.Entier(19) == 0) { ecartes.Add(Ecarte("Commande introuvable")); continue; }
-                if (!int.TryParse(rd.Texte(18), out var mode) || mode is < 1 or > 8)
+                var mode = 6;
+                if (auto is not null)
                 {
-                    ecartes.Add(Ecarte("Client sans mode de facturation automatique (1 à 8)"));
-                    continue;
-                }
-                var frequence = rd.Texte(20) == "$" ? null : rd.Texte(20);
-                if (frequence != c.Frequence)
-                {
-                    ecartes.Add(Ecarte(frequence is null ? "Client des conditions de règlement introuvable"
-                        : $"Fréquence de facturation du client « {(frequence == "" ? "sans" : frequence)} », autre que celle demandée"));
-                    continue;
+                    if (!int.TryParse(rd.Texte(18), out mode) || mode is < 1 or > 8)
+                    {
+                        ecartes.Add(Ecarte("Client sans mode de facturation automatique (1 à 8)"));
+                        continue;
+                    }
+                    var frequence = rd.Texte(20) == "$" ? null : rd.Texte(20);
+                    if (frequence != auto.Frequence)
+                    {
+                        ecartes.Add(Ecarte(frequence is null ? "Client des conditions de règlement introuvable"
+                            : $"Fréquence de facturation du client « {(frequence == "" ? "sans" : frequence)} », autre que celle demandée"));
+                        continue;
+                    }
                 }
                 // Conditions : celles de la commande si elle en porte (AB001.CCMOD), sinon celles du client des conditions
                 var conditions = rd.Texte(26) != ""
@@ -200,7 +224,7 @@ internal sealed partial class FacturationAutoDb2(IConfiguration config)
                 retenus.Add(new ElementBlAFacturer(bl, num, gen, cli, rd.Entier(4), rd.Entier(5), mode, conditions,
                     new AdresseEnvoi(rd.Texte(11), rd.Texte(12), rd.Texte(13), rd.Texte(14), rd.Texte(15), rd.Texte(16), ""),
                     rd.Entier(31), rd.Texte(6) == "R", rd.Nombre(7), d, lignes.GetValueOrDefault((bl, num)) ?? [],
-                    enPlus.GetValueOrDefault((bl, num)) ?? [], nom));
+                    enPlus.GetValueOrDefault((bl, num)) ?? [], nom, BaseDb2.Date(rd.Entier(70), rd.Entier(71), rd.Entier(72)), rd.Texte(73)));
             }
         return (retenus, ecartes, tronque);
     }

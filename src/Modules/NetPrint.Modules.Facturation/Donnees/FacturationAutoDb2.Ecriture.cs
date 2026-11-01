@@ -10,7 +10,7 @@ namespace NetPrint.Modules.Facturation.Donnees;
 internal sealed record NumerotationFactures(int Type, bool GereEnseignes, string Enseigne);
 
 // =====================================================================
-// Écriture d'une facture automatique (FAC402P) : une transaction par facture, n° compris, pour qu'un arrêt ne laisse ni trou
+// Écriture d'une facture automatique (FAC402P) ou saisie (FAC150, BL choisis) : une transaction par facture, n° compris, pour qu'un arrêt ne laisse ni trou
 // de numérotation ni BL pointant sur une facture absente (le RPG marquait les BL avant d'écrire l'en-tête, sans transaction).
 // Sous verrou : éléments de BL toujours facturables et pas facturés, éléments en plus et compléments pas encore facturés,
 // compteur (FAC040, ou PRT320F par enseigne) qui doit exister (le RPG écrivait alors une facture n° −1).
@@ -44,7 +44,7 @@ internal sealed partial class FacturationAutoDb2
                     if (!await rd.ReadAsync(ct)) throw new RegleMetierException($"L'élément {element} du BL {bl} n'existe plus.");
                     if (rd.Entier(0) != 0) throw new RegleMetierException($"Le BL {bl} (élément {element}) a été facturé entre-temps (facture {rd.Entier(0)}).");
                     if (rd.Texte(1) != "O" || rd.Texte(2) != (f.Avoir ? "R" : "C"))
-                        throw new RegleMetierException($"Le BL {bl} (élément {element}) a changé entre-temps : relancez la simulation.");
+                        throw new RegleMetierException($"Le BL {bl} (élément {element}) a changé entre-temps (état ou « facturable ») : recommencez.");
                 }
 
             var numero = await NumeroAsync(cnx, tx, Executer, societe, numerotation, date, ct);
@@ -79,13 +79,13 @@ internal sealed partial class FacturationAutoDb2
                             UPDATE {b}.EXP011 SET HPFACT = 'O', HPNFAC = ?, HPNELT = ?, HPDFAA = ?, HPDFAM = ?, HPDFAJ = ?
                             WHERE RSOC = ? AND HNOBL = ? AND HNUM = ? AND HPLIG = ? AND HPFACT <> 'O'
                             """, numero, e.Numero, date.Year, date.Month, date.Day, societe, bl, element, ligne) != 1)
-                        throw new RegleMetierException($"Une ligne « à facturer en plus » du BL {bl} a été facturée entre-temps : relancez la simulation.");
+                        throw new RegleMetierException($"Une ligne « à facturer en plus » du BL {bl} a été facturée entre-temps : recommencez.");
                 foreach (var ligne in e.Complements)
                     if (await Executer("""
                             UPDATE {b}.AB004 SET F4FACT = 'O', F4NFAC = ?, F4NELT = ?, F4DFAA = ?, F4DFAM = ?, F4DFAJ = ?
                             WHERE RSOC = ? AND RDOSS = ? AND F4DCLE = ? AND F4LIG = ? AND F4FACT <> 'O'
                             """, numero, e.Numero, date.Year, date.Month, date.Day, societe, d.Numero, d.Cle, ligne) != 1)
-                        throw new RegleMetierException($"Un complément de facturation de la commande {d.Numero}/{d.Cle} a été facturé entre-temps : relancez la simulation.");
+                        throw new RegleMetierException($"Un complément de facturation de la commande {d.Numero}/{d.Cle} a été facturé entre-temps : recommencez.");
             }
 
             var dd = f.DernierDossier;
