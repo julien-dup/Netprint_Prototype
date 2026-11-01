@@ -102,8 +102,9 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         {
             Numero = numero, DateOrigine = date, Date = date, Avoir = f.Avoir, CompteGeneral = f.CompteGeneral, CompteClient = f.CompteClient,
             NomClient = f.NomClient,
-            CompteGeneralFacture = f.CompteClientFacture == 0 ? null : f.CompteGeneralFacture,
-            CompteClientFacture = f.CompteClientFacture == 0 ? null : f.CompteClientFacture,
+            // Client facturé « si autre » : vide s'il n'y en a pas (0) ou si c'est le donneur d'ordre (FAC150 R7)
+            CompteGeneralFacture = AutreClientFacture(f) ? f.CompteGeneralFacture : null,
+            CompteClientFacture = AutreClientFacture(f) ? f.CompteClientFacture : null,
             ModeReglement = c.Mode, NombreJours = c.NombreJours, Le = c.Le, Arrete = c.Arrete, Escompte = c.Escompte,
             Representant = f.Representant == 0 ? null : f.Representant, Reference = f.Reference, AlAttention = f.AlAttention,
             Acompte = f.Acompte, PeutEditerDefinitif = await PeutEditerAsync(u, ct),
@@ -118,6 +119,9 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
             Unites = p.Diviseurs, ModesReglement = modes, Representants = representants,
         };
     }
+
+    private static bool AutreClientFacture(FactureEnregistree f) =>
+        f.CompteClientFacture != 0 && (f.CompteGeneralFacture, f.CompteClientFacture) != (f.CompteGeneral, f.CompteClient);
 
     public async Task<FactureCreee> ModifierAsync(FactureSaisie s, bool editerDefinitif, CancellationToken ct = default)
     {
@@ -141,10 +145,11 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
             && SaisieFacture.ControlerNouvelleDate(type, origine, date) is { } refus)
             throw new RegleMetierException(refus);
         // Client facturé inchangé (même vide) : zones FAC080 gardées telles quelles, adresse figée comprise
-        int gf = s.CompteGeneralFacture ?? 0, cf = s.CompteClientFacture ?? 0;
-        var avant = lue.CompteClientFacture == 0 ? (0, 0) : (lue.CompteGeneralFacture, lue.CompteClientFacture);
+        // Client facturé : le donneur d'ordre s'il n'y en a pas d'autre (FAC150 R7), comme les factures de l'AS400
+        int gf = s.CompteGeneralFacture ?? s.CompteGeneral, cf = s.CompteClientFacture ?? s.CompteClient;
+        var avant = lue.CompteClientFacture == 0 ? (lue.CompteGeneral, lue.CompteClient) : (lue.CompteGeneralFacture, lue.CompteClientFacture);
         var clientChange = (gf, cf) != avant;
-        if (!clientChange) (gf, cf) = (lue.CompteGeneralFacture, lue.CompteClientFacture);
+        if (!clientChange && lue.CompteClientFacture != 0) (gf, cf) = (lue.CompteGeneralFacture, lue.CompteClientFacture);
         else if (cf != 0 && !await donnees.ClientExisteAsync(u.Societe, gf, cf, ct))
             throw new RegleMetierException($"Le client facturé {gf} {cf} n'existe pas.");
 

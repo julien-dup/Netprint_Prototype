@@ -58,6 +58,8 @@ internal sealed partial class FacturationAutoDb2
             var escompte = Math.Truncate(c.Escompte * 10m) / 10m;   // FDESC sur 2,1 (le RPG tronquait déjà à la lecture)
             var echeance = CalculFacture.Echeance(new ConditionsFacture(f.Avoir, date, escompte, acompte, c.Le, c.NombreJours, c.Arrete, null));
             var a = f.Adresse;
+            // Client facturé : le donneur d'ordre s'il n'y en a pas d'autre (FAC150 R7 ; FDGENF / FDCLIF jamais à 0 dans les factures de l'AS400)
+            var facture = f.CompteClientFacture == 0 ? (General: f.CompteGeneral, Client: f.CompteClient) : (General: f.CompteGeneralFacture, Client: f.CompteClientFacture);
             await Executer("""
                 INSERT INTO {b}.FAC080 (RSOC, RNFAC, FDANNE, FDMOIS, FDJOUR, FDTYPE, FDREF, FDCNNE, FDCOIS, FDCOUR, FDGEND, FDCLID, FDGENF, FDCLIF,
                     FDRGLT, FDRELE, FDECHA, FDECHM, FDECHJ, FDNECH, FDNLE, FDART, FDESC, FDCPT, FDEDIT, FDPLEL, FDFJ, FDNOM, FDRUE1, FDRUE2,
@@ -66,7 +68,7 @@ internal sealed partial class FacturationAutoDb2
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     'N', 'N', 'N', 'N', 'N', 'N', 'N', ?, ?, 'E', 'EUR', 1, ?, ?, ?, ?)
                 """, [.. cle, f.Avoir ? "A" : "F", dd.Reference, dd.DateCommande?.Year ?? 0, dd.DateCommande?.Month ?? 0, dd.DateCommande?.Day ?? 0,
-                    f.CompteGeneral, f.CompteClient, f.CompteGeneralFacture, f.CompteClientFacture, c.Mode, dd.Releve, echeance.Year,
+                    f.CompteGeneral, f.CompteClient, facture.General, facture.Client, c.Mode, dd.Releve, echeance.Year,
                     echeance.Month, echeance.Day, c.NombreJours, c.Le, c.Arrete, escompte, acompte, f.AControler ? "A" : "O", f.Elements.Count,
                     a.FormeJuridique, a.Nom, a.Rue1, a.Rue2, a.CodePostal, a.Ville, a.Pays, numerotation.Enseigne, f.Representant, f.CodeVente,
                     dd.AlAttention, Tronquer(profil, 10), dd.Presentation, f.Periode.Debut, f.Periode.Fin]);
