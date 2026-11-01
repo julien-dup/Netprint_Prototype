@@ -71,12 +71,14 @@ public sealed class ElementSaisie
 }
 
 // Facture en cours de saisie ; Avoir : BL de retour ; Bls : éléments de BL facturés (relus à la création) ;
-// Numero et DateOrigine : facture existante en modification (null en création)
+// Numero et DateOrigine : facture existante en modification ou à compléter (null en création) ; Ajout : BL ajoutés à cette facture
+// (nouveaux éléments, en-tête inchangé)
 public sealed class FactureSaisie
 {
     public int? Numero { get; init; }
     public DateOnly? DateOrigine { get; init; }
-    public bool Modification => Numero is not null;
+    public bool Ajout { get; init; }
+    public bool Modification => Numero is not null && !Ajout;
     public bool Avoir { get; init; }
     public int CompteGeneral { get; init; }
     public int CompteClient { get; init; }
@@ -138,4 +140,14 @@ public interface ISaisieFactures
 
     // Facture éditée mais pas comptabilisée remise « à éditer » (FAC166) pour pouvoir la modifier : édition définitive annulée
     Task RemettreAEditerAsync(int numero, DateOnly date, CancellationToken ct = default);
+
+    // Ajout de BL à une facture pas encore éditée (FAC080S option AE → FAC085 → FAC150 mode A) : BL facturables de son donneur
+    // d'ordre, du même type (livrés pour une facture, retours pour un avoir), aucun coché d'office
+    Task<BlsAFacturer> ChercherBlsAjoutAsync(int numero, DateOnly date, CancellationToken ct = default);
+
+    // Nouveaux éléments préparés (une commande = un élément), lignes modifiables ; l'en-tête de la facture ne change pas
+    Task<FactureSaisie> PreparerAjoutAsync(int numero, DateOnly date, IReadOnlyList<ElementDeBl> bls, CancellationToken ct = default);
+
+    // Ajout dans une transaction (éléments numérotés à la suite, BL marqués facturés) ; puis édition définitive si demandée et sans anomalie
+    Task<FactureCreee> AjouterAsync(FactureSaisie facture, bool editerDefinitif, CancellationToken ct = default);
 }

@@ -3,7 +3,7 @@
    Fiche d'une facture ou d'un avoir (ConsultationFactures, tables des éléments et des lignes) : en-tête, totaux, envoi,
    éléments (commandes) et leurs lignes, textes rattachés à la ligne qui les précède, liens vers la commande et le BL.
    Facture « à éditer » : édition définitive (FAC201), après confirmation. Facture pas encore éditée : modification, suppression de la
-   facture ou d'un de ses éléments (FAC160 / FAC165). Facture éditée non comptabilisée : modification après remise « à éditer » (FAC166).
+   facture ou d'un de ses éléments (FAC160 / FAC165), ajout de BL (FAC085 / FAC150 mode A). Facture éditée non comptabilisée : modification après remise « à éditer » (FAC166).
    ===================================================================== *@
 @using System.Globalization
 @inject IConsultationFactures Factures
@@ -26,6 +26,8 @@
         {
             <button title="Modifier l'en-tête, les lignes ou la date (reportée sur tous les fichiers de la facture)"
                     @onclick='() => Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}/modifier")'>✏ Modifier</button>
+            <button title="Ajouter à cette facture d'autres BL du même donneur d'ordre (nouveaux éléments)"
+                    @onclick='() => Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}/ajouter")'>➕ Ajouter des BL</button>
             <button disabled="@enCours" @onclick="() => SupprimerAsync(null)"
                     title="Supprime la facture ; ses BL et compléments redeviennent à facturer">🗑 Supprimer</button>
         }

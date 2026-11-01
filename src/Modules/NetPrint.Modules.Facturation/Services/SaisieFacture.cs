@@ -14,8 +14,12 @@ internal static class SaisieFacture
     public static readonly IReadOnlyList<int> Delais = [0, 20, 30, 45, 60, 90, 120, 150, 180];
 
     public static FactureSaisie VersSaisie(FacturePrevue f, IReadOnlyList<ElementDeBl> bls, string nom, ParametresGeneration p, DateOnly date,
-        IReadOnlyList<CodeLibelle> modes, IReadOnlyList<CodeLibelle> representants, bool peutEditer) => new()
+        IReadOnlyList<CodeLibelle> modes, IReadOnlyList<CodeLibelle> representants, bool peutEditer, int? ajoutA = null) => new()
     {
+        // Ajout à la facture ajoutA du jour date : en-tête inchangé, acompte des nouvelles commandes non repris (FDCPT inchangé)
+        Numero = ajoutA,
+        DateOrigine = ajoutA is null ? null : date,
+        Ajout = ajoutA is not null,
         Avoir = f.Avoir,
         CompteGeneral = f.CompteGeneral,
         CompteClient = f.CompteClient,
@@ -31,7 +35,7 @@ internal static class SaisieFacture
         Representant = f.Representant == 0 ? null : f.Representant,
         Reference = f.DernierDossier.Reference,
         AlAttention = f.DernierDossier.AlAttention,
-        Acompte = f.Acompte,
+        Acompte = ajoutA is null ? f.Acompte : 0,
         PeutEditerDefinitif = peutEditer,
         Bls = bls,
         Empreinte = Empreinte(f),
@@ -75,13 +79,9 @@ internal static class SaisieFacture
 
     private static string Type(ParametresGeneration p, string code) => p.TypesLigne.TryGetValue(code, out var t) ? t.Type : "";
 
-    public static ControleFactureSaisie Recalculer(FactureSaisie s)
+    // En-tête : date, client facturé complet, mode de règlement (RG), délai, jours, escompte, représentant (B000F)
+    private static void ControlerEnTete(FactureSaisie s, Action<string, string> Erreur)
     {
-        var p = Parametres(s);
-        var erreurs = new List<ErreurLancement>();
-        var anomalies = new List<string>();
-        void Erreur(string champ, string message) => erreurs.Add(new(champ, message));
-
         if (s.Date is null) Erreur(nameof(s.Date), "La date de la facture est obligatoire.");
         if ((s.CompteGeneralFacture is null) != (s.CompteClientFacture is null))
             Erreur(nameof(s.CompteGeneralFacture), "Client facturé : indiquez le compte général et le compte client, ou aucun des deux.");
@@ -97,6 +97,17 @@ internal static class SaisieFacture
         if (s.Representant is not { } r || r <= 0) Erreur(nameof(s.Representant), "Le représentant est obligatoire.");
         else if (s.Representants.Count > 0 && s.Representants.All(x => x.Code != r.ToString()))
             Erreur(nameof(s.Representant), $"Le représentant {r} n'existe pas.");
+    }
+
+    public static ControleFactureSaisie Recalculer(FactureSaisie s)
+    {
+        var p = Parametres(s);
+        var erreurs = new List<ErreurLancement>();
+        var anomalies = new List<string>();
+        void Erreur(string champ, string message) => erreurs.Add(new(champ, message));
+
+        // Ajout à une facture existante : son en-tête ne change pas (ni saisi ni écrit), il n'est pas contrôlé
+        if (!s.Ajout) ControlerEnTete(s, Erreur);
 
         foreach (var e in s.Elements)
         {

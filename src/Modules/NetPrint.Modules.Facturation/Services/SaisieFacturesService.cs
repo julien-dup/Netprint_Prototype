@@ -13,7 +13,8 @@ namespace NetPrint.Modules.Facturation.Services;
 // Suppression d'une facture pas encore éditée ou d'un de ses éléments (FAC160 / FAC165) ; facture éditée non comptabilisée remise
 // « à éditer » (FAC166) pour la modifier. Droits : interdiction PRT000P1 sur FAC150 pour saisir (total ou création), modifier ou
 // remettre à éditer (total ou modification), supprimer (total ou suppression), sur FAC200 pour éditer en définitif ; représentant
-// limité : ses factures seulement. Pas encore repris : facture sans BL, ajout d'élément ou de BL, copie.
+// limité : ses factures seulement. Ajout de BL à une facture pas encore éditée (FAC085 / FAC150 mode A) : droit de création (comme
+// l'option AE de FAC080S), nouveaux éléments écrits comme à la création. Pas encore repris : facture sans BL, copie.
 // =====================================================================
 internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFacturesDb2 donnees, EditionDefinitiveDb2 definitive,
     DroitsFacturationDb2 droits, ConsultationFacturesDb2 consultation, IUtilisateurCourant utilisateur) : ISaisieFactures
@@ -209,6 +210,62 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
     }
 
     public ControleFactureSaisie Recalculer(FactureSaisie facture) => SaisieFacture.Recalculer(facture);
+
+    // Facture à compléter : existante, pas encore éditée, accessible (FAC085 : facture inexistante, éditée ou supprimée refusée)
+    private async Task<(UtilisateurConnecte U, FactureEnregistree F)> FactureACompleterAsync(int numero, DateOnly date, CancellationToken ct)
+    {
+        var u = await ExigerFactureAsync(numero, date, ActionFacture.Creation, ct);
+        var f = await bls.LireFactureAsync(u.Societe, numero, date, ct)
+                ?? throw new RegleMetierException($"La facture {numero} du {date:dd/MM/yyyy} n'existe pas.");
+        if (f.Edition is not ("O" or "A"))
+            throw new RegleMetierException($"La facture {numero} est {(f.Edition == "S" ? "supprimée" : "éditée")} : on ne peut plus lui ajouter de BL.");
+        return (u, f);
+    }
+
+    public async Task<BlsAFacturer> ChercherBlsAjoutAsync(int numero, DateOnly date, CancellationToken ct = default)
+    {
+        var (_, f) = await FactureACompleterAsync(numero, date, ct);
+        var r = await ChercherBlsAsync(new CleFacturation { CompteGeneral = f.CompteGeneral, CompteClient = f.CompteClient }, ct);
+        return r with { Bls = [.. r.Bls.Where(b => b.Retour == f.Avoir).Select(b => b with { Propose = false })] };
+    }
+
+    // BL relus et regroupés pour la facture à compléter : même donneur d'ordre, même type, même enseigne
+    private async Task<(UtilisateurConnecte U, FacturePrevue Facture, ParametresGeneration Parametres, string Nom)> RelireAjoutAsync(int numero,
+        DateOnly date, IReadOnlyList<ElementDeBl> choisis, CancellationToken ct)
+    {
+        var (u, fe) = await FactureACompleterAsync(numero, date, ct);
+        var (f, p, enseigne, nom) = await RelireAsync(u.Societe, choisis, ct);
+        if ((f.CompteGeneral, f.CompteClient) != (fe.CompteGeneral, fe.CompteClient))
+            throw new RegleMetierException($"Les BL choisis ne sont pas du donneur d'ordre de la facture {numero} ({fe.CompteGeneral} {fe.CompteClient}).");
+        if (f.Avoir != fe.Avoir)
+            throw new RegleMetierException(f.Avoir ? $"Des retours (avoir) ne s'ajoutent pas à la facture {numero}." : $"Des BL livrés ne s'ajoutent pas à l'avoir {numero}.");
+        if (enseigne.Trim() != fe.Enseigne.Trim())
+            throw new RegleMetierException($"Les BL choisis ne sont pas de l'enseigne de la facture {numero} ({fe.Enseigne.Trim()}).");
+        return (u, f, p, nom);
+    }
+
+    public async Task<FactureSaisie> PreparerAjoutAsync(int numero, DateOnly date, IReadOnlyList<ElementDeBl> choisis, CancellationToken ct = default)
+    {
+        var (u, f, p, nom) = await RelireAjoutAsync(numero, date, choisis, ct);
+        var (modes, representants) = await donnees.ListesAsync(u.Societe, ct);
+        return SaisieFacture.VersSaisie(f, choisis, nom, p, date, modes, representants, await PeutEditerAsync(u, ct), ajoutA: numero);
+    }
+
+    public async Task<FactureCreee> AjouterAsync(FactureSaisie s, bool editerDefinitif, CancellationToken ct = default)
+    {
+        if (!s.Ajout || s.Numero is not { } numero || s.DateOrigine is not { } date)
+            throw new RegleMetierException("Cette saisie n'est pas un ajout à une facture existante.");
+        var controle = SaisieFacture.Recalculer(s);
+        if (controle.Erreurs.Count > 0) throw new RegleMetierException(string.Join("\n", controle.Erreurs.Select(e => e.Message)));
+        var (u, relue, p, _) = await RelireAjoutAsync(numero, date, s.Bls, ct);
+        if (editerDefinitif && !await PeutEditerAsync(u, ct))
+            throw new RegleMetierException("Vous n'avez pas le droit d'éditer les factures en définitif (FAC200).");
+        if (SaisieFacture.Empreinte(relue) != s.Empreinte)
+            throw new RegleMetierException("Les BL ont changé depuis la préparation (lignes, prix ou commande) : recommencez.");
+        var f = SaisieFacture.Appliquer(relue, s, p, controle.Anomalies);
+        var aControler = await bls.AjouterElementsAsync(u.Societe, numero, date, f, ct);
+        return await TerminerAsync(u, numero, date, aControler, editerDefinitif, ct);
+    }
 
     public async Task<FactureCreee> CreerAsync(FactureSaisie s, bool editerDefinitif, CancellationToken ct = default)
     {

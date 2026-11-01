@@ -150,6 +150,16 @@ public class SaisieFactureRevueTests
     }
 
     [Fact]
+    public void Ajout_a_une_facture_sans_controle_de_l_en_tete()
+    {
+        // En-tête vide (pas de représentant, de règlement ni de date) : bloquant en création, ignoré en ajout (il n'est pas écrit)
+        Assert.NotEmpty(SaisieFacture.Recalculer(new FactureSaisie()).Erreurs);
+        var ajout = new FactureSaisie { Numero = 1, DateOrigine = new DateOnly(2026, 11, 1), Ajout = true };
+        Assert.Empty(SaisieFacture.Recalculer(ajout).Erreurs);
+        Assert.False(ajout.Modification);
+    }
+
+    [Fact]
     public void Un_seul_client_facture()
     {
         Assert.Throws<RegleMetierException>(() => GenerationFactures.Regrouper([Bl(), Bl(30) with { Bl = 2 }], P));
@@ -288,6 +298,78 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         }
         var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
         Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+    }
+
+    [FactDb2Ecriture]
+    public async Task Ajout_de_BL_puis_suppression_puis_remise_a_l_identique()
+    {
+        const int societe = 29, bl = 29379;
+        var date = DateOnly.FromDateTime(DateTime.Today);
+        var service = Service(societe);
+        var f = await service.PreparerAsync([new ElementDeBl(bl, 1)]);
+
+        await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
+        await cnx.OpenAsync();
+        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        List<(string Table, long Rrn, string Colonnes, object?[] Valeurs)> avant2 = [];
+        int? numero = null, autreBl = null;
+        try
+        {
+            numero = (await service.CreerAsync(f, editerDefinitif: false)).Numero;
+
+            // BL du même donneur d'ordre, hors celui de la facture, aucun coché d'office
+            var proposes = await service.ChercherBlsAjoutAsync(numero.Value, date);
+            Assert.Empty(proposes.Erreurs);
+            Assert.DoesNotContain(proposes.Bls, b => b.Bl == bl);
+            Assert.All(proposes.Bls, b => Assert.False(b.Propose || b.Retour));
+            if (proposes.Bls.FirstOrDefault() is not { } autre)
+            {
+                sortie.WriteLine("Aucun autre BL de 411029 1 à facturer sur la base de test : ajout non essayé.");
+                return;
+            }
+            avant2 = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, autre.Bl, date);
+            autreBl = autre.Bl;
+
+            var a = await service.PreparerAjoutAsync(numero.Value, date, [new ElementDeBl(autre.Bl, autre.Element)]);
+            Assert.True(a.Ajout);
+            Assert.False(a.Modification);
+            Assert.Empty(service.Recalculer(a).Erreurs);
+            var r = await service.AjouterAsync(a, editerDefinitif: false);
+            Assert.Equal(numero, r.Numero);
+            sortie.WriteLine($"Facture {numero} : BL {autre.Bl} (commande {autre.Commande}) ajouté, à contrôler {r.AControler} ; {await CompterAsync(cnx, societe, numero.Value, date)}");
+
+            // Deux éléments numérotés 1 et 2, le BL ajouté rattaché au 2 ; il n'est plus proposé
+            var relue = await service.OuvrirAsync(numero.Value, date);
+            Assert.Equal([1, 2], relue.Elements.Select(e => e.Numero));
+            Assert.Contains(autre.Bl, relue.Elements[1].Bls);
+            Assert.DoesNotContain((await service.ChercherBlsAjoutAsync(numero.Value, date)).Bls, b => b.Bl == autre.Bl && b.Element == autre.Element);
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.AjouterAsync(a, false));   // BL déjà facturé
+
+            // Suppression de la facture : les deux BL redeviennent à facturer
+            Assert.True(await service.SupprimerAsync(numero.Value, date));
+            Assert.Equal("FAC080=1 FAC081=0 FAC090=0 FAC100=0 EXP010=0", await CompterAsync(cnx, societe, numero.Value, date));
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.ChercherBlsAjoutAsync(numero.Value, date));   // facture supprimée
+        }
+        finally
+        {
+            if (numero is { } n)
+                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
+                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
+                        societe, n, date.Year, date.Month, date.Day);
+            foreach (var (table, rrn, colonnes, valeurs) in avant2.Concat(avant))
+                await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
+                    [.. valeurs, rrn]);
+        }
+        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+        if (autreBl is { } b2)
+        {
+            var remis2 = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, b2, date);
+            // relevé pris après la création de la facture : compteurs comparés avec le premier relevé
+            static bool HorsCompteurs((string Table, long Rrn, string Colonnes, object?[] Valeurs) x) => x.Table is not ("FAC040" or "PRT320F");
+            Assert.Equal(avant2.Where(HorsCompteurs).Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))),
+                remis2.Where(HorsCompteurs).Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+        }
     }
 
     // Comptes des lignes d'une facture par fichier, à une date
