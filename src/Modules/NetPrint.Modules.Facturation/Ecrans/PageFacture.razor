@@ -3,7 +3,8 @@
    Fiche d'une facture ou d'un avoir (ConsultationFactures, tables des éléments et des lignes) : en-tête, totaux, envoi,
    éléments (commandes) et leurs lignes, textes rattachés à la ligne qui les précède, liens vers la commande et le BL.
    Facture « à éditer » : édition définitive (FAC201), après confirmation. Facture pas encore éditée : modification, suppression de la
-   facture ou d'un de ses éléments (FAC160 / FAC165), ajout de BL (FAC085 / FAC150 mode A). Facture éditée non comptabilisée : modification après remise « à éditer » (FAC166).
+   facture ou d'un de ses éléments (FAC160 / FAC165), ajout de BL (FAC085 / FAC150 mode A). Toute facture non supprimée : copie
+   (FAC150 mode D), puis ouverture de la copie en modification. Facture éditée non comptabilisée : modification après remise « à éditer » (FAC166).
    ===================================================================== *@
 @using System.Globalization
 @inject IConsultationFactures Factures
@@ -22,6 +23,8 @@
     {
         <a class="bouton-ancre" href="@($"api/facturation/factures/{Numero}/{Jour}/pdf")" target="_blank" rel="noopener"
            title="Facture en PDF, recalculée (FAC202P5) ; « BROUILLON » tant qu'elle n'est pas éditée en définitif">🖨 Imprimer</a>
+        <button disabled="@enCours" @onclick="CopierAsync"
+                title="Crée une nouvelle facture du jour, « à éditer », avec le même en-tête, les mêmes éléments et les mêmes lignes">⧉ Copier</button>
         if (fiche.Facture.Statut is StatutsFacture.AEditer or StatutsFacture.Attente)
         {
             <button title="Modifier l'en-tête, les lignes ou la date (reportée sur tous les fichiers de la facture)"
@@ -45,6 +48,10 @@
 </fieldset>
 
 <div class="contenu contenu-detail fiche-facture">
+    @if (compteurAbsent is not null)
+    {
+        <CreationCompteurFactures Absent="compteurAbsent" OnCree="() => compteurAbsent = null" OnFermer="() => compteurAbsent = null" />
+    }
     @if (fiche is null)
     {
         <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreur ?? "Cette facture n'existe pas ou ne vous est pas accessible.")</p>
@@ -229,6 +236,32 @@
         }
         catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
         catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    private CompteurFacturesAbsentException? compteurAbsent;   // copie refusée faute de compteur : proposé à la création
+
+    // Copie (FAC150 mode D) : nouvelle facture du jour, puis ouverte en modification pour la corriger
+    private async Task CopierAsync()
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;
+        try
+        {
+            var f = fiche.Facture;
+            var quoi = f.Avoir ? "l'avoir" : "la facture";
+            var message = $"Copier {quoi} {f.Numero} du {f.Date:dd/MM/yyyy} ?"
+                + $"\n{(f.Avoir ? "Un nouvel avoir daté d'aujourd'hui est créé" : "Une nouvelle facture datée d'aujourd'hui est créée")} (n° pris au compteur),"
+                + $" « {(f.Statut == StatutsFacture.Attente ? "à contrôler" : "à éditer")} », avec le même en-tête et les mêmes lignes, sans acompte ni BL rattachés."
+                + " Elle s'ouvre ensuite en modification ; éditée en définitif, elle facture de nouveau les quantités à la commande.";
+            if (!await Dialogues.ConfirmerAsync(message, "Copier", "Copier")) return;
+            var c = await Saisie.CopierAsync(f.Numero, f.Date);
+            Notifications.Succes($"Copie créée : {(f.Avoir ? "avoir" : "facture")} {c.Numero} du {c.Date:dd/MM/yyyy}{(c.AControler ? ", « à contrôler »" : "")}.");
+            Navigation.NavigateTo($"facturation/factures/{c.Numero}/{c.Date:yyyyMMdd}/modifier");
+        }
+        catch (CompteurFacturesAbsentException ex) { compteurAbsent = ex; }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Copie impossible : {ex.Message}"); }
         finally { enCours = false; }
     }
 

@@ -372,6 +372,50 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         }
     }
 
+    [FactDb2Ecriture]
+    public async Task Copie_puis_remise_a_l_identique()
+    {
+        const int societe = 29, bl = 29379;
+        var date = DateOnly.FromDateTime(DateTime.Today);
+        var service = Service(societe);
+        var f = await service.PreparerAsync([new ElementDeBl(bl, 1)]);
+
+        await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
+        await cnx.OpenAsync();
+        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        var numeros = new List<int>();
+        try
+        {
+            var origine = await service.CreerAsync(f, editerDefinitif: true);
+            numeros.Add(origine.Numero);
+            Assert.True(origine.EditeeDefinitif);
+            var compteOrigine = await CompterAsync(cnx, societe, origine.Numero, date);   // FAC080, FAC081, FAC090, FAC100, BL
+
+            // Copie d'une facture éditée : nouveau n°, « à éditer », mêmes éléments et lignes, aucun BL rattaché
+            var copie = await service.CopierAsync(origine.Numero, date);
+            numeros.Add(copie.Numero);
+            Assert.True(copie.Numero > origine.Numero);   // compteur partagé : un autre n° a pu être pris entre-temps
+            Assert.False(copie.AControler);
+            Assert.Equal(compteOrigine.Replace("EXP010=1", "EXP010=0"), await CompterAsync(cnx, societe, copie.Numero, date));
+            var lue = await service.OuvrirAsync(copie.Numero, date);   // modifiable : pas éditée
+            Assert.NotEmpty(lue.Elements.SelectMany(e => e.Lignes));   // lignes copiées (comptes FAC100 comparés ci-dessus)
+            Assert.Equal(0, lue.Acompte);
+            sortie.WriteLine($"Facture {origine.Numero} (éditée) copiée en {copie.Numero} : {await CompterAsync(cnx, societe, copie.Numero, date)}");
+        }
+        finally
+        {
+            foreach (var n in numeros)
+                foreach (var table in new[] { ("FAC100", "FG"), ("FAC105", "FT"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
+                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
+                        societe, n, date.Year, date.Month, date.Day);
+            foreach (var (table, rrn, colonnes, valeurs) in avant)
+                await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
+                    [.. valeurs, rrn]);
+        }
+        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+    }
+
     // Comptes des lignes d'une facture par fichier, à une date
     private static async Task<string> CompterAsync(System.Data.Odbc.OdbcConnection cnx, int societe, int numero, DateOnly d)
     {

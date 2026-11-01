@@ -5,7 +5,10 @@ namespace NetPrint.Modules.Facturation.Services;
 // Contexte du contrôle des critères : société (AA0007 : enseignes SOP03, périodes ouvertes SPED1-SPEF1 / SPED2-SPEF2 en AAAAMM),
 // paramètres de facturation FAC010 (null = absents) et existence de l'enseigne saisie (PRT320F)
 internal sealed record ContexteLancement(bool GereEnseignes, bool EnseigneExiste, IReadOnlyList<(int Debut, int Fin)> Periodes,
-    int? TypeNumerotation);
+    int? TypeNumerotation)
+{
+    public bool PeriodeOuverte(DateOnly d) => Periodes.Any(p => d.Year * 100 + d.Month >= p.Debut && d.Year * 100 + d.Month <= p.Fin);
+}
 
 // =====================================================================
 // Contrôle des critères de la facturation automatique (FAC400, R3 à R11). Les bornes absentes sont complétées comme le RPG :
@@ -50,7 +53,7 @@ internal static class ReglesFacturationAuto
         if (c.CompteClientDu > c.CompteClientAu) Erreur(nameof(c.CompteClientAu), "Le compte client de fin est avant celui de début.");
 
         if (c.DateFacture is not { } d) Erreur(nameof(c.DateFacture), "La date des factures est obligatoire.");
-        else if (!x.Periodes.Any(p => d.Year * 100 + d.Month >= p.Debut && d.Year * 100 + d.Month <= p.Fin))
+        else if (!x.PeriodeOuverte(d))
             Erreur(nameof(c.DateFacture), "La date des factures n'est pas dans une période comptable ouverte de la société.");
 
         if (x.TypeNumerotation is null) Erreur("", "Les paramètres de facturation de la société (FAC010) n'existent pas.");

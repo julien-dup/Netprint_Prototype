@@ -14,7 +14,8 @@ namespace NetPrint.Modules.Facturation.Services;
 // « à éditer » (FAC166) pour la modifier. Droits : interdiction PRT000P1 sur FAC150 pour saisir (total ou création), modifier ou
 // remettre à éditer (total ou modification), supprimer (total ou suppression), sur FAC200 pour éditer en définitif ; représentant
 // limité : ses factures seulement. Ajout de BL à une facture pas encore éditée (FAC085 / FAC150 mode A) : droit de création (comme
-// l'option AE de FAC080S), nouveaux éléments écrits comme à la création. Pas encore repris : facture sans BL, copie.
+// l'option AE de FAC080S), nouveaux éléments écrits comme à la création. Copie (FAC150 mode D) : droits de création et de
+// modification (la copie s'ouvre en modification ; le RPG ne contrôlait que la modification). Pas encore repris : facture sans BL.
 // =====================================================================
 internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFacturesDb2 donnees, EditionDefinitiveDb2 definitive,
     DroitsFacturationDb2 droits, ConsultationFacturesDb2 consultation, IUtilisateurCourant utilisateur) : ISaisieFactures
@@ -130,7 +131,7 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
             throw new RegleMetierException("Les éléments de la facture ont changé depuis son ouverture : rouvrez-la.");
         var contexte = await bls.ContexteAsync(u.Societe, lue.Enseigne, ct);
         // Nouvelle date seulement : une facture restée « à éditer » d'une période close se corrige encore
-        if (date != origine && !contexte.Periodes.Any(x => date.Year * 100 + date.Month >= x.Debut && date.Year * 100 + date.Month <= x.Fin))
+        if (date != origine && !contexte.PeriodeOuverte(date))
             throw new RegleMetierException("La nouvelle date n'est pas dans une période comptable ouverte de la société.");
         if (contexte.TypeNumerotation is { } type && !(type == 3 && contexte.GereEnseignes)
             && SaisieFacture.ControlerNouvelleDate(type, origine, date) is { } refus)
@@ -267,6 +268,27 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         return await TerminerAsync(u, numero, date, aControler, editerDefinitif, ct);
     }
 
+    public async Task<FactureCreee> CopierAsync(int numero, DateOnly date, CancellationToken ct = default)
+    {
+        var u = await ExigerFactureAsync(numero, date, ActionFacture.Creation, ct);
+        await ExigerDroitAsync(ct, ActionFacture.Modification);   // la copie s'ouvre en modification pour être corrigée
+        var f = await bls.LireFactureAsync(u.Societe, numero, date, ct)
+                ?? throw new RegleMetierException($"La facture {numero} du {date:dd/MM/yyyy} n'existe pas.");
+        var jour = DateOnly.FromDateTime(DateTime.Today);
+        var contexte = await bls.ContexteAsync(u.Societe, f.Enseigne, ct);
+        if (!contexte.PeriodeOuverte(jour))
+            throw new RegleMetierException("La date du jour n'est pas dans une période comptable ouverte de la société.");
+        if (contexte.TypeNumerotation is not { } type) throw new RegleMetierException("Les paramètres de facturation de la société (FAC010) n'existent pas.");
+        if (contexte.GereEnseignes && type == 3 && f.Enseigne.Trim() == "")
+            throw new RegleMetierException("La numérotation est par enseigne et la facture n'a pas d'enseigne.");
+        var c = f.Conditions;
+        var echeance = CalculFacture.Echeance(new ConditionsFacture(f.Avoir, jour, c.Escompte, 0, c.Le, c.NombreJours, c.Arrete, null));
+        // Compteur absent : CompteurFacturesAbsentException levée à l'écriture (transaction annulée), l'écran propose de le créer
+        var (copie, aControler) = await bls.CopierFactureAsync(u.Societe, u.Profil, new NumerotationFactures(type, contexte.GereEnseignes, f.Enseigne),
+            numero, date, jour, echeance, ct);
+        return new FactureCreee(copie, jour, aControler, false, null);
+    }
+
     public async Task<FactureCreee> CreerAsync(FactureSaisie s, bool editerDefinitif, CancellationToken ct = default)
     {
         var u = await ExigerDroitAsync(ct);
@@ -281,7 +303,7 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         if (SaisieFacture.Empreinte(relue) != s.Empreinte)
             throw new RegleMetierException("Les BL ont changé depuis la préparation de la facture (lignes, prix ou commande) : recommencez.");
         var contexte = await bls.ContexteAsync(u.Societe, enseigne, ct);
-        if (!contexte.Periodes.Any(x => date.Year * 100 + date.Month >= x.Debut && date.Year * 100 + date.Month <= x.Fin))
+        if (!contexte.PeriodeOuverte(date))
             throw new RegleMetierException("La date de la facture n'est pas dans une période comptable ouverte de la société.");
         if (contexte.TypeNumerotation is not { } type) throw new RegleMetierException("Les paramètres de facturation de la société (FAC010) n'existent pas.");
         if (contexte.GereEnseignes && type == 3 && enseigne.Trim() == "")

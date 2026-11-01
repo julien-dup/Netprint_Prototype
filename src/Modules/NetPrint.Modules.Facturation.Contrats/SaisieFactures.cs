@@ -150,4 +150,8 @@ public interface ISaisieFactures
 
     // Ajout dans une transaction (éléments numérotés à la suite, BL marqués facturés) ; puis édition définitive si demandée et sans anomalie
     Task<FactureCreee> AjouterAsync(FactureSaisie facture, bool editerDefinitif, CancellationToken ct = default);
+
+    // Copie d'une facture (FAC080S option 3 → FAC150 mode D) : nouvelle facture du jour, n° pris au compteur, « à éditer », mêmes
+    // en-tête, éléments et lignes, sans acompte ni BL rattachés ; à corriger ensuite en modification
+    Task<FactureCreee> CopierAsync(int numero, DateOnly date, CancellationToken ct = default);
 }
