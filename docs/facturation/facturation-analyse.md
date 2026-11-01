@@ -104,3 +104,5 @@ réel. F1 peut démarrer avant, en lecture seule, avec un PDF provisoire.
 6. **FDTAGR** : décrit « facture réglée » dans la DDS, utilisé comme « exclure du CA » : confirmer.
 7. **Envoi FTP / EDI** : quels formats PRT057F (CSV1/2, TXT1, EDI1/2, EDIP) sont réellement utilisés, et chez quels clients ?
 8. **Coexistence** : pendant la transition, EnvoideFactures et le SaaS tourneront-ils sur la même FAC080 (risque de double envoi) ?
+9. ~~Avoirs en montants positifs~~ : **réponse de David (01/11)** : on garde le positif (quantités et montants), le signe est porté par le type A (FDTYPE).
+10. ~~Mode 7 de la facturation automatique~~ : **réponse de David (01/11)** : comme le RPG (regroupé par commande, TART7 jamais alimenté). Note : un vrai regroupement par article se ferait dans `GenerationFactures.CleFacture` / `CleElement` (cas 7).
