@@ -268,15 +268,6 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
             p, "", c.Nom);
     }
 
-    public async Task<ChiffreAffairesPeriode> ChiffreAffairesAsync(int compteGeneral, int compteClient, DateOnly du, DateOnly au,
-        CancellationToken ct = default)
-    {
-        var u = await ExigerDroitAsync(ct);
-        if (du > au) throw new RegleMetierException("Période : le début est après la fin.");
-        var (ca, documents) = await bls.ChiffreAffairesAsync(u.Societe, compteGeneral, compteClient, du, au, ct);
-        return new ChiffreAffairesPeriode(ca, documents);
-    }
-
     public async Task<FactureSaisie> PreparerClientAsync(int compteGeneral, int compteClient, bool avoir = false, CancellationToken ct = default)
     {
         var u = await ExigerDroitAsync(ct);

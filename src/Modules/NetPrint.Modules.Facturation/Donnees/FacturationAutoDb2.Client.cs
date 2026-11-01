@@ -52,21 +52,6 @@ internal sealed partial class FacturationAutoDb2
         return await rd.ReadAsync(ct);
     }
 
-    // Chiffre d'affaires HT facturé au client sur une période (remise de fin d'année) : factures et avoirs édités dont il est le client
-    // facturé (ou le donneur d'ordre sans autre client facturé), avoirs déduits, hors avoirs de remise de fin d'année (période FDRFAD ;
-    // un avoir EDI qui porte une période pour une autre raison est donc écarté aussi)
-    public async Task<(decimal ChiffreAffaires, int Documents)> ChiffreAffairesAsync(int societe, int general, int client, DateOnly du, DateOnly au,
-        CancellationToken ct)
-    {
-        await using var cnx = await OuvrirAsync(ct);
-        await using var rd = await Lire(cnx, null, """
-            SELECT COALESCE(SUM(CASE WHEN FDTYPE = 'A' THEN -FDMTN ELSE FDMTN END), 0), COUNT(*) FROM {b}.FAC080
-            WHERE RSOC = ? AND FDEDIT = 'E' AND FDRFAD = 0 AND FDANNE * 10000 + FDMOIS * 100 + FDJOUR BETWEEN ? AND ?
-              AND ((FDGENF = ? AND FDCLIF = ?) OR (FDCLIF = 0 AND FDGEND = ? AND FDCLID = ?))
-            """, ct, societe, BaseDb2.AAAAMMJJ(du), BaseDb2.AAAAMMJJ(au), general, client, general, client);
-        return await rd.ReadAsync(ct) ? (rd.Nombre(0), rd.Entier(1)) : (0, 0);
-    }
-
     // Codes de FAC030 (codes vente, ES pour l'escompte) utilisables pour la catégorie, ou à défaut pour la catégorie « ** », et s'ils
     // ont un compte de comptabilisation (R20) ; une seule lecture. RVENTE (2 caractères) est calé à droite (« ␣0 » pour la ligne de
     // code 0, MOVE du RPG) : comparé sans les blancs

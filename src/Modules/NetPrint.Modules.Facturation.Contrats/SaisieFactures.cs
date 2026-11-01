@@ -120,8 +120,6 @@ public sealed class FactureSaisie
 // Contrôle de la saisie : Erreurs bloquantes ; Anomalies : la facture sera créée « à contrôler » (comme en automatique)
 public sealed record ControleFactureSaisie(IReadOnlyList<ErreurLancement> Erreurs, IReadOnlyList<string> Anomalies, decimal Ventes);
 
-public sealed record ChiffreAffairesPeriode(decimal ChiffreAffaires, int Documents);
-
 // Facture créée ; Avertissement : créée, mais l'édition définitive demandée a échoué
 public sealed record FactureCreee(int Numero, DateOnly Date, bool AControler, bool EditeeDefinitif, string? Avertissement);
 
@@ -141,10 +139,6 @@ public interface ISaisieFactures
     // à choisir, lignes saisies
     // avoir : avoir du client sans facture d'origine (remise de fin d'année : période de référence)
     Task<FactureSaisie> PreparerClientAsync(int compteGeneral, int compteClient, bool avoir = false, CancellationToken ct = default);
-
-    // Chiffre d'affaires HT facturé au client sur une période (factures − avoirs édités, hors remises de fin d'année), pour calculer
-    // une remise de fin d'année
-    Task<ChiffreAffairesPeriode> ChiffreAffairesAsync(int compteGeneral, int compteClient, DateOnly du, DateOnly au, CancellationToken ct = default);
 
     // Montants des lignes et des éléments recalculés, saisie contrôlée (sans base)
     ControleFactureSaisie Recalculer(FactureSaisie facture);

@@ -1,3 +1,4 @@
+using NetPrint.Socle;
 using NetPrint.Modules.Facturation.Contrats;
 
 namespace NetPrint.Modules.Facturation.Services;
@@ -107,6 +108,31 @@ internal static class SaisieFacture
         if (s.Representant is not { } r || r <= 0) Erreur(nameof(s.Representant), "Le représentant est obligatoire.");
         else if (s.Representants.Count > 0 && s.Representants.All(x => x.Code != r.ToString()))
             Erreur(nameof(s.Representant), $"Le représentant {r} n'existe pas.");
+    }
+
+    public const string OrigineRemiseFinAnnee = "RFA";   // lignes ajoutées par la remise de fin d'année (remplacées si elle est refaite)
+
+    // Remise de fin d'année (avoir RFA) : CA de base et taux convenus entre le client et le service commercial (saisis, sans calcul :
+    // David, 01/11) → ligne de vente au code vente du client (montant = CA × taux, arrondi au centime) et textes « CA … euros HT »
+    // et « Taux de remise … % », comme les avoirs RFA de la base (ex. 30974 de la société 8) ; refaite, elle remplace la précédente
+    public static void AjouterRemiseFinAnnee(FactureSaisie f, decimal chiffreAffaires, decimal taux)
+    {
+        if (f.PeriodeDebut is not { } du || f.PeriodeFin is not { } au) throw new RegleMetierException("Indiquez d'abord la période de référence.");
+        if (chiffreAffaires <= 0 || taux <= 0) throw new RegleMetierException("Indiquez le chiffre d'affaires de base et le taux de remise.");
+        var code = f.CodesLigne.Any(x => x.Code == f.CodeVente && x.Type == "V") ? f.CodeVente : f.CodesLigne.FirstOrDefault(x => x.Type == "V")?.Code ?? "";
+        var texte = f.CodesLigne.FirstOrDefault(x => x.Type == "T")?.Code ?? "9";
+        // Unité au diviseur 1 (montant = prix), UN de préférence
+        var unite = f.Unites.TryGetValue("UN", out var un) && un == 1 ? "UN" : f.Unites.FirstOrDefault(x => x.Value == 1).Key ?? "";
+        var periode = du.Year == au.Year && du.DayOfYear == 1 && au.Month == 12 && au.Day == 31 ? $"{du.Year}" : $"du {du:dd/MM/yyyy} au {au:dd/MM/yyyy}";
+        var montant = Math.Round(chiffreAffaires * taux / 100m, 2, MidpointRounding.AwayFromZero);
+        var fr = System.Globalization.CultureInfo.GetCultureInfo("fr-FR");
+        var lignes = f.Elements[0].Lignes;
+        lignes.RemoveAll(l => l.Origine == OrigineRemiseFinAnnee);
+        lignes.Add(new LigneSaisie { CodeLigne = code, Designation = $"Remise de fin d'année {periode}", Quantite = 1, Unite = unite, Pu = montant,
+            Origine = OrigineRemiseFinAnnee });
+        lignes.Add(new LigneSaisie { CodeLigne = texte, Designation = $"CA {periode} : {chiffreAffaires.ToString("#,##0.##", fr)} euros HT",
+            Origine = OrigineRemiseFinAnnee });
+        lignes.Add(new LigneSaisie { CodeLigne = texte, Designation = $"Taux de remise : {taux.ToString("0.##", fr)} %", Origine = OrigineRemiseFinAnnee });
     }
 
     public static ControleFactureSaisie Recalculer(FactureSaisie s)

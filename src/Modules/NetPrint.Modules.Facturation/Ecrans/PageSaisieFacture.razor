@@ -227,10 +227,10 @@
             {
                 <div class="remise-fin-annee">
                     <b>Remise de fin d'année</b>
+                    <label class="champ-ligne">CA de base HT <input type="number" step="0.01" class="num7" @bind="caRemise" /></label>
                     <label class="champ-ligne">Taux % <input type="number" step="0.01" class="num3" @bind="tauxRemise" /></label>
-                    <button disabled="@(occupe || f.PeriodeDebut is null || f.PeriodeFin is null || tauxRemise is not > 0)" @onclick="CalculerRemiseAsync"
-                            title="Lit le CA HT facturé au client sur la période et ajoute la ligne de remise et ses textes">Calculer sur le CA de la période</button>
-                    @if (caRemise is { } ca) {<span class="discret">CA HT de la période : <b>@E(ca.ChiffreAffaires)</b> (@ca.Documents factures et avoirs édités)</span>}
+                    <button disabled="@(f.PeriodeDebut is null || f.PeriodeFin is null || caRemise is not > 0 || tauxRemise is not > 0)" @onclick="AjouterRemise"
+                            title="CA et taux convenus avec le client : ajoute la ligne de remise (CA × taux) et ses textes ; refaite, elle remplace la précédente">Ajouter la remise</button>
                 </div>
             }
             }
@@ -426,43 +426,15 @@
 
     private (int Numero, string Cle)? commandeCherchee;   // clé « commande » : elle peut se facturer sans BL
     private (int General, int Client)? clientCherche;      // clé « donneur d'ordre » : facture sans commande possible
-    private decimal? tauxRemise;                            // remise de fin d'année : taux appliqué au CA de la période
-    private ChiffreAffairesPeriode? caRemise;
-    private const string OrigineRemise = "RFA";   // lignes ajoutées par le calcul de la remise (remplacées s'il est refait)
+    private decimal? caRemise, tauxRemise;   // remise de fin d'année : CA de base et taux convenus avec le client (saisis)
 
-    // Remise de fin d'année : CA HT de la période × taux → ligne de vente (code vente du client) et textes CA / taux, comme les
-    // avoirs RFA de la base (ex. 30974 de la société 8)
-    private async Task CalculerRemiseAsync()
+    private void AjouterRemise()
     {
-        if (occupe || facture is not { PeriodeDebut: { } du, PeriodeFin: { } au } f || tauxRemise is not > 0) return;
-        occupe = true;
-        try
-        {
-            // CA du client facturé de l'avoir (le donneur d'ordre s'il n'y en a pas d'autre)
-            caRemise = await Saisie.ChiffreAffairesAsync(f.CompteGeneralFacture ?? f.CompteGeneral, f.CompteClientFacture ?? f.CompteClient, du, au);
-            if (caRemise.ChiffreAffaires <= 0)
-            {
-                await Dialogues.AlerterAsync($"Aucun chiffre d'affaires facturé à ce client sur la période ({caRemise.ChiffreAffaires:#,##0.00} € HT) : pas de remise calculée.");
-                return;
-            }
-            var taux = tauxRemise.Value;
-            var montant = Math.Round(caRemise.ChiffreAffaires * taux / 100m, 2, MidpointRounding.AwayFromZero);
-            var code = f.CodesLigne.Any(x => x.Code == f.CodeVente && x.Type == "V") ? f.CodeVente : f.CodesLigne.FirstOrDefault(x => x.Type == "V")?.Code ?? "";
-            var texte = f.CodesLigne.FirstOrDefault(x => x.Type == "T")?.Code ?? "9";
-            // Unité au diviseur 1 (montant = prix), UN de préférence
-            var unite = f.Unites.TryGetValue("UN", out var un) && un == 1 ? "UN" : f.Unites.FirstOrDefault(x => x.Value == 1).Key ?? "";
-            var periode = du.Year == au.Year && du.DayOfYear == 1 && au.Month == 12 && au.Day == 31 ? $"{du.Year}" : $"du {du:dd/MM/yyyy} au {au:dd/MM/yyyy}";
-            var el = f.Elements[0];
-            el.Lignes.RemoveAll(l => l.Origine == OrigineRemise);   // nouveau calcul : remplace le précédent
-            el.Lignes.Add(new LigneSaisie { CodeLigne = code, Designation = $"Remise de fin d'année {periode}", Quantite = 1, Unite = unite, Pu = montant, Origine = OrigineRemise });
-            el.Lignes.Add(new LigneSaisie { CodeLigne = texte, Designation = $"CA {periode} : {caRemise.ChiffreAffaires:#,##0.00} euros HT", Origine = OrigineRemise });
-            el.Lignes.Add(new LigneSaisie { CodeLigne = texte, Designation = $"Taux de remise : {taux:0.##} %", Origine = OrigineRemise });
-            Recalculer();
-        }
-        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
-        catch (Exception ex) { Notifications.Erreur($"Calcul du chiffre d'affaires impossible : {ex.Message}"); }
-        finally { occupe = false; }
+        if (facture is null || caRemise is not { } ca || tauxRemise is not { } taux) return;
+        SaisieFacture.AjouterRemiseFinAnnee(facture, ca, taux);
+        Recalculer();
     }
+
 
     private async Task PreparerClientAsync(bool avoir)
     {

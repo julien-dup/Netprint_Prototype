@@ -182,6 +182,23 @@ public class SaisieFactureRevueTests
     }
 
     [Fact]
+    public void Remise_de_fin_d_annee_sur_un_CA_saisi()
+    {
+        var f = new FactureSaisie
+        {
+            Avoir = true, SansCommande = true, CodeVente = "6", PeriodeDebut = new DateOnly(2022, 1, 1), PeriodeFin = new DateOnly(2022, 12, 31),
+            CodesLigne = [new CodeLigneFacture("0", "V", "vente"), new CodeLigneFacture("6", "V", "vente"), new CodeLigneFacture("9", "T", "texte")],
+            Unites = new Dictionary<string, decimal> { ["MI"] = 1000, ["UN"] = 1 }, Elements = [new ElementSaisie { Numero = 1 }],
+        };
+        SaisieFacture.AjouterRemiseFinAnnee(f, 4247510m, 4.5m);
+        SaisieFacture.AjouterRemiseFinAnnee(f, 4247510m, 4.5m);   // refaite : remplace
+        Assert.Equal([("6", "Remise de fin d'année 2022", 191137.95m), ("9", "CA 2022 : 4 247 510 euros HT", 0m), ("9", "Taux de remise : 4,5 %", 0m)],
+            f.Elements[0].Lignes.Select(l => (l.CodeLigne, l.Designation.Replace('\u202f', ' ').Replace('\u00a0', ' '), l.Pu)));
+        Assert.Equal("UN", f.Elements[0].Lignes[0].Unite);
+        Assert.Throws<RegleMetierException>(() => SaisieFacture.AjouterRemiseFinAnnee(f, 0, 4.5m));
+    }
+
+    [Fact]
     public void Ajout_a_une_facture_sans_controle_de_l_en_tete()
     {
         // En-tête vide (pas de représentant, de règlement ni de date) : bloquant en création, ignoré en ajout (il n'est pas écrit)
@@ -609,8 +626,6 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         var date = DateOnly.FromDateTime(DateTime.Today);
         var service = Service(societe);
         DateOnly du = new(2025, 1, 1), au = new(2025, 12, 31);
-        var ca = await service.ChiffreAffairesAsync(411029, 1, du, au);
-        sortie.WriteLine($"CA 2025 de 411029 1 : {ca.ChiffreAffaires:N2} € ({ca.Documents} documents)");
 
         var f = await service.PreparerClientAsync(411029, 1, avoir: true);
         Assert.True(f.Avoir && f.SansCommande);
