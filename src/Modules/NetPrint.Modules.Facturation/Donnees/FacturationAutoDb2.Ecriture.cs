@@ -146,7 +146,8 @@ internal sealed partial class FacturationAutoDb2
                          ct, societe, date.Year, mois))
         {
             if (!await rd.ReadAsync(ct))
-                throw new RegleMetierException($"Pas de compteur de factures pour {(mois == 0 ? $"l'année {date.Year}" : $"{mois:00}/{date.Year}")} (FAC040).");
+                throw new RegleMetierException($"Pas de compteur de factures pour {(mois == 0 ? $"l'année {date.Year}" : $"{mois:00}/{date.Year}")} : "
+                    + "créez le prochain n° de facture dans les paramètres de facturation (FAC040).");
             numero = Math.Max(rd.Entier(0), 1);
         }
         await executer("UPDATE {b}.FAC040 SET NFACT = ? WHERE RSOC = ? AND NAN = ? AND NMOIS = ?", [numero + 1, societe, date.Year, mois]);

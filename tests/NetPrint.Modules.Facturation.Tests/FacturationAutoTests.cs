@@ -169,7 +169,7 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
 
     // Lignes touchées par la génération et l'édition définitive, relevées par RRN pour être remises telles quelles
     internal static async Task<List<(string Table, long Rrn, string Colonnes, object?[] Valeurs)>> ReleverAsync(System.Data.Odbc.OdbcConnection cnx,
-        int societe, int bl, int annee)
+        int societe, int bl, DateOnly date)
     {
         var bib = NetPrint.Socle.Donnees.BaseDb2.Bibliotheque(BaseDeTest.Configuration);
         var dossiers = $"(RDOSS, {{0}}) IN (SELECT HNODOS, HCLEF FROM {bib}.EXP010 WHERE RSOC = {societe} AND HNOBL = {bl})";
@@ -180,7 +180,9 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
             ("AB004", "F4FACT, F4NFAC, F4NELT, F4DFAA, F4DFAM, F4DFAJ", $"RSOC = {societe} AND " + string.Format(dossiers, "F4DCLE")),
             ("AB001", "CCNOFA, CCFCTA, CCFCTM, CCFCTJ, CCQTEP", $"RSOC = {societe} AND " + string.Format(dossiers, "CCDCLE")),
             ("NEG100", "DNQTEF", $"RSOC = {societe} AND " + string.Format(dossiers, "DNDCLE")),
-            ("FAC040", "NFACT", $"RSOC = {societe} AND NAN = {annee} AND NMOIS = 0"),
+            // Compteurs : annuel (mois 0), mensuel (mois de la facture), par enseigne
+            ("FAC040", "NFACT", $"RSOC = {societe} AND NAN = {date.Year} AND NMOIS IN (0, {date.Month})"),
+            ("PRT320F", "ENDNFA", $"RSOC = {societe}"),
         };
         var releve = new List<(string, long, string, object?[])>();
         foreach (var (table, colonnes, condition) in releves)
@@ -206,54 +208,77 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
         return await cmd.ExecuteNonQueryAsync();
     }
 
+    // Société 29 : numérotation annuelle, sans enseigne
     [FactDb2Ecriture]
-    public async Task Generation_et_edition_definitive_puis_remise_a_l_identique()
+    public Task Generation_et_edition_definitive_puis_remise_a_l_identique() => GenererPuisRemettreAsync(29, "");
+
+    // Société 8 : celle qui utilise la facturation automatique (David, 01/11), enseignes, numérotation mensuelle
+    [FactDb2Ecriture]
+    public Task Generation_societe_8_enseigne_1_puis_remise_a_l_identique() => GenererPuisRemettreAsync(8, "1");
+
+    private async Task GenererPuisRemettreAsync(int societe, string enseigne)
     {
-        const int societe = 29;
         var date = DateOnly.FromDateTime(DateTime.Today);
         var service = Service(societe);
-        var simulation = await service.SimulerAsync(new CriteresFacturationAuto { ExpedieDu = new DateOnly(2000, 1, 1), DateFacture = date });
+        var simulation = await service.SimulerAsync(new CriteresFacturationAuto { Enseigne = enseigne, ExpedieDu = new DateOnly(2000, 1, 1), DateFacture = date });
         var cible = simulation.Factures.First(f => f is { Avoir: false, AControler: false, NombreBl: 1 });
         var bl = cible.Elements[0].Bls[0];
-        var criteres = new CriteresFacturationAuto { BlDu = bl, BlAu = bl, DateFacture = date };
+        var criteres = new CriteresFacturationAuto { Enseigne = enseigne, BlDu = bl, BlAu = bl, DateFacture = date };
         Assert.Single((await service.SimulerAsync(criteres)).Factures);
 
         await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
         await cnx.OpenAsync();
-        var avant = await ReleverAsync(cnx, societe, bl, date.Year);
-        int? numero = null;
+        // Compteur du mois absent (numérotation mensuelle : il se crée à la main, écran FAC040) : créé pour l'essai, supprimé après
+        var compteurCree = false;
+        await using (var rd = await new System.Data.Odbc.OdbcCommand($"SELECT PTYPEN FROM {NetPrint.Socle.Donnees.BaseDb2.Bibliotheque(BaseDeTest.Configuration)}.FAC010 WHERE RSOC = {societe}", cnx).ExecuteReaderAsync())
+            if (await rd.ReadAsync() && Convert.ToInt32(rd.GetValue(0)) == 2)
+                compteurCree = await ExecuterAsync(cnx, "INSERT INTO {b}.FAC040 (RSOC, NAN, NMOIS, NFACT) SELECT CAST(? AS NUMERIC(4, 0)), CAST(? AS NUMERIC(4, 0)), CAST(? AS NUMERIC(2, 0)), CAST(? AS NUMERIC(6, 0)) FROM SYSIBM.SYSDUMMY1 "
+                    + "WHERE NOT EXISTS (SELECT 1 FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ?)", societe, date.Year, date.Month, date.Month * 10000 + 1, societe, date.Year, date.Month) == 1;
         try
         {
-            var r = await service.GenererAsync(criteres, editerDefinitif: true, (await service.SimulerAsync(criteres)).Empreinte);
-            var f = Assert.Single(r.Factures);
-            Assert.Null(f.Refus);
-            numero = f.Numero;
-            Assert.True(f.EditeeDefinitif);
-            sortie.WriteLine($"BL {bl} → facture {numero} du {date:dd/MM/yyyy}, {f.Montant:N2} €");
+            var avant = await ReleverAsync(cnx, societe, bl, date);
+            int? numero = null;
+            try
+            {
+                var r = await service.GenererAsync(criteres, editerDefinitif: true, (await service.SimulerAsync(criteres)).Empreinte);
+                var f = Assert.Single(r.Factures);
+                Assert.Null(f.Refus);
+                numero = f.Numero;
+                Assert.True(f.EditeeDefinitif);
+                sortie.WriteLine($"BL {bl} → facture {numero} du {date:dd/MM/yyyy}, {f.Montant:N2} €");
 
-            var apres = await ReleverAsync(cnx, societe, bl, date.Year);
-            Assert.All(apres.Where(x => x.Table == "EXP010"), x => Assert.Equal(("O", numero!.Value), (x.Valeurs[0]!.ToString()!.Trim(), Convert.ToInt32(x.Valeurs[1]))));
-            Assert.Equal(numero + 1, Convert.ToInt32(apres.Single(x => x.Table == "FAC040").Valeurs[0]));
-            // Facture lue par la consultation : éditée, même montant que la simulation
-            var fiche = await new ConsultationFacturesService(new NetPrint.Modules.Facturation.Donnees.ConsultationFacturesDb2(BaseDeTest.Configuration),
-                new Utilisateur(societe)).LireAsync(numero!.Value, date);
-            Assert.Equal((StatutsFacture.Editee, cible.Montant), (fiche!.Facture.Statut, fiche.Facture.Ht + fiche.Facture.Port));
+                var apres = await ReleverAsync(cnx, societe, bl, date);
+                Assert.All(apres.Where(x => x.Table == "EXP010"), x => Assert.Equal(("O", numero!.Value), (x.Valeurs[0]!.ToString()!.Trim(), Convert.ToInt32(x.Valeurs[1]))));
+                // Un seul compteur a bougé, et il donne le n° suivant
+                var compteurs = apres.Where(x => x.Table is "FAC040" or "PRT320F")
+                    .Where(x => !avant.Single(y => y.Table == x.Table && y.Rrn == x.Rrn).Valeurs.SequenceEqual(x.Valeurs)).ToList();
+                Assert.Equal(numero + 1, Convert.ToInt32(Assert.Single(compteurs).Valeurs[0]));
+                // Facture lue par la consultation : éditée, même montant que la simulation
+                var fiche = await new ConsultationFacturesService(new NetPrint.Modules.Facturation.Donnees.ConsultationFacturesDb2(BaseDeTest.Configuration),
+                    new Utilisateur(societe)).LireAsync(numero!.Value, date);
+                Assert.Equal((StatutsFacture.Editee, cible.Montant), (fiche!.Facture.Statut, fiche.Facture.Ht + fiche.Facture.Port));
 
-            // Le BL est facturé : une nouvelle simulation ne le reprend plus
-            Assert.Empty((await service.SimulerAsync(criteres)).Factures);
+                // Le BL est facturé : une nouvelle simulation ne le reprend plus
+                Assert.Empty((await service.SimulerAsync(criteres)).Factures);
+            }
+            finally
+            {
+                if (numero is { } n)
+                    foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
+                        await ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
+                            societe, n, date.Year, date.Month, date.Day);
+                foreach (var (table, rrn, colonnes, valeurs) in avant)
+                    await ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(c => $"{c.Trim()} = ?"))} WHERE RRN(t) = ?",
+                        [.. valeurs, rrn]);
+            }
+            var remis = await ReleverAsync(cnx, societe, bl, date);
+            Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
         }
         finally
         {
-            if (numero is { } n)
-                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
-                    await ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
-                        societe, n, date.Year, date.Month, date.Day);
-            foreach (var (table, rrn, colonnes, valeurs) in avant)
-                await ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(c => $"{c.Trim()} = ?"))} WHERE RRN(t) = ?",
-                    [.. valeurs, rrn]);
+            if (compteurCree)
+                await ExecuterAsync(cnx, "DELETE FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ?", societe, date.Year, date.Month);
         }
-        var remis = await ReleverAsync(cnx, societe, bl, date.Year);
-        Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
     }
 }
 

@@ -185,7 +185,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
 
         await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
         await cnx.OpenAsync();
-        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date.Year);
+        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
         int? numero = null;
         try
         {
@@ -213,7 +213,7 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);
         }
-        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date.Year);
+        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
         Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
     }
 }
