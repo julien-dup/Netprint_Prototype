@@ -1,0 +1,155 @@
+@page "/logistique/prebl"
+@* =====================================================================
+   Pré-BL palettes (WinDev PreBL, FEN_GestionPreBL) : un pré-BL par ligne, les plus récents d'abord, avec l'avancement du
+   pointage des palettes sur les terminaux. Rien n'est chargé à l'ouverture.
+   ===================================================================== *@
+@using NetPrint.Modules.Logistique.Ecrans.PreBl
+@inject IPreBl PreBls
+@inject EtatListePreBl Etat
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Pré-BL · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <span class="espace"></span>
+    <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche du pré-BL (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir le pré-BL</button>
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="RechercherAsync">
+    <label class="champ"><span>N° pré-BL</span><input type="number" class="num6" @bind="C.Numero" /></label>
+    <div class="champ">
+        <span>Commande</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" @bind="C.Commande" />
+            <input class="code" maxlength="1" title="Clé" @bind="C.Cle" />
+        </div>
+    </div>
+    <div class="champ">
+        <span>Client</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
+            <input type="number" class="num7" title="Compte client" @bind="C.CompteClient" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+        </div>
+    </div>
+    <label class="champ"><span>Date de départ</span><input type="date" @bind="C.DateDepart" /></label>
+    <label class="champ champ-case"><input type="checkbox" @bind="C.AvecLivres" /><span>Avec les pré-BL livrés</span></label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@chargement">🔍 Rechercher</button>
+        <button type="button" class="bouton-gomme" title="Réinitialiser tous les critères" @onclick="Effacer"><img src="gomme.png" alt="" /> Effacer</button>
+    </div>
+</form>
+
+<div class="contenu">
+    <section class="zone-liste">
+        <div class="ligne-infos">
+            <p class="compteur">
+                @if (!droits.Acces)
+                {
+                    <span class="avertissement">Vous n'êtes pas autorisé à la gestion des pré-BL (droits des OPR).</span>
+                }
+                else if (Etat.Resultat is not { } r)
+                {
+                    <span>Saisissez au moins un critère puis cliquez sur Rechercher.</span>
+                }
+                else
+                {
+                    var prets = r.Lignes.Count(e => e.Pret);
+                    <strong>@r.Lignes.Count.ToString("N0")</strong><span> pré-BL</span>
+                    <span class="separateur-compteur">·</span>
+                    <strong>@prets.ToString("N0")</strong><span> prêt@(prets > 1 ? "s" : "") à transformer en BL</span>
+                    @if (r.Tronque) {<span class="avertissement"> (seuls les @LimitesRecherche.Maximum.ToString("N0") plus récents sont chargés : affinez la recherche)</span>}
+                }
+                @if (chargement) {<span class="chargement"> Chargement…</span>}
+            </p>
+        </div>
+        @if (Etat.Resultat is { Lignes.Count: > 0 })
+        {
+            <div class="zone-defilement-liste">
+                <table class="grille grille-bl">
+                    <thead>
+                        <tr><th class="nombre">Pré-BL</th><th>État</th><th>Client</th><th>Départ</th><th>Livrer à</th><th>Transporteur</th>
+                            <th class="nombre">Lignes</th><th title="Palettes pointées sur les terminaux / palettes du pré-BL">Palettes pointées</th><th>Créé</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in Etat.Resultat.Lignes)
+                        {
+                            <tr class="@(e.Numero == Etat.Selection ? "selection" : "")" @onclick="() => Etat.Selection = e.Numero" @ondblclick="() => Ouvrir(e)">
+                                <td class="nombre"><b>@e.Numero</b></td>
+                                <td><span class="badge @BadgeEtat(e)">@(e.Pret ? "Prêt" : e.Etat)</span>@if (e.StockPaye) {<span class="badge" title="Stock payé : BL non facturable">SP</span>}</td>
+                                <td title="@($"{e.CompteGeneral} {e.CompteClient}")">@e.NomClient</td>
+                                <td>@e.DateDepart?.ToString("dd/MM/yyyy")</td>
+                                <td>@e.Adresse.RaisonSociale <span class="discret">@e.Adresse.CodePostal @e.Adresse.Ville</span></td>
+                                <td>@(e.Transporteur > 0 ? $"{e.Transporteur} {e.NomTransporteur}" : "")</td>
+                                <td class="nombre">@e.Lignes</td>
+                                <td>
+                                    @if (e.Palettes > 0)
+                                    {
+                                        <span>@e.Pointees / @e.Palettes</span>
+                                        @if (e.Picking > 0) {<span class="discret"> · @e.Picking en picking</span>}
+                                    }
+                                </td>
+                                <td>@e.DateCreation?.ToString("dd/MM/yyyy") <span class="discret">@e.Profil</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private CriteresPreBl C => Etat.Criteres;
+    private bool chargement;
+    private DroitsOpr droits = new(true, false, false, false);
+
+    private ElementPreBl? Selection => Etat.Resultat?.Lignes.FirstOrDefault(e => e.Numero == Etat.Selection);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { droits = await PreBls.DroitsAsync(); }
+        catch (Exception ex) { Notifications.Erreur($"Lecture des droits impossible : {ex.Message}"); }
+    }
+
+    private static string BadgeEtat(ElementPreBl e) =>
+        e.Etat == EtatsPreBl.Livre ? "badge-bl-r" : e.Pret ? "badge-bl-c" : e.Etat == EtatsPreBl.EnPreparation ? "badge-appel" : "";
+
+    private async Task RechercherAsync()
+    {
+        if (chargement || !droits.Acces) return;
+        if (C.Numero is not > 0 && C.Commande is not > 0 && string.IsNullOrWhiteSpace(C.Cle) && C.CompteGeneral is not > 0 && C.CompteClient is not > 0 && C.DateDepart is null
+            && !await Dialogues.ConfirmerAsync("Rechercher tous les pré-BL de la société (les plus récents d'abord) ?", "Recherche sans critère", "Rechercher"))
+            return;
+        chargement = true;
+        try
+        {
+            Etat.Resultat = await PreBls.RechercherAsync(C);
+            Etat.Selection = null;
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Recherche impossible : {ex.Message}"); }
+        finally { chargement = false; }
+    }
+
+    private void Effacer()
+    {
+        Etat.Criteres = new();
+        Etat.Resultat = null;
+        Etat.Selection = null;
+    }
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        if (l.Codes.Count < 2) return;
+        (C.CompteGeneral, C.CompteClient) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+    }
+
+    private void Ouvrir(ElementPreBl? e)
+    {
+        if (e is not null) Navigation.NavigateTo($"logistique/prebl/{e.Numero}");
+    }
+}

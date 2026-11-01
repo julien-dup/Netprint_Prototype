@@ -23,7 +23,7 @@ public static class LogistiqueModule
             Icone: "🚚",
             Ordre: 4,
             Assemblage: typeof(LogistiqueModule).Assembly,
-            Description: "Consultation des bons de livraison. À venir : saisie des BL, livraisons à effectuer, OPR, pré-BL."));
+            Description: "Bons de livraison : consultation, saisie, BL divers, édition, envoi, retours de marchandises."));
 
         services.AddSingleton(new DescriptionModule(
             Code: "LOGISTIQUE-LIVRAISONS",
@@ -42,6 +42,15 @@ public static class LogistiqueModule
             Ordre: 6,
             Assemblage: typeof(LogistiqueModule).Assembly,
             Description: "OPR : lignes de commande à préparer regroupées par client, adresse, date et transporteur ; création, ajout, modification."));
+
+        services.AddSingleton(new DescriptionModule(
+            Code: "LOGISTIQUE-PREBL",
+            Nom: "Pré-BL palettes",
+            Url: "/logistique/prebl",
+            Icone: "🏷",
+            Ordre: 7,
+            Assemblage: typeof(LogistiqueModule).Assembly,
+            Description: "Pré-BL des palettes code-barre : lignes, lots, palettes et leur pointage sur les terminaux, transformation en BL."));
 
         services.AddScoped<ConsultationBlDb2>();
         services.AddScoped<IConsultationBl, ConsultationBlService>();   // ConsultationBL / EXP010S
@@ -63,6 +72,9 @@ public static class LogistiqueModule
         services.AddScoped<IEditionOpr, EditionOprService>();               // OPR150
         services.AddScoped<ILivraisonOpr, LivraisonOprService>();           // FEN_BonLivraison, FEN_CreationBL, FEN_DetailBL
         services.AddScoped<Ecrans.Opr.EtatListeOpr>();
+        services.AddScoped<PreBlDb2>();
+        services.AddScoped<IPreBl, PreBlService>();                         // WinDev PreBL / PreBLSansPalette
+        services.AddScoped<Ecrans.PreBl.EtatListePreBl>();
         return services;
     }
 

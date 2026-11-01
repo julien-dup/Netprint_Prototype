@@ -4,6 +4,7 @@
    préparation ligne par ligne (palettes conditionnées, cartons clôturés, détail des colis), puis génération des BL selon
    le mode du client et finalisation (palettes, poids, texte de pied) avec impression.
    ===================================================================== *@
+@using NetPrint.Modules.Logistique.Ecrans
 @inject ILivraisonOpr Livraison
 @inject IEditionBl EditionBl
 @inject NavigationManager Navigation
@@ -88,7 +89,7 @@
                                         @foreach (var c in l.Colis)
                                         {
                                             <tr><td>…@(c.Sscc.Length > 9 ? c.Sscc[^9..] : c.Sscc)</td><td>lot @c.Lot</td><td class="nombre">@c.Quantite.ToString("#,##0")</td>
-                                                <td>@StatutPalette(c.Statut)</td><td>@(c.Carton != 0 ? $"carton {c.Carton} · {(c.CartonClos ? "clôturé" : "en cours")}" : "sans carton")</td>
+                                                <td>@LibellesPalette.Statut(c.Statut)</td><td>@(c.Carton != 0 ? $"carton {c.Carton} · {(c.CartonClos ? "clôturé" : "en cours")}" : "sans carton")</td>
                                                 <td>@c.Operateur</td><td>@c.Matiere</td></tr>
                                         }
                                     </tbody>
@@ -165,11 +166,6 @@
         catch (Exception ex) { erreur = $"Lecture de l'OPR impossible : {ex.Message}"; }
         finally { occupe = false; }
     }
-
-    private static string StatutPalette(string s) => s switch
-    {
-        "0" => "Déclaré", "1" => "Fabriqué", "2" => "En stock", "3" => "En prépa", "4" => "Conditionné", "5" => "Expédié", _ => s,
-    };
 
     private async Task GenererAsync()
     {
