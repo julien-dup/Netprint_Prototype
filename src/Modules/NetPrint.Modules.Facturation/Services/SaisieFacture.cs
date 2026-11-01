@@ -14,8 +14,11 @@ internal static class SaisieFacture
     public static readonly IReadOnlyList<int> Delais = [0, 20, 30, 45, 60, 90, 120, 150, 180];
 
     public static FactureSaisie VersSaisie(FacturePrevue f, IReadOnlyList<ElementDeBl> bls, string nom, ParametresGeneration p, DateOnly date,
-        IReadOnlyList<CodeLibelle> modes, IReadOnlyList<CodeLibelle> representants, bool peutEditer, int? ajoutA = null) => new()
+        IReadOnlyList<CodeLibelle> modes, IReadOnlyList<CodeLibelle> representants, bool peutEditer, int? ajoutA = null,
+        (int, string)? commandeSansBl = null, string? avertissement = null) => new()
     {
+        CommandeSansBl = commandeSansBl,
+        Avertissement = avertissement,
         // Ajout à la facture ajoutA du jour date : en-tête inchangé, acompte des nouvelles commandes non repris (FDCPT inchangé)
         Numero = ajoutA,
         DateOrigine = ajoutA is null ? null : date,

@@ -78,6 +78,8 @@ public sealed class FactureSaisie
     public int? Numero { get; init; }
     public DateOnly? DateOrigine { get; init; }
     public bool Ajout { get; init; }
+    public (int Numero, string Cle)? CommandeSansBl { get; init; }   // facture d'une commande sans BL (relue à la création)
+    public string? Avertissement { get; init; }   // à lire avant de créer (ex. : commande déjà sur une facture pas encore éditée)
     public bool Modification => Numero is not null && !Ajout;
     public bool Avoir { get; init; }
     public int CompteGeneral { get; init; }
@@ -120,6 +122,10 @@ public interface ISaisieFactures
 
     // Facture préparée à partir des BL cochés (lignes des BL et des commandes, compléments, remise), modifiable avant la création
     Task<FactureSaisie> PreparerAsync(IReadOnlyList<ElementDeBl> bls, CancellationToken ct = default);
+
+    // Facture d'une commande sans BL (acompte, frais, prestation) : reste à facturer de la commande (fabrication : quantité
+    // commandée − facturée ; négoce : lignes pas entièrement facturées), compléments, remise ; ses BL restent à facturer
+    Task<FactureSaisie> PreparerCommandeAsync(int commande, string cle, CancellationToken ct = default);
 
     // Montants des lignes et des éléments recalculés, saisie contrôlée (sans base)
     ControleFactureSaisie Recalculer(FactureSaisie facture);

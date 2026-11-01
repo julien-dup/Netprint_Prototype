@@ -15,7 +15,8 @@ namespace NetPrint.Modules.Facturation.Services;
 // remettre à éditer (total ou modification), supprimer (total ou suppression), sur FAC200 pour éditer en définitif ; représentant
 // limité : ses factures seulement. Ajout de BL à une facture pas encore éditée (FAC085 / FAC150 mode A) : droit de création (comme
 // l'option AE de FAC080S), nouveaux éléments écrits comme à la création. Copie (FAC150 mode D) : droits de création et de
-// modification (la copie s'ouvre en modification ; le RPG ne contrôlait que la modification). Pas encore repris : facture sans BL.
+// modification (la copie s'ouvre en modification ; le RPG ne contrôlait que la modification). Facture d'une commande sans BL
+// (FAC085 clé dossier) : même moteur, élément sans BL. Pas encore repris : facture d'un client sans commande.
 // =====================================================================
 internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFacturesDb2 donnees, EditionDefinitiveDb2 definitive,
     DroitsFacturationDb2 droits, ConsultationFacturesDb2 consultation, IUtilisateurCourant utilisateur) : ISaisieFactures
@@ -210,6 +211,43 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         return SaisieFacture.VersSaisie(f, choisis, nom, p, DateOnly.FromDateTime(DateTime.Today), modes, representants, await PeutEditerAsync(u, ct));
     }
 
+    // Commande sans BL lue et préparée par le moteur des BL (élément sans BL) ; lignes marquées « hors BL » (FGLBL = N, sans n° de BL) ;
+    // acompte non déduit : il l'est sur la facture des BL de la commande (sinon déduit deux fois)
+    private async Task<(FacturePrevue Facture, ParametresGeneration Parametres, string Enseigne, string Nom)> RelireCommandeAsync(int societe,
+        int commande, string cle, CancellationToken ct)
+    {
+        var r = await donnees.ResoudreAsync(societe, new CleFacturation { Commande = commande, Cle = cle }, ct);
+        if (r.Erreur is not null) throw new RegleMetierException(r.Erreur.Message);
+        var (numero, c) = r.Commande!.Value;
+        var e = await bls.LireCommandeAsync(societe, numero, c, ct) ?? throw new RegleMetierException($"La commande {numero}/{c} n'existe plus.");
+        var p = await bls.ParametresAsync(societe, ct);
+        var f = GenerationFactures.Regrouper([e], p);
+        f = f with
+        {
+            Elements = [.. f.Elements.Select(x => x with
+            {
+                Bls = [], Lignes = [.. x.Lignes.Select(l => l.LigneBl == "O" ? l with { LigneBl = "N", Bl = 0, ElementBl = 0, LigneDuBl = 0 } : l)],
+            })],
+            Acompte = 0,
+            Anomalies = [.. f.Anomalies.Where(a => a != "Acompte supérieur au montant")],
+        };
+        return (f, p, e.Enseigne, e.NomClient);
+    }
+
+    public async Task<FactureSaisie> PreparerCommandeAsync(int commande, string cle, CancellationToken ct = default)
+    {
+        var u = await ExigerDroitAsync(ct);
+        var (f, p, _, nom) = await RelireCommandeAsync(u.Societe, commande, cle, ct);
+        var (modes, representants) = await donnees.ListesAsync(u.Societe, ct);
+        var d = f.Elements[0].Dossier;
+        var enCours = await bls.FacturesEnCoursAsync(u.Societe, d.Numero, d.Cle, ct);
+        var avertissement = enCours.Count == 0 ? null
+            : $"La commande {d.Numero}/{d.Cle} est déjà sur {(enCours.Count > 1 ? "les factures" : "la facture")} {string.Join(", ", enCours)}, pas encore "
+              + "éditée(s) : ses quantités facturées ne sont pas encore comptées. Vérifiez avant de la facturer de nouveau.";
+        return SaisieFacture.VersSaisie(f, [], nom, p, DateOnly.FromDateTime(DateTime.Today), modes, representants, await PeutEditerAsync(u, ct),
+            commandeSansBl: (d.Numero, d.Cle), avertissement: avertissement);
+    }
+
     public ControleFactureSaisie Recalculer(FactureSaisie facture) => SaisieFacture.Recalculer(facture);
 
     // Facture à compléter : existante, pas encore éditée, accessible (FAC085 : facture inexistante, éditée ou supprimée refusée)
@@ -299,15 +337,18 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         if (controle.Erreurs.Count > 0) throw new RegleMetierException(string.Join("\n", controle.Erreurs.Select(e => e.Message)));
         var date = s.Date!.Value;
 
-        var (relue, p, enseigne, _) = await RelireAsync(u.Societe, s.Bls, ct);
+        var (relue, p, enseigne, _) = s.CommandeSansBl is { } commande
+            ? await RelireCommandeAsync(u.Societe, commande.Numero, commande.Cle, ct)
+            : await RelireAsync(u.Societe, s.Bls, ct);
         if (SaisieFacture.Empreinte(relue) != s.Empreinte)
-            throw new RegleMetierException("Les BL ont changé depuis la préparation de la facture (lignes, prix ou commande) : recommencez.");
+            throw new RegleMetierException(s.CommandeSansBl is null ? "Les BL ont changé depuis la préparation de la facture (lignes, prix ou commande) : recommencez."
+                : "La commande a changé depuis la préparation de la facture (lignes, prix ou quantités) : recommencez.");
         var contexte = await bls.ContexteAsync(u.Societe, enseigne, ct);
         if (!contexte.PeriodeOuverte(date))
             throw new RegleMetierException("La date de la facture n'est pas dans une période comptable ouverte de la société.");
         if (contexte.TypeNumerotation is not { } type) throw new RegleMetierException("Les paramètres de facturation de la société (FAC010) n'existent pas.");
         if (contexte.GereEnseignes && type == 3 && enseigne.Trim() == "")
-            throw new RegleMetierException("La numérotation est par enseigne et les BL n'ont pas d'enseigne.");
+            throw new RegleMetierException($"La numérotation est par enseigne et {(s.CommandeSansBl is null ? "les BL n'ont" : "la commande n'a")} pas d'enseigne.");
         if (s.CompteGeneralFacture is { } gf && s.CompteClientFacture is { } cf && !await donnees.ClientExisteAsync(u.Societe, gf, cf, ct))
             throw new RegleMetierException($"Le client facturé {gf} {cf} n'existe pas.");
 

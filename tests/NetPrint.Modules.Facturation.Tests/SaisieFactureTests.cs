@@ -416,6 +416,53 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
     }
 
+    [FactDb2Ecriture]
+    public async Task Commande_sans_BL_puis_remise_a_l_identique()
+    {
+        const int societe = 29, bl = 29379;
+        var date = DateOnly.FromDateTime(DateTime.Today);
+        var service = Service(societe);
+        var cmd = (await service.ChercherBlsAsync(new CleFacturation { Bl = bl })).Bls.First(b => b.Bl == bl);
+        var f = await service.PreparerCommandeAsync(cmd.Commande, cmd.Cle);
+        Assert.Equal((cmd.Commande, cmd.Cle), f.CommandeSansBl);
+        var e = Assert.Single(f.Elements);
+        Assert.Empty(e.Bls);
+        var controle = service.Recalculer(f);
+        Assert.Empty(controle.Erreurs);
+        sortie.WriteLine($"Commande {cmd.Commande}/{cmd.Cle} sans BL : {e.Lignes.Count} lignes, {controle.Ventes:N2} € ; anomalies {string.Join(", ", controle.Anomalies)}");
+
+        await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
+        await cnx.OpenAsync();
+        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        int? numero = null;
+        try
+        {
+            numero = (await service.CreerAsync(f, editerDefinitif: false)).Numero;
+            // Aucun BL rattaché : le BL de la commande reste à facturer
+            var comptes = (await CompterAsync(cnx, societe, numero.Value, date)).Split(' ');
+            Assert.Contains("FAC080=1", comptes);
+            Assert.Contains("FAC090=1", comptes);
+            Assert.Contains($"FAC100={e.Lignes.Count}", comptes);
+            Assert.Contains("EXP010=0", comptes);   // pied FAC081 : textes du client (CLITXF), autant qu'il en a
+            Assert.Contains("déjà sur la facture", (await service.PreparerCommandeAsync(cmd.Commande, cmd.Cle)).Avertissement);
+            Assert.Contains((await service.ChercherBlsAsync(new CleFacturation { Bl = bl })).Bls, b => b.Bl == bl && b.Propose);
+            var relue = await service.OuvrirAsync(numero.Value, date);
+            Assert.Equal(cmd.Commande, Assert.Single(relue.Elements).Commande);
+        }
+        finally
+        {
+            if (numero is { } n)
+                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
+                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
+                        societe, n, date.Year, date.Month, date.Day);
+            foreach (var (table, rrn, colonnes, valeurs) in avant)
+                await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
+                    [.. valeurs, rrn]);
+        }
+        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+    }
+
     // Comptes des lignes d'une facture par fichier, à une date
     private static async Task<string> CompterAsync(System.Data.Odbc.OdbcConnection cnx, int societe, int numero, DateOnly d)
     {

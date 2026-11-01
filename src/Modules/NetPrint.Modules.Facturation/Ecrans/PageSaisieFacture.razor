@@ -101,6 +101,14 @@
         else
         {
             var cochesRetour = bls.Bls.Where(Coche).Select(b => b.Retour).Distinct().Count() > 1;
+            @if (!EnAjout && commandeCherchee is { } cmd)
+            {
+                <div class="barre-preparation">
+                    <span class="discret">Ou facturer la commande elle-même, sans BL (acompte, frais, prestation) : ce qui reste à facturer ; ses BL resteront à facturer.</span>
+                    <span class="espace"></span>
+                    <button disabled="@occupe" @onclick="PreparerCommandeAsync">Facturer la commande @cmd.Numero/@cmd.Cle sans BL →</button>
+                </div>
+            }
             @if (EnAjout)
             {
                 <h3 class="titre-ajout">Ajouter des BL à la facture <a href="@($"facturation/factures/{Numero}/{Jour}")">@Numero</a> du @DateFacture?.ToString("dd/MM/yyyy")</h3>
@@ -151,6 +159,7 @@
         var f = facture;
         <section class="carte en-tete-saisie">
             <h3>@(f.Ajout ? $"Ajout à {(f.Avoir ? "l'avoir" : "la facture")}" : f.Avoir ? "Avoir" : "Facture") @(f.Numero is { } n ? $"n° {n} du {f.DateOrigine:dd/MM/yyyy} " : "")pour @f.CompteGeneral @f.CompteClient <span class="discret">@f.NomClient</span></h3>
+            @if (f.Avertissement is not null) {<p class="avertissement-saisie">@f.Avertissement</p>}
             @if (f.Ajout)
             {
                 <p class="discret">Les BL cochés deviennent de nouveaux éléments ; l'en-tête (date, règlement, client facturé, acompte) ne change pas.</p>
@@ -204,7 +213,7 @@
             <section class="carte element-saisie">
                 <div class="titre-element">
                     <b>Commande <a href="@($"ventes/commandes/{el.Commande}/{el.Cle}")">@el.Commande/@el.Cle</a></b>
-                    <span class="discret">@el.Designation · BL @string.Join(", ", el.Bls)</span>
+                    <span class="discret">@el.Designation · @(el.Bls.Count > 0 ? $"BL {string.Join(", ", el.Bls)}" : "sans BL")</span>
                     <span class="espace"></span><b>@E(el.Ventes)</b>
                 </div>
                 <table class="grille grille-saisie-lignes">
@@ -342,6 +351,7 @@
         try
         {
             bls = await Saisie.ChercherBlsAsync(C);
+            commandeCherchee = C.Commande is { } n && bls.Erreurs.Count == 0 ? (n, C.Cle.Trim().ToUpperInvariant()) : null;
             coches.Clear();
             foreach (var b in bls.Bls.Where(b => b.Propose)) coches.Add(new ElementDeBl(b.Bl, b.Element));
         }
@@ -362,6 +372,23 @@
         try { bls = await Saisie.ChercherBlsAjoutAsync(Numero!.Value, date); }
         catch (RegleMetierException ex) { erreurOuverture = ex.Message; }
         catch (Exception ex) { erreurOuverture = $"Recherche des BL impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private (int Numero, string Cle)? commandeCherchee;   // clé « commande » : elle peut se facturer sans BL
+
+    private async Task PreparerCommandeAsync()
+    {
+        if (occupe || commandeCherchee is not { } c) return;
+        occupe = true;
+        try
+        {
+            facture = await Saisie.PreparerCommandeAsync(c.Numero, c.Cle);
+            editerDefinitif = false;
+            Recalculer();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Préparation de la facture impossible : {ex.Message}"); }
         finally { occupe = false; }
     }
 
@@ -436,7 +463,7 @@
 
     private void Recommencer()
     {
-        (facture, controle, creee, bls) = (null, null, null, null);
+        (facture, controle, creee, bls, commandeCherchee) = (null, null, null, null, null);
         coches.Clear();
         C = new();
     }
@@ -480,7 +507,8 @@
                 return;
             }
             var message = $"Créer {(f.Avoir ? "l'avoir" : "la facture")} de {E(controle!.Ventes)} HT au {f.Date:dd/MM/yyyy} ?"
-                + "\nLe n° est pris sur le compteur et les BL sont marqués facturés."
+                + (f.CommandeSansBl is null ? "\nLe n° est pris sur le compteur et les BL sont marqués facturés."
+                    : "\nLe n° est pris sur le compteur ; aucun BL n'est marqué facturé (ceux de la commande resteront à facturer).")
                 + (controle.Anomalies.Count > 0 ? $"\nElle sera « à contrôler » : {string.Join(", ", controle.Anomalies)}." : "")
                 + (editerDefinitif && controle.Anomalies.Count == 0 ? "\nElle sera éditée en définitif." : "");
             if (!await Dialogues.ConfirmerAsync(message, f.Avoir ? "Nouvel avoir" : "Nouvelle facture", "Créer")) return;
