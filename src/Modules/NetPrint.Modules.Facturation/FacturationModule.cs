@@ -36,6 +36,7 @@ public static class FacturationModule
             Description: "Factures et avoirs des BL facturables selon le mode de facturation des clients (FAC400) : simulation, puis génération."));
 
         services.AddScoped<FacturationAutoDb2>();
+        services.AddScoped<ICompteursFactures, CompteursFacturesService>();       // FAC040 (compteur manquant, créé sur place)
         services.AddScoped<SaisieFacturesDb2>();
         services.AddScoped<ISaisieFactures, SaisieFacturesService>();             // FAC085 → FAC150 (factures de BL choisis)
         services.AddScoped<IFacturationAutomatique, FacturationAutomatiqueService>();   // FAC400 → FAC402P, provisoire FAC412

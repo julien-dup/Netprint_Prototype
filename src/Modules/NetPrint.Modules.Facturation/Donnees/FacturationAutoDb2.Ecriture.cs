@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Odbc;
+using NetPrint.Modules.Facturation.Contrats;
 using NetPrint.Modules.Facturation.Services;
 using NetPrint.Socle;
 using NetPrint.Socle.Donnees;
@@ -7,7 +8,21 @@ using NetPrint.Socle.Donnees;
 namespace NetPrint.Modules.Facturation.Donnees;
 
 // Numérotation des factures de la société (FAC010.PTYPEN : 1 annuelle, 2 mensuelle, 3 par enseigne si AA0007.SOP03 = O)
-internal sealed record NumerotationFactures(int Type, bool GereEnseignes, string Enseigne);
+internal sealed record NumerotationFactures(int Type, bool GereEnseignes, string Enseigne)
+{
+    public bool ParEnseigne => Type == 3 && GereEnseignes;
+
+    // Compteur FAC040 (numérotation annuelle ou mensuelle) ; sinon PRT320F par enseigne, ou type non géré
+    public bool ParCompteurFac040 => Type is 1 or 2;
+
+    // Mois du compteur FAC040 : celui de la facture en mensuel, 0 en annuel
+    public int Mois(DateOnly date) => Type == 2 ? date.Month : 0;
+
+    // N° de départ habituel d'un nouveau compteur : 110001 pour novembre en mensuel, 260001 pour 2026 en annuel
+    public static int PremierPropose(DateOnly date, int mois) => (mois == 0 ? date.Year % 100 : mois) * 10000 + 1;
+
+    public CompteurFacturesAbsentException CompteurAbsent(DateOnly date) => new(date.Year, Mois(date), PremierPropose(date, Mois(date)));
+}
 
 // =====================================================================
 // Écriture d'une facture automatique (FAC402P) ou saisie (FAC150, BL choisis) : une transaction par facture, n° compris, pour qu'un arrêt ne laisse ni trou
@@ -23,14 +38,7 @@ internal sealed partial class FacturationAutoDb2
     {
         await using var cnx = await OuvrirAsync(ct);
         await using var tx = (OdbcTransaction)await cnx.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        async Task<int> Executer(string sql, params object?[] v)
-        {
-            await using var cmd = cnx.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = sql.Replace("{b}", Bib);
-            foreach (var x in v) cmd.Parameters.Valeur(x is string t && t == "" ? " " : x);
-            return await cmd.ExecuteNonQueryAsync(ct);
-        }
+        Task<int> Executer(string sql, params object?[] v) => ExecuterAsync(cnx, tx, sql, ct, v);
         var valide = false;
         try
         {
@@ -127,7 +135,7 @@ internal sealed partial class FacturationAutoDb2
     private async Task<int> NumeroAsync(OdbcConnection cnx, OdbcTransaction tx, Func<string, object?[], Task<int>> executer, int societe,
         NumerotationFactures n, DateOnly date, CancellationToken ct)
     {
-        if (n.Type == 3 && n.GereEnseignes)
+        if (n.ParEnseigne)
         {
             int suivant;
             await using (var rd = await Lire(cnx, tx, "SELECT ENDNFA FROM {b}.PRT320F WHERE RSOC = ? AND RENSEI = ? WITH RS USE AND KEEP EXCLUSIVE LOCKS",
@@ -140,18 +148,66 @@ internal sealed partial class FacturationAutoDb2
             return suivant;
         }
         if (n.Type is not (1 or 2)) throw new RegleMetierException($"Type de numérotation des factures {n.Type} non géré (FAC010).");
-        var mois = n.Type == 2 ? date.Month : 0;
+        var mois = n.Mois(date);
         int numero;
         await using (var rd = await Lire(cnx, tx, "SELECT NFACT FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ? WITH RS USE AND KEEP EXCLUSIVE LOCKS",
                          ct, societe, date.Year, mois))
         {
-            if (!await rd.ReadAsync(ct))
-                throw new RegleMetierException($"Pas de compteur de factures pour {(mois == 0 ? $"l'année {date.Year}" : $"{mois:00}/{date.Year}")} : "
-                    + "créez le prochain n° de facture dans les paramètres de facturation (FAC040).");
+            if (!await rd.ReadAsync(ct)) throw n.CompteurAbsent(date);
             numero = Math.Max(rd.Entier(0), 1);
         }
         await executer("UPDATE {b}.FAC040 SET NFACT = ? WHERE RSOC = ? AND NAN = ? AND NMOIS = ?", [numero + 1, societe, date.Year, mois]);
         return numero;
+    }
+
+    // Ordre SQL dans la transaction (chaîne vide passée en blanc, comme les zones CHAR) ; nombre de lignes touchées
+    private async Task<int> ExecuterAsync(OdbcConnection cnx, OdbcTransaction tx, string sql, CancellationToken ct, params object?[] v)
+    {
+        await using var cmd = cnx.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = sql.Replace("{b}", Bib);
+        foreach (var x in v) cmd.Parameters.Valeur(x is string t && t == "" ? " " : x);
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // Compteur FAC040 de la date présent (vrai hors numérotation FAC040 : enseigne PRT320F ou type non géré, contrôlés à l'écriture)
+    public async Task<bool> CompteurExisteAsync(int societe, NumerotationFactures n, DateOnly date, CancellationToken ct)
+    {
+        if (!n.ParCompteurFac040) return true;
+        await using var cnx = await OuvrirAsync(ct);
+        await using var rd = await Lire(cnx, null, "SELECT 1 FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ?", ct, societe, date.Year, n.Mois(date));
+        return await rd.ReadAsync(ct);
+    }
+
+    // Création d'un compteur (écran FAC040) : refus s'il existe ou si le premier n° est déjà pris par une facture de la période
+    public async Task CreerCompteurAsync(int societe, int annee, int mois, int premier, CancellationToken ct)
+    {
+        await using var cnx = await OuvrirAsync(ct);
+        await using var tx = (OdbcTransaction)await cnx.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        var valide = false;
+        try
+        {
+            await using (var rd = await Lire(cnx, tx, "SELECT NFACT FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ?", ct, societe, annee, mois))
+                if (await rd.ReadAsync(ct)) throw new RegleMetierException($"Le compteur existe déjà (prochain n° {rd.Entier(0)}).");
+            var periode = mois == 0 ? "" : " AND FDMOIS = ?";
+            object?[] v = mois == 0 ? [societe, annee] : [societe, annee, mois];
+            await using (var rd = await Lire(cnx, tx, $"SELECT COALESCE(MAX(RNFAC), 0) FROM {{b}}.FAC080 WHERE RSOC = ? AND FDANNE = ?{periode}", ct, v))
+                if (await rd.ReadAsync(ct) && rd.Entier(0) >= premier)
+                    throw new RegleMetierException($"Le n° {premier} est déjà pris : la dernière facture de la période porte le n° {rd.Entier(0)}.");
+            // Insertion conditionnelle : deux créations simultanées ne donnent pas deux compteurs
+            if (await ExecuterAsync(cnx, tx, """
+                    INSERT INTO {b}.FAC040 (RSOC, NAN, NMOIS, NFACT)
+                    SELECT CAST(? AS NUMERIC(4, 0)), CAST(? AS NUMERIC(4, 0)), CAST(? AS NUMERIC(2, 0)), CAST(? AS NUMERIC(6, 0)) FROM SYSIBM.SYSDUMMY1
+                    WHERE NOT EXISTS (SELECT 1 FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ?)
+                    """, ct, societe, annee, mois, premier, societe, annee, mois) != 1)
+                throw new RegleMetierException("Le compteur vient d'être créé par quelqu'un d'autre.");
+            await tx.CommitAsync(ct);
+            valide = true;
+        }
+        finally
+        {
+            if (!valide) try { await tx.RollbackAsync(CancellationToken.None); } catch (OdbcException) { }
+        }
     }
 
     private static string Tronquer(string s, int n) => s.Length > n ? s[..n] : s;

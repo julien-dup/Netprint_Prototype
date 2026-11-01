@@ -228,12 +228,23 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
 
         await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
         await cnx.OpenAsync();
-        // Compteur du mois absent (numérotation mensuelle : il se crée à la main, écran FAC040) : créé pour l'essai, supprimé après
-        var compteurCree = false;
-        await using (var rd = await new System.Data.Odbc.OdbcCommand($"SELECT PTYPEN FROM {NetPrint.Socle.Donnees.BaseDb2.Bibliotheque(BaseDeTest.Configuration)}.FAC010 WHERE RSOC = {societe}", cnx).ExecuteReaderAsync())
-            if (await rd.ReadAsync() && Convert.ToInt32(rd.GetValue(0)) == 2)
-                compteurCree = await ExecuterAsync(cnx, "INSERT INTO {b}.FAC040 (RSOC, NAN, NMOIS, NFACT) SELECT CAST(? AS NUMERIC(4, 0)), CAST(? AS NUMERIC(4, 0)), CAST(? AS NUMERIC(2, 0)), CAST(? AS NUMERIC(6, 0)) FROM SYSIBM.SYSDUMMY1 "
-                    + "WHERE NOT EXISTS (SELECT 1 FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ?)", societe, date.Year, date.Month, date.Month * 10000 + 1, societe, date.Year, date.Month) == 1;
+        // Compteur du mois absent (numérotation mensuelle) : la génération le signale, l'écran le fait créer ; supprimé après l'essai
+        int? compteurCree = null;   // mois du compteur créé (0 en annuelle)
+        var config = BaseDeTest.Configuration;
+        var contexte = await new NetPrint.Modules.Facturation.Donnees.FacturationAutoDb2(config).ContexteAsync(societe, enseigne, default);
+        var numerotation = new NetPrint.Modules.Facturation.Donnees.NumerotationFactures(contexte.TypeNumerotation!.Value, contexte.GereEnseignes, enseigne);
+        if (!await new NetPrint.Modules.Facturation.Donnees.FacturationAutoDb2(config).CompteurExisteAsync(societe, numerotation, date, default))
+        {
+            var absent = await Assert.ThrowsAsync<CompteurFacturesAbsentException>(async () =>
+                await service.GenererAsync(criteres, false, (await service.SimulerAsync(criteres)).Empreinte));
+            Assert.Equal((date.Year, numerotation.Mois(date)), (absent.Annee, absent.Mois));
+            sortie.WriteLine($"{absent.Message} Proposé : {absent.PremierPropose}");
+            var compteurs = new CompteursFacturesService(new NetPrint.Modules.Facturation.Donnees.FacturationAutoDb2(config),
+                new NetPrint.Modules.Facturation.Donnees.DroitsFacturationDb2(config), new Utilisateur(societe));
+            await compteurs.CreerAsync(absent.Annee, absent.Mois, absent.PremierPropose);
+            compteurCree = absent.Mois;
+            await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => compteurs.CreerAsync(absent.Annee, absent.Mois, absent.PremierPropose));   // existe
+        }
         try
         {
             var avant = await ReleverAsync(cnx, societe, bl, date);
@@ -276,8 +287,8 @@ public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sorti
         }
         finally
         {
-            if (compteurCree)
-                await ExecuterAsync(cnx, "DELETE FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ?", societe, date.Year, date.Month);
+            if (compteurCree is { } mois)
+                await ExecuterAsync(cnx, "DELETE FROM {b}.FAC040 WHERE RSOC = ? AND NAN = ? AND NMOIS = ?", societe, date.Year, mois);
         }
     }
 }

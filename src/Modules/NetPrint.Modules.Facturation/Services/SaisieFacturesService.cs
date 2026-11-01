@@ -43,7 +43,8 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         var tout = r.Commande is not null;   // clé commande : tous ses BL cochés
         return new BlsAFacturer([], r.CompteGeneral, r.CompteClient, r.NomClient,
             [.. retenus.Select(e => new BlAFacturer(e.Bl, e.Element, e.Expedition, e.Dossier.Numero, e.Dossier.Cle, e.Dossier.Designation1,
-                e.Dossier.Reference, e.QuantiteLivree, e.Retour, tout || r.Proposes.Contains((e.Bl, e.Element))))],
+                e.Dossier.Reference, e.QuantiteLivree, e.Retour, tout || r.Proposes.Contains((e.Bl, e.Element))))
+                .OrderByDescending(b => b.Propose).ThenByDescending(b => b.Bl).ThenBy(b => b.Element)],   // cochés d'abord, puis les plus récents
             [.. ecartes.Select(e => new BlEcarte(e.Bl, e.Element, e.Dossier, e.Cle, e.CompteGeneral, e.CompteClient, e.Nom, e.Raison))], tronque);
 
         static BlsAFacturer Refus(ErreurLancement e) => new([e], 0, 0, "", [], [], false);
@@ -104,8 +105,10 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         if (s.CompteGeneralFacture is { } gf && s.CompteClientFacture is { } cf && !await donnees.ClientExisteAsync(u.Societe, gf, cf, ct))
             throw new RegleMetierException($"Le client facturé {gf} {cf} n'existe pas.");
 
+        // Compteur absent : CompteurFacturesAbsentException levée à l'écriture (transaction annulée), l'écran propose de le créer
+        var numerotation = new NumerotationFactures(type, contexte.GereEnseignes, enseigne);
         var f = SaisieFacture.Appliquer(relue, s, p, controle.Anomalies);
-        var numero = await bls.EcrireAsync(u.Societe, u.Profil, new NumerotationFactures(type, contexte.GereEnseignes, enseigne), date, f, ct);
+        var numero = await bls.EcrireAsync(u.Societe, u.Profil, numerotation, date, f, ct);
         if (!editerDefinitif || f.AControler) return new FactureCreee(numero, date, f.AControler, false, null);
         try
         {

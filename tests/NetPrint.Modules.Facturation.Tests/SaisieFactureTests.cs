@@ -130,6 +130,15 @@ public class SaisieFactureRevueTests
     }
 
     [Fact]
+    public void Premier_numero_propose_pour_un_nouveau_compteur()
+    {
+        var date = new DateOnly(2026, 11, 1);
+        Assert.Equal(110001, NumerotationFactures.PremierPropose(date, new NumerotationFactures(2, false, "").Mois(date)));   // mensuelle
+        Assert.Equal(260001, NumerotationFactures.PremierPropose(date, new NumerotationFactures(1, false, "").Mois(date)));   // annuelle
+        Assert.True(new NumerotationFactures(3, true, "1").ParEnseigne);
+    }
+
+    [Fact]
     public void Un_seul_client_facture()
     {
         Assert.Throws<RegleMetierException>(() => GenerationFactures.Regrouper([Bl(), Bl(30) with { Bl = 2 }], P));

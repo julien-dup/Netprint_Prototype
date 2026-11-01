@@ -60,6 +60,10 @@
 </form>
 
 <div class="contenu facturation-auto">
+    @if (compteurAbsent is not null)
+    {
+        <CreationCompteurFactures Absent="compteurAbsent" OnCree="() => compteurAbsent = null" OnFermer="() => compteurAbsent = null" />
+    }
     @if (resultat is null)
     {
         <p class="discret">@(occupe ? "Traitement en cours…" : "Choisissez les BL (n° ou dates d'expédition) et la date des factures, puis lancez la simulation : rien n'est écrit.")</p>
@@ -165,6 +169,7 @@
     private ResultatFacturationAuto? resultat;
     private bool occupe, generee, editerDefinitif, voirEcartes;
     private int? ouverte;
+    private CompteurFacturesAbsentException? compteurAbsent;   // génération refusée faute de compteur : proposé à la création
     private string? simule;   // critères de la dernière simulation réussie : la génération porte sur les mêmes
 
     private bool PeutGenerer => !occupe && !generee && simule is not null && simule == Empreinte() && resultat is { Erreurs.Count: 0, Tronque: false }
@@ -179,14 +184,18 @@
     private string Empreinte() => string.Join("|", C.Enseigne, C.BlDu, C.BlAu, C.ExpedieDu, C.ExpedieAu, C.CompteGeneralDu, C.CompteClientDu,
         C.CompteGeneralAu, C.CompteClientAu, C.DateFacture, C.Frequence);
 
-    private void Modifie() { if (generee) generee = false; }
+    private void Modifie()
+    {
+        if (generee) generee = false;
+        compteurAbsent = null;   // proposé pour d'autres critères (date)
+    }
 
     private string Err(string champ) => resultat?.Erreurs.Any(e => e.Champ == champ) == true ? "en-erreur" : "";
 
     private async Task SimulerAsync()
     {
         if (occupe) return;
-        (occupe, generee, ouverte, voirEcartes, simule) = (true, false, null, false, null);
+        (occupe, generee, ouverte, voirEcartes, simule, compteurAbsent) = (true, false, null, false, null, null);
         try
         {
             resultat = await Facturation.SimulerAsync(C);
@@ -215,6 +224,7 @@
             if (resultat.Factures.Any(f => f.Refus is not null || f.Avertissement is not null))
                 Notifications.Erreur("Des factures n'ont pas pu être créées ou éditées : voir la colonne Observation.");
         }
+        catch (CompteurFacturesAbsentException ex) { compteurAbsent = ex; }
         catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
         catch (Exception ex) { Notifications.Erreur($"Génération impossible : {ex.Message}"); }
         finally { occupe = false; }

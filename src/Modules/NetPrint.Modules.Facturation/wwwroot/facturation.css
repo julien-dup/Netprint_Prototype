@@ -52,3 +52,5 @@
 .grille-saisie-lignes tr.ligne-texte input.designation { font-style: italic; }
 .boutons-lignes { display: flex; gap: 8px; }
 .resultat-saisie .boutons-criteres { display: flex; gap: 8px; }
+.compteur-absent { border-color: var(--orange, #d97706); background: var(--jaune-clair); }
+.compteur-absent .ligne-champs { display: flex; align-items: flex-end; gap: 10px; }

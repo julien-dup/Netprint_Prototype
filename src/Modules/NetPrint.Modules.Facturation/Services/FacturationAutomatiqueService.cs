@@ -59,6 +59,8 @@ internal sealed class FacturationAutomatiqueService(FacturationAutoDb2 donnees, 
         {
             if (tronque || ResultatFacturationAuto.Empreindre(factures) != empreinte)
                 throw new RegleMetierException("Les factures à créer ne sont plus celles de la simulation (BL, prix ou clients modifiés entre-temps) : relancez la simulation.");
+            // Compteur du mois (ou de l'année) absent : signalé avant de commencer, l'écran propose de le créer
+            if (prevues.Count > 0 && !await donnees.CompteurExisteAsync(u.Societe, numerotation, date, ct)) throw numerotation.CompteurAbsent(date);
             // Une facture après l'autre : une erreur (règle ou base) n'arrête pas les suivantes
             for (var i = 0; i < prevues.Count; i++)
             {
@@ -70,7 +72,7 @@ internal sealed class FacturationAutomatiqueService(FacturationAutoDb2 donnees, 
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    factures[i] = factures[i] with { Refus = ex is RegleMetierException ? ex.Message : $"Erreur : {ex.Message}" };
+                    factures[i] = factures[i] with { Refus = ex is RegleMetierException or CompteurFacturesAbsentException ? ex.Message : $"Erreur : {ex.Message}" };
                     continue;
                 }
                 if (!editerDefinitif || f.AControler) continue;

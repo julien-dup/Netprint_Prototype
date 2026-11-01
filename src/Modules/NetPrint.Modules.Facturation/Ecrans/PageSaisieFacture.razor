@@ -58,6 +58,10 @@
 }
 
 <div class="contenu facturation-auto">
+    @if (compteurAbsent is not null)
+    {
+        <CreationCompteurFactures Absent="compteurAbsent" OnCree="() => compteurAbsent = null" OnFermer="() => compteurAbsent = null" />
+    }
     @if (creee is { } c)
     {
         <section class="carte resultat-saisie">
@@ -133,7 +137,7 @@
         <section class="carte en-tete-saisie">
             <h3>@(f.Avoir ? "Avoir" : "Facture") pour @f.CompteGeneral @f.CompteClient <span class="discret">@f.NomClient</span></h3>
             <div class="grille-champs">
-                <label class="champ"><span>Date</span><input type="date" class="@Err(nameof(f.Date))" @bind="f.Date" @bind:after="Recalculer" /></label>
+                <label class="champ"><span>Date</span><input type="date" class="@Err(nameof(f.Date))" @bind="f.Date" @bind:after="ChangerDate" /></label>
                 <div class="champ">
                     <span>Client facturé (si autre)</span>
                     <div class="ligne-champs">
@@ -249,6 +253,7 @@
     private ControleFactureSaisie? controle;
     private FactureCreee? creee;
     private bool occupe, editerDefinitif;
+    private CompteurFacturesAbsentException? compteurAbsent;   // création refusée faute de compteur : proposé à la création
 
     private static IReadOnlyList<int> Delais => SaisieFacture.Delais;
 
@@ -320,6 +325,12 @@
         finally { occupe = false; }
     }
 
+    private void ChangerDate()
+    {
+        compteurAbsent = null;   // proposé pour une autre date
+        Recalculer();
+    }
+
     private void Recalculer()
     {
         if (facture is not null) controle = Saisie.Recalculer(facture);
@@ -371,6 +382,7 @@
             creee = await Saisie.CreerAsync(f, editerDefinitif);
             Notifications.Succes($"{(f.Avoir ? "Avoir" : "Facture")} {creee.Numero} créé{(f.Avoir ? "" : "e")}.");
         }
+        catch (CompteurFacturesAbsentException ex) { compteurAbsent = ex; }
         catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
         catch (Exception ex) { Notifications.Erreur($"Création impossible : {ex.Message}"); }
         finally { occupe = false; }
