@@ -1,0 +1,154 @@
+@page "/facturation/factures/{Numero:int}/{Jour}"
+@* =====================================================================
+   Fiche d'une facture ou d'un avoir (ConsultationFactures, tables des éléments et des lignes) : en-tête, totaux, envoi,
+   éléments (commandes) et leurs lignes, textes rattachés à la ligne qui les précède, liens vers la commande et le BL.
+   ===================================================================== *@
+@using System.Globalization
+@inject IConsultationFactures Factures
+@inject NavigationManager Navigation
+
+<PageTitle>Facture @Numero · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo("facturation/factures")'>← Liste des factures</button>
+</fieldset>
+
+<div class="contenu contenu-detail fiche-facture">
+    @if (fiche is null)
+    {
+        <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreur ?? "Cette facture n'existe pas ou ne vous est pas accessible.")</p>
+    }
+    else
+    {
+        var f = fiche.Facture;
+        <section class="carte">
+            <div class="titre-fiche">
+                <span class="type-fiche">@(f.Avoir ? "AVOIR" : "FACTURE")</span> <b class="numero-fiche">@f.Numero</b>
+                <span>du @f.Date.ToString("dd/MM/yyyy")</span>
+                <span class="badge">@f.Statut</span>
+                @if (f.Envoi != "") {<span class="badge">@f.Envoi</span>}
+            </div>
+            <div class="cartes-info">
+                <div class="info">
+                    <h3>Facturé à</h3>
+                    <p><b>@($"{fiche.FormeJuridique} {f.NomFacture}".Trim())</b> <span class="discret">@f.CompteGeneralFacture @f.CompteClientFacture</span></p>
+                    @foreach (var l in new[] { fiche.Rue1, fiche.Rue2, $"{fiche.CodePostal} {f.Ville}".Trim() }.Where(x => x != "")) {<p>@l</p>}
+                    @if (fiche.AlAttention != "") {<p class="discret">À l'attention de @fiche.AlAttention</p>}
+                    @if (fiche.TvaIntracom != "") {<p class="discret">TVA intracommunautaire @fiche.TvaIntracom</p>}
+                </div>
+                <div class="info">
+                    <h3>Donneur d'ordre</h3>
+                    <p><b>@f.NomClient</b> <span class="discret">@f.CompteGeneral @f.CompteClient</span></p>
+                    @if (fiche.ReferenceFacture != "") {<p>Référence : @fiche.ReferenceFacture</p>}
+                    @if (f.Representant > 0) {<p class="discret">Représentant @f.Representant</p>}
+                    @if (f.Enseigne != "") {<p class="discret">Enseigne @f.Enseigne</p>}
+                </div>
+                <div class="info">
+                    <h3>Montants</h3>
+                    <table class="tableau-montants">
+                        <tbody>
+                            <tr><td>HT</td><td class="nombre">@E(f.Ht)</td></tr>
+                            @if (f.Port != 0) {<tr><td>Port</td><td class="nombre">@E(f.Port)</td></tr>}
+                            @if (f.Escompte != 0) {<tr><td>Escompte (déduit)</td><td class="nombre">@E(f.Escompte)</td></tr>}
+                            <tr><td>TVA</td><td class="nombre">@E(f.Tva)</td></tr>
+                            <tr><td><b>TTC</b></td><td class="nombre"><b>@E(f.Ttc)</b></td></tr>
+                            @if (f.Acompte != 0) {<tr><td class="discret">dont acompte versé</td><td class="nombre discret">@E(f.Acompte)</td></tr>}
+                        </tbody>
+                    </table>
+                    @if (f.Statut == StatutsFacture.AEditer) {<p class="discret">TVA et totaux calculés à l'édition définitive.</p>}
+                </div>
+                <div class="info">
+                    <h3>Règlement</h3>
+                    @if (fiche.ModeReglement != "") {<p>Mode @fiche.ModeReglement</p>}
+                    @if (f.Echeance is { } e) {<p>Échéance le <b>@e.ToString("dd/MM/yyyy")</b></p>}
+                </div>
+            </div>
+        </section>
+
+        @if (fiche.Lignes.Any(l => fiche.Elements.All(el => el.Numero != l.Element)))
+        {
+            <p class="avertissement-saisie">Des lignes de cette facture ne sont rattachées à aucun élément : elles sont listées à la fin.</p>
+        }
+        @foreach (var el in fiche.Elements.Append(new ElementFacture(-1, 0, "", "", null, "", "", 0)))
+        {
+            var orphelines = el.Numero == -1;
+            if (orphelines && fiche.Lignes.All(l => fiche.Elements.Any(x => x.Numero == l.Element))) continue;
+            var lignes = orphelines ? fiche.Lignes.Where(l => fiche.Elements.All(x => x.Numero != l.Element)).ToList()
+                : fiche.Lignes.Where(l => l.Element == el.Numero).ToList();
+            <section class="carte element-bl">
+                <div class="titre-element">
+                    @if (el.Dossier > 0)
+                    {
+                        <a href="@($"ventes/commandes/{el.Dossier}/{el.Cle}")" title="Ouvrir la commande">Commande @el.Dossier/@el.Cle</a>
+                        @if (el.ReferenceCommande != "") {<span class="discret">réf. @el.ReferenceCommande</span>}
+                        @if (el.DateCommande is { } dc) {<span class="discret">du @dc.ToString("dd/MM/yyyy")</span>}
+                        @if (el.RefImprime != "") {<span class="discret">réf. imp. @el.RefImprime</span>}
+                    }
+                    else if (orphelines)
+                    {
+                        <span>Lignes sans élément</span>
+                    }
+                    else
+                    {
+                        <span>Élément @el.Numero</span>@if (el.Categorie != "") {<span class="discret">catégorie @el.Categorie</span>}
+                    }
+                    <span class="espace"></span>
+                    <b>@E(lignes.Sum(l => l.Montant))</b>
+                </div>
+                <table class="grille grille-fiche">
+                    <thead><tr><th>Article</th><th>Désignation</th><th class="nombre">Quantité</th><th class="nombre">PU</th><th>Unité</th><th class="nombre">Montant</th>
+                        <th>BL</th><th>Livré le</th><th>Appel</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in lignes)
+                        {
+                            <tr>
+                                <td><b>@l.Article</b>@if (l.Indice != "") {<span class="discret"> @l.Indice</span>}@if (l.RefImprime != "") {<div class="discret">@l.RefImprime</div>}</td>
+                                <td>@l.Designation@foreach (var t in l.Textes) {<div class="discret">@t</div>}</td>
+                                <td class="nombre">@(l.Quantite != 0 ? l.Quantite.ToString("#,##0.###") : "")</td>
+                                <td class="nombre">@(l.PrixUnitaire != 0 ? l.PrixUnitaire.ToString("#,##0.00##") : "")</td>
+                                <td>@l.Unite</td>
+                                <td class="nombre">@(l.Montant != 0 ? l.Montant.ToString("#,##0.00") : "")</td>
+                                <td>@if (l.Bl > 0) {<a href="@($"logistique/bl/{l.Bl}")">@l.Bl</a>}</td>
+                                <td>@l.DateLivraison?.ToString("dd/MM/yyyy")</td>
+                                <td>@l.Appel</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+    [Parameter] public string Jour { get; set; } = "";
+
+    private FicheFacture? fiche;
+    private string? erreur;
+    private bool occupe;
+
+    private int lecture;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        (fiche, erreur, occupe) = (null, null, true);
+        var celleCi = ++lecture;   // une lecture plus ancienne, finie après, n'écrase pas celle-ci
+        try
+        {
+            if (!DateOnly.TryParseExact(Jour, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                erreur = "Date de facture invalide.";
+            else
+            {
+                var lue = await Factures.LireAsync(Numero, date);
+                if (celleCi == lecture) fiche = lue;
+            }
+        }
+        catch (RegleMetierException ex) { erreur = ex.Message; }
+        catch (Exception ex) { erreur = $"Lecture de la facture impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private static string E(decimal v) => $"{v:#,##0.00} €";
+}

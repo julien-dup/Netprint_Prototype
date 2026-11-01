@@ -1,4 +1,5 @@
 using System.Globalization;
+using NetPrint.Modules.Facturation;
 using NetPrint.Modules.Logistique;
 using NetPrint.Modules.Production;
 using NetPrint.Modules.Ventes;
@@ -27,6 +28,7 @@ builder.Services.AddNoyau();
 builder.Services.AddModuleVentes();
 builder.Services.AddModuleProduction();
 builder.Services.AddModuleLogistique();
+builder.Services.AddModuleFacturation();
 
 var app = builder.Build();
 
@@ -50,6 +52,7 @@ app.MapEndpointsCompte();
 // API des modules : une ligne par module
 app.MapModuleVentes();
 app.MapModuleLogistique();
+app.MapModuleFacturation();
 
 // Écrans : ceux de NetPrint.Web + ceux de chaque module (trouvés via leur DescriptionModule)
 var assemblagesModules = app.Services.GetServices<DescriptionModule>()

@@ -1,0 +1,169 @@
+@page "/facturation/factures"
+@* =====================================================================
+   Consultation des factures (WinDev ConsultationFactures, FAC080S) : critères combinables, une ligne par facture ou avoir,
+   les plus récentes d'abord, montants des avoirs en négatif. Rien n'est chargé à l'ouverture.
+   ===================================================================== *@
+@using NetPrint.Modules.Facturation.Ecrans
+@inject IConsultationFactures Factures
+@inject EtatListeFactures Etat
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Factures · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <span class="espace"></span>
+    <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche de la facture (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir la facture</button>
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="RechercherAsync">
+    <label class="champ"><span>N° facture</span><input type="number" class="num6" @bind="C.Numero" /></label>
+    <div class="champ">
+        <span>Client facturé</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneralFacture" />
+            <input type="number" class="num7" title="Compte client" @bind="C.CompteClientFacture" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher le client facturé" OnChoix="l => ChoisirClient(l, true)" />
+        </div>
+    </div>
+    <div class="champ">
+        <span>Donneur d'ordre</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
+            <input type="number" class="num7" title="Compte client" @bind="C.CompteClient" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher le donneur d'ordre" OnChoix="l => ChoisirClient(l, false)" />
+        </div>
+    </div>
+    <div class="champ">
+        <span>Commande</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" @bind="C.Commande" />
+            <input class="code" maxlength="1" title="Clé" @bind="C.Cle" />
+        </div>
+    </div>
+    <label class="champ"><span>Réf. commande</span><input maxlength="30" @bind="C.ReferenceCommande" /></label>
+    <label class="champ"><span>N° BL</span><input type="number" class="num6" @bind="C.Bl" /></label>
+    <div class="champ">
+        <span>Article</span>
+        <div class="ligne-champs">
+            <input maxlength="15" @bind="C.Article" />
+            <input class="code" maxlength="2" title="Indice" @bind="C.Indice" />
+        </div>
+    </div>
+    <label class="champ"><span>Représentant</span><input type="number" class="num3" @bind="C.Representant" /></label>
+    <label class="champ"><span>Facturée du</span><input type="date" @bind="C.Du" /></label>
+    <label class="champ"><span>au</span><input type="date" @bind="C.Au" /></label>
+    <label class="champ"><span>Échéance du</span><input type="date" @bind="C.EcheanceDu" /></label>
+    <label class="champ"><span>au</span><input type="date" @bind="C.EcheanceAu" /></label>
+    <label class="champ"><span>HT de</span><input type="number" class="num7" step="0.01" @bind="C.MontantHtDe" /></label>
+    <label class="champ"><span>à</span><input type="number" class="num7" step="0.01" @bind="C.MontantHtA" /></label>
+    <label class="champ champ-case"><input type="checkbox" @bind="C.AvoirsSeulement" /><span>Avoirs seulement</span></label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@chargement">🔍 Rechercher</button>
+        <button type="button" class="bouton-gomme" title="Réinitialiser tous les critères" @onclick="Effacer"><img src="gomme.png" alt="" /> Effacer</button>
+    </div>
+</form>
+
+<div class="contenu">
+    <section class="zone-liste">
+        <div class="ligne-infos">
+            <p class="compteur">
+                @if (Etat.Resultat is not { } r)
+                {
+                    <span>Saisissez au moins un critère puis cliquez sur Rechercher.</span>
+                }
+                else
+                {
+                    <strong>@r.Lignes.Count.ToString("N0")</strong><span> facture@(r.Lignes.Count > 1 ? "s" : "")</span>
+                    <span class="separateur-compteur">·</span>
+                    <span>HT @r.Lignes.Sum(f => f.Ht).ToString("#,##0.00") € · TTC @r.Lignes.Sum(f => f.Ttc).ToString("#,##0.00") €</span>
+                    @if (r.Tronque) {<span class="avertissement"> (seules les @LimitesRecherche.Maximum.ToString("N0") plus récentes sont chargées : affinez la recherche)</span>}
+                }
+                @if (chargement) {<span class="chargement"> Chargement…</span>}
+            </p>
+        </div>
+        @if (Etat.Resultat is { Lignes.Count: > 0 })
+        {
+            <div class="zone-defilement-liste">
+                <table class="grille grille-factures">
+                    <thead>
+                        <tr><th class="nombre">N°</th><th>Date</th><th>Client facturé</th><th>Donneur d'ordre</th><th>Échéance</th>
+                            <th class="nombre">HT</th><th class="nombre">TVA</th><th class="nombre">TTC</th><th>Statut</th><th>Envoi</th><th class="nombre">Rep.</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var f in Etat.Resultat.Lignes)
+                        {
+                            <tr class="@(f.Cle == Etat.Selection ? "selection" : "") @(f.Avoir ? "avoir" : "")" @onclick="() => Etat.Selection = f.Cle" @ondblclick="() => Ouvrir(f)">
+                                <td class="nombre"><b>@f.Numero</b>@if (f.Avoir) {<span class="badge badge-bl-r">avoir</span>}</td>
+                                <td>@f.Date.ToString("dd/MM/yyyy")</td>
+                                <td title="@($"{f.CompteGeneralFacture} {f.CompteClientFacture}")">@f.NomFacture <span class="discret">@f.Ville</span></td>
+                                <td title="@($"{f.CompteGeneral} {f.CompteClient}")">@(f.CompteClient == f.CompteClientFacture && f.CompteGeneral == f.CompteGeneralFacture ? "" : f.NomClient)</td>
+                                <td>@f.Echeance?.ToString("dd/MM/yyyy")</td>
+                                <td class="nombre">@f.Ht.ToString("#,##0.00")</td>
+                                <td class="nombre">@f.Tva.ToString("#,##0.00")</td>
+                                <td class="nombre"><b>@f.Ttc.ToString("#,##0.00")</b></td>
+                                <td><span class="badge @Badge(f.Statut)">@f.Statut</span></td>
+                                <td class="discret">@f.Envoi</td>
+                                <td class="nombre">@(f.Representant > 0 ? f.Representant.ToString() : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private CriteresFactures C => Etat.Criteres;
+    private bool chargement;
+
+    private FactureListe? Selection => Etat.Resultat?.Lignes.FirstOrDefault(f => f.Cle == Etat.Selection);
+
+    private static string Badge(string statut) => statut switch
+    {
+        StatutsFacture.AEditer => "badge-bl-v", StatutsFacture.Comptabilisee => "badge-bl-c", StatutsFacture.Attente => "badge-bl-d", _ => "",
+    };
+
+    private async Task RechercherAsync()
+    {
+        if (chargement) return;
+        if (C.Numero is not > 0 && C.CompteGeneralFacture is not > 0 && C.CompteClientFacture is not > 0 && C.CompteGeneral is not > 0
+            && C.CompteClient is not > 0 && C.Commande is not > 0 && string.IsNullOrWhiteSpace(C.ReferenceCommande) && C.Bl is not > 0
+            && string.IsNullOrWhiteSpace(C.Article) && C.Representant is not > 0 && C.Du is null && C.Au is null && C.EcheanceDu is null
+            && C.EcheanceAu is null && C.MontantHtDe is null && C.MontantHtA is null && !C.AvoirsSeulement
+            && !await Dialogues.ConfirmerAsync("Rechercher toutes les factures de la société (les plus récentes d'abord) ?", "Recherche sans critère", "Rechercher"))
+            return;
+        chargement = true;
+        try
+        {
+            Etat.Resultat = await Factures.RechercherAsync(C);
+            Etat.Selection = null;
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Recherche impossible : {ex.Message}"); }
+        finally { chargement = false; }
+    }
+
+    private void Effacer()
+    {
+        Etat.Criteres = new();
+        Etat.Resultat = null;
+        Etat.Selection = null;
+    }
+
+    private void ChoisirClient(LigneChoix l, bool facture)
+    {
+        if (l.Codes.Count < 2) return;
+        var (g, a) = (int.TryParse(l.Codes[0], out var x) ? x : (int?)null, int.TryParse(l.Codes[1], out var y) ? y : (int?)null);
+        if (facture) (C.CompteGeneralFacture, C.CompteClientFacture) = (g, a);
+        else (C.CompteGeneral, C.CompteClient) = (g, a);
+    }
+
+    private void Ouvrir(FactureListe? f)
+    {
+        if (f is not null) Navigation.NavigateTo($"facturation/factures/{f.Numero}/{f.Date:yyyyMMdd}");
+    }
+}

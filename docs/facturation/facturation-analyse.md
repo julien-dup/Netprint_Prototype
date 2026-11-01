@@ -70,7 +70,7 @@ flowchart TD
 
 | Étape | Contenu | Remplace |
 |---|---|---|
-| F1 | **Consultation des factures** : critères combinables, vue facture / élément / ligne, statuts d'édition, d'envoi et de règlement (si compta intégrée), pièces jointes FACDOC, représentant limité | ConsultationFactures, FAC080S (liste), FAC525 |
+| F1 (en cours) | **Consultation des factures** (01/11 : module `NetPrint.Modules.Facturation`, menu « 🧾 Factures », liste et fiche) : critères combinables, vue facture / élément / ligne, statuts d'édition, d'envoi et de règlement (si compta intégrée), pièces jointes FACDOC, représentant limité | ConsultationFactures, FAC080S (liste), FAC525 |
 | F2 | **Calcul et édition PDF native** : moteur de calcul (totaux, TVA multi-taux, port, remises, escompte, acompte, échéance) repris de FAC201 / FAC199, mise en page d'après FAC202P5, **PDF archivé à l'émission** puis relu ; édition définitive (marquage des BL, dossiers, commandes, historique) | FAC199, FAC201, FAC202P5, FAC200CLP |
 | F3 | **Saisie manuelle** : création depuis un dossier, un client ou un BL (bouton « Facturer » de la fiche BL), ajout d'élément, modification, copie, suppression | FAC085, FAC150, FAC160, option FA d'EXP010S |
 | F4 | **Avoirs** depuis une facture (total, partiel sur plusieurs BL), avec libération explicite des BL | FAC080S option SA |
