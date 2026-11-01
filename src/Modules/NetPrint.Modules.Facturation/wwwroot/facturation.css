@@ -28,3 +28,15 @@
 .texte-pied { white-space: pre-line; margin: 0; }
 .grille-factures tr.avoir td { color: var(--danger); }
 .nombre { text-align: right; }
+
+/* Facturation automatique */
+.contenu.facturation-auto { display: flex; flex-direction: column; justify-content: flex-start; align-content: start; gap: 10px; min-height: 0; }
+.contenu.facturation-auto > * { flex: none; }
+.contenu.facturation-auto > .zone-defilement-liste { flex: 1 1 auto; }
+.grille-factures tr.refusee td { background: var(--danger-clair); }
+.grille-factures tr.selectionnee td { background: var(--accent-clair, #eef2ff); }
+.grille-factures tr { cursor: pointer; }
+.detail-facture-auto > td { background: var(--surface-2, #f8fafc); padding: 8px 16px; white-space: normal; cursor: default; }
+.detail-facture-auto .grille-fiche { margin: 4px 0 10px; }
+.erreurs-saisie { color: var(--danger); }
+.contenu.facturation-auto .carte .zone-defilement-liste { max-height: 30vh; }

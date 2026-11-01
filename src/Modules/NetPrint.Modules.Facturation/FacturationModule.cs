@@ -26,6 +26,17 @@ public static class FacturationModule
             Assemblage: typeof(FacturationModule).Assembly,
             Description: "Consultation des factures et avoirs : critères combinables, éléments et lignes. À venir : édition, saisie, facturation automatique, envoi."));
 
+        services.AddSingleton(new DescriptionModule(
+            Code: "FACTURATION-AUTO",
+            Nom: "Facturation automatique",
+            Url: "/facturation/automatique",
+            Icone: "⚙",
+            Ordre: 9,
+            Assemblage: typeof(FacturationModule).Assembly,
+            Description: "Factures et avoirs des BL facturables selon le mode de facturation des clients (FAC400) : simulation, puis génération."));
+
+        services.AddScoped<FacturationAutoDb2>();
+        services.AddScoped<IFacturationAutomatique, FacturationAutomatiqueService>();   // FAC400 → FAC402P, provisoire FAC412
         services.AddScoped<ConsultationFacturesDb2>();
         services.AddScoped<IConsultationFactures, ConsultationFacturesService>();   // ConsultationFactures, FAC080S en lecture
         services.AddScoped<Ecrans.EtatListeFactures>();
