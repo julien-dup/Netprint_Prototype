@@ -52,7 +52,7 @@ internal sealed class LivraisonOprService(OprDb2 donnees, SaisieBlDb2 bl, IUtili
         foreach (var typeStock in source.Lignes.Values.Where(l => l.TypeStock != "").Select(l => l.TypeStock).Distinct())
         {
             var (periode, _) = await bl.TypeStockAsync(u.Societe, typeStock, ct);
-            if (periode is { } debut && (g.Date < debut || g.Date > debut.AddMonths(2).AddDays(-1)))
+            if (ReglesStock.HorsPeriode(g.Date, periode) is { } debut)
                 erreurs.Add($"La date est hors de la période de stock {typeStock} ({debut:MM/yyyy} et mois suivant).");
             if (await bl.InventaireEnCoursAsync(u.Societe, typeStock, g.Date, ct)) erreurs.Add("Création de BL impossible, inventaire en cours.");
         }

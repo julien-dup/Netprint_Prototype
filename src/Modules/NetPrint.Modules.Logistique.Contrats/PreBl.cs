@@ -14,7 +14,13 @@ public interface IPreBl
     Task<DroitsOpr> DroitsAsync(CancellationToken ct = default);
     Task<ResultatRecherche<ElementPreBl>> RechercherAsync(CriteresPreBl criteres, CancellationToken ct = default);
     Task<FichePreBl?> LireAsync(int numero, CancellationToken ct = default);
+
+    // Transformation en BL (EXP540) : BL du même n°, daté du départ prévu ; droit de modification des OPR
+    Task<TransformationPreBl> TransformerAsync(int numero, CancellationToken ct = default);
 }
+
+// Avertissements : lignes livrées pour une autre quantité que prévu (le BL livre les palettes pointées)
+public sealed record TransformationPreBl(int NumeroBl, IReadOnlyList<string> Avertissements);
 
 public static class EtatsPreBl
 {

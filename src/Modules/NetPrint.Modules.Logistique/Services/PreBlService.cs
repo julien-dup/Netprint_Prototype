@@ -33,7 +33,6 @@ internal static class ReglesPreBl
         if (f.Lignes.FirstOrDefault(l => !l.Frais && !l.Lots.Any(x => x.PalettesSscc.Count > 0)) is { } sansPalette)
             return $"Ligne {sansPalette.Numero} ({sansPalette.Article}) : aucune palette.";
         var palettes = f.Lignes.SelectMany(l => l.Lots).SelectMany(l => l.PalettesSscc).ToList();
-        if (palettes.Count == 0) return "Aucune palette n'est rattachée au pré-BL.";
         var nonPointees = palettes.Count(p => !p.Pointee);
         if (nonPointees > 0) return $"{nonPointees} palette{(nonPointees > 1 ? "s ne sont pas pointées" : " n'est pas pointée")} en préparation.";
         var picking = palettes.Count(p => p.Picking);
@@ -42,7 +41,7 @@ internal static class ReglesPreBl
     }
 }
 
-internal sealed class PreBlService(PreBlDb2 donnees, OprDb2 opr, IUtilisateurCourant utilisateur) : IPreBl
+internal sealed class PreBlService(PreBlDb2 donnees, OprDb2 opr, SaisieBlDb2 bl, IUtilisateurCourant utilisateur) : IPreBl
 {
     public async Task<DroitsOpr> DroitsAsync(CancellationToken ct = default)
     {
@@ -62,11 +61,36 @@ internal sealed class PreBlService(PreBlDb2 donnees, OprDb2 opr, IUtilisateurCou
         return await donnees.LireAsync(u.Societe, numero, await opr.RepresentantImposeAsync(u.Societe, u.Profil, ct), ct);
     }
 
-    private async Task<UtilisateurConnecte> AccesAsync(CancellationToken ct)
+    // Contrôles de la fiche (palettes pointées…), date dans la période de stock ouverte (mois ouvert et suivant), pas
+    // d'inventaire en cours ; puis transformation sous verrou, qui revérifie tout
+    public async Task<TransformationPreBl> TransformerAsync(int numero, CancellationToken ct = default)
+    {
+        var u = await AccesAsync(ct, modifier: true);
+        var fiche = await donnees.LireAsync(u.Societe, numero, await opr.RepresentantImposeAsync(u.Societe, u.Profil, ct), ct)
+                    ?? throw new RegleMetierException($"Le pré-BL {numero} n'existe pas ou ne vous est pas accessible.");
+        if (fiche.Refus != "") throw new RegleMetierException(fiche.Refus);
+        var date = fiche.DateDepart ?? throw new RegleMetierException("Le pré-BL n'a pas de date de départ.");
+        var parametres = await bl.ParametresAsync(u.Societe, ct);
+        var erreurs = new List<string>();
+        foreach (var typeStock in (await bl.TypesArticlesPreBlAsync(u.Societe, numero, ct))
+                     .Select(t => parametres.TypeStockArticle(t.TypeArticle, t.TypeFacturation)).Where(t => t != "").Distinct())
+        {
+            var (periode, _) = await bl.TypeStockAsync(u.Societe, typeStock, ct);
+            if (ReglesStock.HorsPeriode(date, periode) is { } debut)
+                erreurs.Add($"La date de départ du {date:dd/MM/yyyy} est hors de la période de stock {typeStock} ({debut:MM/yyyy} et mois suivant).");
+            if (await bl.InventaireEnCoursAsync(u.Societe, typeStock, date, ct)) erreurs.Add("Transformation impossible, inventaire en cours.");
+        }
+        if (erreurs.Count > 0) throw new RegleMetierException(string.Join("\n", erreurs.Distinct()));
+        var avertissements = await bl.TransformerPreBlAsync(u.Societe, u.Profil, numero, parametres, date, ct);
+        return new TransformationPreBl(numero, avertissements);
+    }
+
+    private async Task<UtilisateurConnecte> AccesAsync(CancellationToken ct, bool modifier = false)
     {
         var u = await utilisateur.ExigerAsync();
-        if (!ReglesOpr.Droits(await opr.OptionsProgrammeAsync(ReglesOpr.Programme, u.Profil, ct)).Acces)
-            throw new RegleMetierException("Vous n'êtes pas autorisé à la gestion des pré-BL (droits des OPR).");
+        var droits = ReglesOpr.Droits(await opr.OptionsProgrammeAsync(ReglesOpr.Programme, u.Profil, ct));
+        if (!droits.Acces) throw new RegleMetierException("Vous n'êtes pas autorisé à la gestion des pré-BL (droits des OPR).");
+        if (modifier && !droits.Modifier) throw new RegleMetierException("Vous ne pouvez pas transformer les pré-BL en BL (droit de modification des OPR).");
         return u;
     }
 }

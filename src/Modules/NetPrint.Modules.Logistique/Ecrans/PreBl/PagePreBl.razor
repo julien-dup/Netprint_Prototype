@@ -6,6 +6,8 @@
 @using NetPrint.Modules.Logistique.Ecrans
 @inject IPreBl PreBls
 @inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
 
 <PageTitle>Pré-BL @Numero · NetPrint</PageTitle>
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
@@ -15,6 +17,13 @@
     @if (fiche?.Etat == EtatsPreBl.Livre)
     {
         <button title="Le BL porte le numéro du pré-BL" @onclick='() => Navigation.NavigateTo($"logistique/bl/{Numero}")'>🚚 Voir le BL @Numero</button>
+    }
+    else if (fiche is not null)
+    {
+        <span class="espace"></span>
+        <button class="bouton-principal" disabled="@(fiche.Refus != "" || !droits.Modifier || occupe)"
+                title="@(fiche.Refus != "" ? fiche.Refus : droits.Modifier ? "Créer le BL du même numéro : sortie du stock, palettes expédiées, commande mise à jour" : "Droit de modification des OPR nécessaire")"
+                @onclick="TransformerAsync">🚚 Transformer en BL</button>
     }
 </fieldset>
 
@@ -149,15 +158,42 @@
         { ["F"] = "franco", ["D"] = "dû", ["A"] = "avancé", ["E"] = "enlèvement", ["P"] = "payé" };
 
     private FichePreBl? fiche;
+    private DroitsOpr droits = new(true, false, false, false);
     private string? erreur;
     private bool occupe;
 
     protected override async Task OnParametersSetAsync()
     {
         (fiche, erreur, occupe) = (null, null, true);
-        try { fiche = await PreBls.LireAsync(Numero); }
+        try
+        {
+            droits = await PreBls.DroitsAsync();
+            fiche = await PreBls.LireAsync(Numero);
+        }
         catch (RegleMetierException ex) { erreur = ex.Message; }
         catch (Exception ex) { erreur = $"Lecture du pré-BL impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private async Task TransformerAsync()
+    {
+        if (fiche is null) return;
+        if (!await Dialogues.ConfirmerAsync($"Transformer le pré-BL {Numero} en BL ?\nLe BL {Numero} est créé au {fiche.DateDepart:dd/MM/yyyy}, les palettes sortent du stock.",
+                "Transformation en BL", "Transformer")) return;
+        occupe = true;
+        try
+        {
+            var r = await PreBls.TransformerAsync(Numero);
+            foreach (var a in r.Avertissements) Notifications.Info(a);
+            Notifications.Succes($"BL {r.NumeroBl} créé.");
+            Navigation.NavigateTo($"logistique/bl/{r.NumeroBl}");
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+            await OnParametersSetAsync();   // situation relue (pré-BL transformé ou palette changée entre-temps)
+        }
+        catch (Exception ex) { Notifications.Erreur($"Transformation impossible : {ex.Message}"); }
         finally { occupe = false; }
     }
 

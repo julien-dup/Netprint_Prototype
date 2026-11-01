@@ -33,6 +33,8 @@ public class PreBlTests(ITestOutputHelper sortie)
         Assert.Contains("2 palettes ne sont pas pointées", ReglesPreBl.RefusTransformation(Fiche(EtatsPreBl.EnPreparation, P(""), P("2"))));
         Assert.Contains("picking", ReglesPreBl.RefusTransformation(Fiche(EtatsPreBl.EnPreparation, P("4"), P("4", picking: true))));
         Assert.Contains("aucune ligne", ReglesPreBl.RefusTransformation(Fiche(EtatsPreBl.APreparer) with { Lignes = [] }));
+        var frais = Fiche(EtatsPreBl.APreparer);
+        Assert.Equal("", ReglesPreBl.RefusTransformation(frais with { Lignes = [frais.Lignes[0] with { Frais = true, Lots = [] }] }));   // frais seuls
 
         Assert.Contains("1 palette n'est pas pointée", ReglesPreBl.RefusTransformation(Fiche(EtatsPreBl.EnPreparation, P("4"), P("5"))));
         var f = Fiche(EtatsPreBl.EnPreparation, P("4"));
@@ -56,7 +58,7 @@ public class PreBlTests(ITestOutputHelper sortie)
     }
 
     private static PreBlService Service() =>
-        new(new PreBlDb2(BaseDeTest.Configuration), new OprDb2(BaseDeTest.Configuration), new Utilisateur());
+        new(new PreBlDb2(BaseDeTest.Configuration), new OprDb2(BaseDeTest.Configuration), new SaisieBlDb2(BaseDeTest.Configuration), new Utilisateur());
 
     [FactDb2]
     public async Task Liste_des_pre_bl_du_client()

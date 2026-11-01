@@ -169,7 +169,7 @@ internal sealed partial class SaisieBlDb2
                         // Produit fini : quantité livrée du dossier (comme la saisie des BL ; la suppression du BL la diminue)
                         await Executer(cnx, tx, "UPDATE {b}.AB001 SET CCQTEL = CCQTEL + ? WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ? AND CCTYPC = '4'", ct,
                             el.Lignes.Sum(li => li.Quantite), societe, el.Dossier, el.Cle);
-                        await SolderCommandeSiToutLivreAsync(cnx, tx, societe, profil, c, ct);
+                        await SolderCommandeSiToutLivreAsync(cnx, tx, societe, profil, c.Dossier, c.Cle, c.CompteGeneral, c.CompteClient, ct);
                     }
                     // Texte de pied du client (CLITXB)
                     for (var i = 0; i < source.TextePied.Count; i++)
@@ -234,27 +234,34 @@ internal sealed partial class SaisieBlDb2
     }
 
     // Stock : chaque lot sort du dépôt de sa palette (transfert puis sortie, ou sortie directe au dépôt principal)
-    private async Task ControlerStockOprAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, SourceBlOpr source, DateOnly date, CancellationToken ct)
+    private Task ControlerStockOprAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, SourceBlOpr source, DateOnly date, CancellationToken ct) =>
+        ControlerSortiesPalettesAsync(cnx, tx, societe, source.DepotPrincipal, date,
+            [.. source.Palettes.Where(p => !p.Frais).Select(p => (source.Lignes[(p.Dossier, p.Cle, p.LigneCommande)].TypeStock, p.Depot, p.Article, p.Indice,
+                p.Lot, p.Emplacement, p.Quantite))], ct);
+
+    // Sorties de palettes (OPR, pré-BL) : positions article verrouillées dans un ordre fixe (dépôt des palettes et dépôt principal),
+    // puis stock contrôlé par lot (et par emplacement si le type de stock est géré par emplacement) sur toute la chronologie
+    private async Task ControlerSortiesPalettesAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, int depotPrincipal, DateOnly date,
+        IReadOnlyList<(string TypeStock, int Depot, string Article, string Indice, string Lot, string Emplacement, int Quantite)> sorties, CancellationToken ct)
     {
-        var lots = source.Palettes.Where(p => !p.Frais)
-            .Select(p => (Type: source.Lignes[(p.Dossier, p.Cle, p.LigneCommande)].TypeStock, p.Depot, p.Article, p.Indice, p.Lot, p.Emplacement, p.Quantite))
-            .GroupBy(x => (x.Type, x.Depot, x.Article, x.Indice, x.Lot, x.Emplacement)).ToList();
-        foreach (var (typeStock, depot, article, indice) in lots.Select(x => (x.Key.Type, x.Key.Depot, x.Key.Article, x.Key.Indice))
-                     .Concat(lots.Select(x => (x.Key.Type, source.DepotPrincipal, x.Key.Article, x.Key.Indice))).Distinct()
-                     .OrderBy(x => x.Type, StringComparer.Ordinal).ThenBy(x => x.Item2).ThenBy(x => x.Article, StringComparer.Ordinal))
+        foreach (var (typeStock, depot, article, indice) in sorties.Select(x => (x.TypeStock, x.Depot, x.Article, x.Indice))
+                     .Concat(sorties.Select(x => (x.TypeStock, depotPrincipal, x.Article, x.Indice))).Distinct()
+                     .OrderBy(x => x.TypeStock, StringComparer.Ordinal).ThenBy(x => x.Item2).ThenBy(x => x.Article, StringComparer.Ordinal)
+                     .ThenBy(x => x.Indice, StringComparer.Ordinal))
             await Executer(cnx, tx, "UPDATE {b}.AK00F SET PRREF = PRREF WHERE RSOC = ? AND PRTSTO = ? AND PRDEP = ? AND PRREF = ? AND PRIND = ?", ct,
                 societe, typeStock, depot, article, indice);
         var parEmplacement = new Dictionary<string, bool>();
-        foreach (var x in lots)
+        foreach (var typeStock in sorties.Select(x => x.TypeStock).Distinct())
         {
-            if (!parEmplacement.TryGetValue(x.Key.Type, out var pe))
-            {
-                await using var ts = await Lire(cnx, tx, "SELECT TSEMP FROM {b}.AG00F WHERE RSOC = ? AND TSTSTO = ?", ct, societe, x.Key.Type);
-                parEmplacement[x.Key.Type] = pe = await ts.ReadAsync(ct) && ts.Texte(0) == "O";
-            }
-            var retour = await ControlerStockAsync(cnx, tx, societe, x.Key.Type, pe, x.Key.Depot, x.Key.Article, x.Key.Indice, x.Key.Lot, x.Key.Emplacement,
-                date, -x.Sum(p => p.Quantite), ct);
-            if (retour != 0) throw new RegleMetierException(MessageStock(x.Key.Article, x.Key.Lot, x.Key.Emplacement, x.Key.Depot, retour));
+            await using var ts = await Lire(cnx, tx, "SELECT TSEMP FROM {b}.AG00F WHERE RSOC = ? AND TSTSTO = ?", ct, societe, typeStock);
+            parEmplacement[typeStock] = await ts.ReadAsync(ct) && ts.Texte(0) == "O";
+        }
+        foreach (var x in sorties.GroupBy(x => (x.TypeStock, x.Depot, x.Article, x.Indice, x.Lot, Emplacement: parEmplacement[x.TypeStock] ? x.Emplacement : "")))
+        {
+            var k = x.Key;
+            var retour = await ControlerStockAsync(cnx, tx, societe, k.TypeStock, parEmplacement[k.TypeStock], k.Depot, k.Article, k.Indice, k.Lot,
+                k.Emplacement, date, -x.Sum(y => y.Quantite), ct);
+            if (retour != 0) throw new RegleMetierException(MessageStock(k.Article, k.Lot, k.Emplacement, k.Depot, retour));
         }
     }
 
@@ -296,11 +303,12 @@ internal sealed partial class SaisieBlDb2
     }
 
     // Commande soldée (AB001.CCTAGS = 'D') quand toutes ses lignes le sont, comme SoldeCommande du WinDev
-    private async Task SolderCommandeSiToutLivreAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, string profil, CommandeBlOpr c, CancellationToken ct)
+    private async Task SolderCommandeSiToutLivreAsync(OdbcConnection cnx, OdbcTransaction tx, int societe, string profil, int dossier, string cle,
+        int compteGeneral, int compteClient, CancellationToken ct)
     {
         await using (var rd = await Lire(cnx, tx, """
             SELECT COUNT(*) FROM {b}.NEG100 WHERE RSOC = ? AND RDOSS = ? AND DNDCLE = ? AND DNART <> ' ' AND DNART NOT LIKE '999%' AND DNSOLD <> 'O'
-            """, ct, societe, c.Dossier, c.Cle))
+            """, ct, societe, dossier, cle))
         {
             await rd.ReadAsync(ct);
             if (rd.Entier(0) > 0) return;
@@ -308,14 +316,14 @@ internal sealed partial class SaisieBlDb2
         var maintenant = DateTime.Now;
         if (await Executer(cnx, tx, """
                 UPDATE {b}.AB001 SET CCTAGS = 'D', CCSLDA = ?, CCSLDM = ?, CCSLDJ = ? WHERE RSOC = ? AND RDOSS = ? AND CCDCLE = ? AND CCTAGS <> 'D'
-                """, ct, maintenant.Year, maintenant.Month, maintenant.Day, societe, c.Dossier, c.Cle) == 0) return;
+                """, ct, maintenant.Year, maintenant.Month, maintenant.Day, societe, dossier, cle) == 0) return;
         var initiales = "";
         await using (var rd = await Lire(cnx, tx, "SELECT ACINI FROM {b}.AI00F WHERE RPRF = ? FETCH FIRST 1 ROW ONLY", ct, profil))
             if (await rd.ReadAsync(ct)) initiales = rd.Texte(0);
         await Executer(cnx, tx, """
             INSERT INTO {b}.DOS040 (RSOC, RDOSS, HICLE, HIGEN, HICLI, HIINAM, HITYPM, HIDTMA, HIDTMM, HIDTMJ, HIHEUR)
             VALUES (?, ?, ?, ?, ?, ?, 'SO', ?, ?, ?, ?)
-            """, ct, societe, c.Dossier, c.Cle, c.CompteGeneral, c.CompteClient, initiales, maintenant.Year, maintenant.Month, maintenant.Day,
+            """, ct, societe, dossier, cle, compteGeneral, compteClient, initiales, maintenant.Year, maintenant.Month, maintenant.Day,
             maintenant.Hour * 10000 + maintenant.Minute * 100 + maintenant.Second);
     }
 
