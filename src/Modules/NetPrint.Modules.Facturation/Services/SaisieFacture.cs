@@ -15,8 +15,12 @@ internal static class SaisieFacture
 
     public static FactureSaisie VersSaisie(FacturePrevue f, IReadOnlyList<ElementDeBl> bls, string nom, ParametresGeneration p, DateOnly date,
         IReadOnlyList<CodeLibelle> modes, IReadOnlyList<CodeLibelle> representants, bool peutEditer, int? ajoutA = null,
-        (int, string)? commandeSansBl = null, string? avertissement = null) => new()
+        (int, string)? commandeSansBl = null, string? avertissement = null, IReadOnlyList<CodeLibelle>? categories = null,
+        IReadOnlyList<CodeLibelle>? sousCategories = null) => new()
     {
+        SansCommande = categories is not null,
+        Categories = categories ?? [],
+        SousCategories = sousCategories ?? [],
         CommandeSansBl = commandeSansBl,
         Avertissement = avertissement,
         // Ajout à la facture ajoutA du jour date : en-tête inchangé, acompte des nouvelles commandes non repris (FDCPT inchangé)
@@ -46,6 +50,8 @@ internal static class SaisieFacture
         {
             Numero = e.Numero,
             Monnaie = e.Dossier.Monnaie,
+            Categorie = e.Dossier.Categorie,
+            SousCategorie = e.Dossier.SousCategorie,
             Commande = e.Dossier.Numero,
             Cle = e.Dossier.Cle,
             Designation = e.Dossier.Designation1,
@@ -111,10 +117,24 @@ internal static class SaisieFacture
 
         // Ajout à une facture existante : son en-tête ne change pas (ni saisi ni écrit), il n'est pas contrôlé
         if (!s.Ajout) ControlerEnTete(s, Erreur);
+        // Sans commande (FAC150 R18, R21) : catégorie et sous-catégorie obligatoires et existantes, au moins une ligne
+        if (s.SansCommande)
+            foreach (var e in s.Elements)
+            {
+                e.Categorie = e.Categorie.Trim().ToUpperInvariant();
+                e.SousCategorie = e.SousCategorie.Trim().ToUpperInvariant();
+                if (e.Categorie == "") Erreur(nameof(e.Categorie), "La catégorie est obligatoire.");
+                else if (s.Categories.All(c => c.Code != e.Categorie)) Erreur(nameof(e.Categorie), $"La catégorie {e.Categorie} n'existe pas.");
+                else if (e.SousCategorie == "") Erreur(nameof(e.SousCategorie), "La sous-catégorie est obligatoire.");
+                else if (s.SousCategories.All(c => c.Code != $"{e.Categorie}/{e.SousCategorie}"))
+                    Erreur(nameof(e.SousCategorie), $"La sous-catégorie {e.SousCategorie} n'existe pas pour la catégorie {e.Categorie}.");
+                if (e.Lignes.All(l => Type(p, l.CodeLigne.Trim()) is "T" or ""))
+                    Erreur("", "Ajoutez au moins une ligne de vente, de port ou de remise.");
+            }
 
         foreach (var e in s.Elements)
         {
-            var (_, ventes) = Calculer(e, p, (rang, message) => Erreur("", $"Commande {e.Commande}/{e.Cle}, ligne {rang} : {message}"),
+            var (_, ventes) = Calculer(e, p, (rang, message) => Erreur("", $"{(s.SansCommande ? "Sans commande" : $"Commande {e.Commande}/{e.Cle}")}, ligne {rang} : {message}"),
                 anomalies.Add);
             e.Ventes = ventes;
         }

@@ -65,6 +65,8 @@ public sealed class ElementSaisie
     public int Commande { get; init; }
     public string Cle { get; init; } = "";
     public string Designation { get; init; } = "";
+    public string Categorie { get; set; } = "";       // AA0009, choisie seulement pour un élément sans commande
+    public string SousCategorie { get; set; } = "";   // AE0003
     public IReadOnlyList<int> Bls { get; init; } = [];
     public List<LigneSaisie> Lignes { get; init; } = [];
     public decimal Ventes { get; set; }
@@ -80,6 +82,7 @@ public sealed class FactureSaisie
     public bool Ajout { get; init; }
     public (int Numero, string Cle)? CommandeSansBl { get; init; }   // facture d'une commande sans BL (relue à la création)
     public string? Avertissement { get; init; }   // à lire avant de créer (ex. : commande déjà sur une facture pas encore éditée)
+    public bool SansCommande { get; init; }   // facture d'un client sans commande : catégorie et sous-catégorie à choisir
     public bool Modification => Numero is not null && !Ajout;
     public bool Avoir { get; init; }
     public int CompteGeneral { get; init; }
@@ -107,6 +110,8 @@ public sealed class FactureSaisie
     public IReadOnlyList<CodeLibelle> ModesReglement { get; init; } = [];
     public IReadOnlyList<CodeLibelle> Representants { get; init; } = [];
     public IReadOnlyDictionary<string, decimal> Unites { get; init; } = new Dictionary<string, decimal>();
+    public IReadOnlyList<CodeLibelle> Categories { get; init; } = [];
+    public IReadOnlyList<CodeLibelle> SousCategories { get; init; } = [];   // code « catégorie/sous-catégorie »
 }
 
 // Contrôle de la saisie : Erreurs bloquantes ; Anomalies : la facture sera créée « à contrôler » (comme en automatique)
@@ -126,6 +131,10 @@ public interface ISaisieFactures
     // Facture d'une commande sans BL (acompte, frais, prestation) : reste à facturer de la commande (fabrication : quantité
     // commandée − facturée ; négoce : lignes pas entièrement facturées), compléments, remise ; ses BL restent à facturer
     Task<FactureSaisie> PreparerCommandeAsync(int commande, string cle, CancellationToken ct = default);
+
+    // Facture d'un client sans commande (FAC085 clé client, élément sans dossier) : en-tête du client, catégorie et sous-catégorie
+    // à choisir, lignes saisies
+    Task<FactureSaisie> PreparerClientAsync(int compteGeneral, int compteClient, CancellationToken ct = default);
 
     // Montants des lignes et des éléments recalculés, saisie contrôlée (sans base)
     ControleFactureSaisie Recalculer(FactureSaisie facture);

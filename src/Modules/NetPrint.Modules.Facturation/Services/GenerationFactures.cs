@@ -50,8 +50,9 @@ internal sealed record DossierAFacturer(
 {
     public bool Fabrication => TypeCommande == "1";
 
-    // FAC090.FETYP : fabrication 1, négoce 2 (CCTYPC 4) ou 3 (CCTYPC 3), autre 0
-    public int TypeElement => TypeCommande switch { "1" => 1, "4" => 2, "3" => 3, _ => 0 };
+    // FAC090.FETYP : fabrication 1, négoce 2 (CCTYPC 4) ou 3 (CCTYPC 3), sans commande 4 (TypeCommande « S », FAC150), autre 0
+    public const string SansCommande = "S";
+    public int TypeElement => TypeCommande switch { "1" => 1, "4" => 2, "3" => 3, SansCommande => 4, _ => 0 };
 }
 
 // Élément de BL à facturer (TFAC401) : donneur d'ordre (HGENE / HCLIE), client facturé du BL (HGENF / HCLIF, 0 possible),

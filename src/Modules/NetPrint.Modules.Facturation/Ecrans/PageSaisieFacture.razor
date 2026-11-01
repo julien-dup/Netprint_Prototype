@@ -101,6 +101,14 @@
         else
         {
             var cochesRetour = bls.Bls.Where(Coche).Select(b => b.Retour).Distinct().Count() > 1;
+            @if (!EnAjout && clientCherche is { } cl)
+            {
+                <div class="barre-preparation">
+                    <span class="discret">Ou facturer ce client sans commande (frais, prestation) : catégorie et lignes à saisir.</span>
+                    <span class="espace"></span>
+                    <button disabled="@occupe" @onclick="PreparerClientAsync">Facture sans commande pour @cl.General @cl.Client →</button>
+                </div>
+            }
             @if (!EnAjout && commandeCherchee is { } cmd)
             {
                 <div class="barre-preparation">
@@ -212,8 +220,28 @@
         {
             <section class="carte element-saisie">
                 <div class="titre-element">
-                    <b>Commande <a href="@($"ventes/commandes/{el.Commande}/{el.Cle}")">@el.Commande/@el.Cle</a></b>
-                    <span class="discret">@el.Designation · @(el.Bls.Count > 0 ? $"BL {string.Join(", ", el.Bls)}" : "sans BL")</span>
+                    @if (f.SansCommande)
+                    {
+                        <b>Sans commande</b>
+                        <label class="champ-ligne">Catégorie
+                            <select class="@Err(nameof(el.Categorie))" @bind="el.Categorie" @bind:after="ChangerCategorie">
+                                <option value="">—</option>
+                                @foreach (var cat in f.Categories) {<option value="@cat.Code">@cat.Code · @cat.Libelle</option>}
+                            </select>
+                        </label>
+                        <label class="champ-ligne">Sous-catégorie
+                            <select class="@Err(nameof(el.SousCategorie))" @bind="el.SousCategorie" @bind:after="Recalculer">
+                                <option value="">—</option>
+                                @foreach (var sc in f.SousCategories.Where(x => x.Code.StartsWith(el.Categorie + "/", StringComparison.Ordinal)))
+                                {<option value="@sc.Code[(el.Categorie.Length + 1)..]">@sc.Code[(el.Categorie.Length + 1)..] · @sc.Libelle</option>}
+                            </select>
+                        </label>
+                    }
+                    else
+                    {
+                        <b>Commande <a href="@($"ventes/commandes/{el.Commande}/{el.Cle}")">@el.Commande/@el.Cle</a></b>
+                        <span class="discret">@el.Designation · @(el.Bls.Count > 0 ? $"BL {string.Join(", ", el.Bls)}" : "sans BL")</span>
+                    }
                     <span class="espace"></span><b>@E(el.Ventes)</b>
                 </div>
                 <table class="grille grille-saisie-lignes">
@@ -352,6 +380,7 @@
         {
             bls = await Saisie.ChercherBlsAsync(C);
             commandeCherchee = C.Commande is { } n && bls.Erreurs.Count == 0 ? (n, C.Cle.Trim().ToUpperInvariant()) : null;
+            clientCherche = C.CompteGeneral is { } g && C.CompteClient is { } k && bls.Erreurs.Count == 0 ? (g, k) : null;
             coches.Clear();
             foreach (var b in bls.Bls.Where(b => b.Propose)) coches.Add(new ElementDeBl(b.Bl, b.Element));
         }
@@ -376,6 +405,22 @@
     }
 
     private (int Numero, string Cle)? commandeCherchee;   // clé « commande » : elle peut se facturer sans BL
+    private (int General, int Client)? clientCherche;      // clé « donneur d'ordre » : facture sans commande possible
+
+    private async Task PreparerClientAsync()
+    {
+        if (occupe || clientCherche is not { } c) return;
+        occupe = true;
+        try
+        {
+            facture = await Saisie.PreparerClientAsync(c.General, c.Client);
+            editerDefinitif = false;
+            Recalculer();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Préparation de la facture impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
 
     private async Task PreparerCommandeAsync()
     {
@@ -407,6 +452,18 @@
         catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
         catch (Exception ex) { Notifications.Erreur($"Préparation de la facture impossible : {ex.Message}"); }
         finally { occupe = false; }
+    }
+
+    // Autre catégorie : sous-catégorie à rechoisir (la seule proposée est prise d'office)
+    private void ChangerCategorie()
+    {
+        if (facture is null) return;
+        foreach (var e in facture.Elements)
+        {
+            var sous = facture.SousCategories.Where(x => x.Code.StartsWith(e.Categorie + "/", StringComparison.Ordinal)).ToList();
+            e.SousCategorie = sous.Count == 1 ? sous[0].Code[(e.Categorie.Length + 1)..] : "";
+        }
+        Recalculer();
     }
 
     private void ChangerDate()
@@ -463,7 +520,7 @@
 
     private void Recommencer()
     {
-        (facture, controle, creee, bls, commandeCherchee) = (null, null, null, null, null);
+        (facture, controle, creee, bls, commandeCherchee, clientCherche) = (null, null, null, null, null, null);
         coches.Clear();
         C = new();
     }

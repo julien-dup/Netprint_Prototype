@@ -16,7 +16,8 @@ namespace NetPrint.Modules.Facturation.Services;
 // limité : ses factures seulement. Ajout de BL à une facture pas encore éditée (FAC085 / FAC150 mode A) : droit de création (comme
 // l'option AE de FAC080S), nouveaux éléments écrits comme à la création. Copie (FAC150 mode D) : droits de création et de
 // modification (la copie s'ouvre en modification ; le RPG ne contrôlait que la modification). Facture d'une commande sans BL
-// (FAC085 clé dossier) : même moteur, élément sans BL. Pas encore repris : facture d'un client sans commande.
+// (FAC085 clé dossier) : même moteur, élément sans BL. Facture d'un client sans commande (FAC085 clé client) : élément sans dossier,
+// catégorie et sous-catégorie choisies, code vente et compte d'escompte contrôlés dans FAC030 (R20, R34).
 // =====================================================================
 internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFacturesDb2 donnees, EditionDefinitiveDb2 definitive,
     DroitsFacturationDb2 droits, ConsultationFacturesDb2 consultation, IUtilisateurCourant utilisateur) : ISaisieFactures
@@ -248,6 +249,33 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
             commandeSansBl: (d.Numero, d.Cle), avertissement: avertissement);
     }
 
+    // Client sans commande : en-tête de la fiche client, un élément sans dossier (FETYP 4, 3 pour la catégorie $1, 2 pour $2 :
+    // FAC150), catégorie et sous-catégorie de l'élément saisi (vides à la préparation)
+    private async Task<(FacturePrevue Facture, ParametresGeneration Parametres, string Enseigne, string Nom)> RelireClientAsync(int societe,
+        int general, int client, ElementSaisie? saisi, CancellationToken ct)
+    {
+        var c = await bls.LireClientAsync(societe, general, client, ct)
+                ?? throw new RegleMetierException($"Le client {general} {client} n'existe pas.");
+        var p = await bls.ParametresAsync(societe, ct);
+        string categorie = saisi?.Categorie ?? "", sousCategorie = saisi?.SousCategorie ?? "";
+        var type = categorie switch { "$1" => "3", "$2" => "4", _ => DossierAFacturer.SansCommande };
+        var d = new DossierAFacturer(0, "", type, c.CodeVente, "", "", "", 0, 0, "", null, categorie, sousCategorie, 0, 0, 0, "E", 0, "", "", "O",
+            AdresseEnvoi.Aucune, true, c.Releve, c.Presentation, []);
+        var element = new ElementPrevu(1, d, 0, 0, 0, [], [], [], [], []);
+        return (new FacturePrevue(false, general, client, 0, 0, 6, c.Conditions, c.Representant, AdresseEnvoi.Aucune, d, "", [element], [], 0),
+            p, "", c.Nom);
+    }
+
+    public async Task<FactureSaisie> PreparerClientAsync(int compteGeneral, int compteClient, CancellationToken ct = default)
+    {
+        var u = await ExigerDroitAsync(ct);
+        var (f, p, _, nom) = await RelireClientAsync(u.Societe, compteGeneral, compteClient, null, ct);
+        var (modes, representants) = await donnees.ListesAsync(u.Societe, ct);
+        var (categories, sousCategories) = await bls.CategoriesAsync(u.Societe, ct);
+        return SaisieFacture.VersSaisie(f, [], nom, p, DateOnly.FromDateTime(DateTime.Today), modes, representants, await PeutEditerAsync(u, ct),
+            categories: categories, sousCategories: sousCategories);
+    }
+
     public ControleFactureSaisie Recalculer(FactureSaisie facture) => SaisieFacture.Recalculer(facture);
 
     // Facture à compléter : existante, pas encore éditée, accessible (FAC085 : facture inexistante, éditée ou supprimée refusée)
@@ -337,18 +365,33 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         if (controle.Erreurs.Count > 0) throw new RegleMetierException(string.Join("\n", controle.Erreurs.Select(e => e.Message)));
         var date = s.Date!.Value;
 
-        var (relue, p, enseigne, _) = s.CommandeSansBl is { } commande
-            ? await RelireCommandeAsync(u.Societe, commande.Numero, commande.Cle, ct)
+        var (relue, p, enseigne, _) = s.SansCommande ? await RelireClientAsync(u.Societe, s.CompteGeneral, s.CompteClient, s.Elements.Single(), ct)
+            : s.CommandeSansBl is { } commande ? await RelireCommandeAsync(u.Societe, commande.Numero, commande.Cle, ct)
             : await RelireAsync(u.Societe, s.Bls, ct);
+        if (s.SansCommande)
+        {
+            // FAC150 R34 et R20 : codes vente de la catégorie (ou « ** ») ; escompte : compte ES de la catégorie (ou « ** »)
+            var categorie = s.Elements.Single().Categorie;
+            var ventes = s.Elements.SelectMany(e => e.Lignes).Where(l => s.CodesLigne.Any(c => c.Code == l.CodeLigne && c.Type == "V"))
+                .Select(l => l.CodeLigne.Trim()).Distinct().ToList();
+            var trouves = await bls.CodesVenteAsync(u.Societe, [.. ventes, .. s.Escompte != 0 ? ["ES"] : Array.Empty<string>()], categorie, ct);
+            if (ventes.FirstOrDefault(v => !trouves.ContainsKey(v)) is { } absent)
+                throw new RegleMetierException($"Le code vente {absent} n'existe pas pour la catégorie {categorie} (FAC030).");
+            if (s.Escompte != 0 && !trouves.GetValueOrDefault("ES"))
+                throw new RegleMetierException($"Pas de compte d'escompte (ES) pour la catégorie {categorie} (FAC030) : l'escompte ne peut pas être comptabilisé.");
+        }
         if (SaisieFacture.Empreinte(relue) != s.Empreinte)
-            throw new RegleMetierException(s.CommandeSansBl is null ? "Les BL ont changé depuis la préparation de la facture (lignes, prix ou commande) : recommencez."
+            throw new RegleMetierException(s.SansCommande ? "Le client a changé depuis la préparation de la facture : recommencez."
+                : s.CommandeSansBl is null ? "Les BL ont changé depuis la préparation de la facture (lignes, prix ou commande) : recommencez."
                 : "La commande a changé depuis la préparation de la facture (lignes, prix ou quantités) : recommencez.");
         var contexte = await bls.ContexteAsync(u.Societe, enseigne, ct);
         if (!contexte.PeriodeOuverte(date))
             throw new RegleMetierException("La date de la facture n'est pas dans une période comptable ouverte de la société.");
         if (contexte.TypeNumerotation is not { } type) throw new RegleMetierException("Les paramètres de facturation de la société (FAC010) n'existent pas.");
         if (contexte.GereEnseignes && type == 3 && enseigne.Trim() == "")
-            throw new RegleMetierException($"La numérotation est par enseigne et {(s.CommandeSansBl is null ? "les BL n'ont" : "la commande n'a")} pas d'enseigne.");
+            throw new RegleMetierException(s.SansCommande
+                ? "La numérotation des factures est par enseigne : la facture sans commande (enseigne à choisir) n'est pas encore possible ici."
+                : $"La numérotation est par enseigne et {(s.CommandeSansBl is null ? "les BL n'ont" : "la commande n'a")} pas d'enseigne.");
         if (s.CompteGeneralFacture is { } gf && s.CompteClientFacture is { } cf && !await donnees.ClientExisteAsync(u.Societe, gf, cf, ct))
             throw new RegleMetierException($"Le client facturé {gf} {cf} n'existe pas.");
 
