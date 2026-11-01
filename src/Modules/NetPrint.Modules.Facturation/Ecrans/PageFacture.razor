@@ -30,6 +30,13 @@
         }
         <button disabled="@enCours" @onclick="CopierAsync"
                 title="Crée une nouvelle facture du jour, « à éditer », avec le même en-tête, les mêmes éléments et les mêmes lignes">⧉ Copier</button>
+        @if (fiche.Facture.Statut is StatutsFacture.Editee or StatutsFacture.Comptabilisee)
+        {
+            var f0 = fiche.Facture;
+            var (gen, cli) = NetPrint.Modules.Facturation.Services.ReglesFactures.ClientFacture(f0);
+            <a class="bouton-ancre" href="@($"facturation/envoi?general={gen}&client={cli}&facture={Numero}&jour={Jour}")"
+               title="Envoyer la facture par e-mail au client facturé (PDF), avec ses autres factures à envoyer si besoin">✉ Envoyer</a>
+        }
         if (fiche.Facture.Statut is StatutsFacture.AEditer or StatutsFacture.Attente)
         {
             <button title="Modifier l'en-tête, les lignes ou la date (reportée sur tous les fichiers de la facture)"

@@ -27,6 +27,13 @@ internal sealed class ConsultationFacturesDb2(IConfiguration config)
     private Task<Lecteur> Lire(OdbcConnection cnx, string sql, CancellationToken ct, params object?[] valeurs) =>
         Lecteur.ExecuterAsync(cnx, sql.Replace("{b}", Bib), ct, valeurs);
 
+    // Représentant imposé au profil (B000F.ILIMIT = O) : il ne voit que ses factures (FDREP) ; null sinon
+    public async Task<int?> RepresentantImposeAsync(int societe, string profil, CancellationToken ct)
+    {
+        await using var cnx = await OuvrirAsync(ct);
+        return await RepresentantImposeAsync(cnx, societe, profil, ct);
+    }
+
     private async Task<int?> RepresentantImposeAsync(OdbcConnection cnx, int societe, string profil, CancellationToken ct)
     {
         await using var rd = await Lire(cnx, "SELECT RREPR, ILIMIT FROM {b}.B000F WHERE RSOC = ? AND IPROF = ? AND ITAG <> '*' FETCH FIRST 1 ROW ONLY", ct,

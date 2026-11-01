@@ -48,6 +48,8 @@ public static class FacturationModule
         services.AddScoped<EditionDefinitiveDb2>();
         services.AddScoped<DroitsFacturationDb2>();                                 // PRT000P1
         services.AddScoped<IEditionFactures, EditionFacturesService>();             // FAC202P5 (PDF)
+        services.AddScoped<EnvoiFacturesDb2>();
+        services.AddScoped<IEnvoiFactures, EnvoiFacturesService>();                 // EnvoideFactures (mail, PDF)
         return services;
     }
 

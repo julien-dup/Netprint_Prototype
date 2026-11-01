@@ -22,6 +22,10 @@ internal static class ReglesFactures
     };
 
     // Envoi (EnvoideFactures) : FDTAGE = O envoyée (date, manuel ou automatique, canal et format), FDNONE = O ignorée
+    // Client facturé d'une facture : FDGENF / FDCLIF, sinon le donneur d'ordre (FAC150 R7)
+    public static (int General, int Client) ClientFacture(FactureListe f) =>
+        f.CompteClientFacture != 0 ? (f.CompteGeneralFacture, f.CompteClientFacture) : (f.CompteGeneral, f.CompteClient);
+
     public static string Envoi(string envoyee, string ignoree, int date, string mode, string methode, string format)
     {
         if (ignoree == "O") return "Ignorée";
