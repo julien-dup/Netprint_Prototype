@@ -76,16 +76,22 @@ internal sealed record ParametresGeneration(IReadOnlyDictionary<string, (string 
 
 // Ligne de facture (FAC100) ; LigneBl : FGLBL (O / N / blanc) ; Bl / ElementBl / LigneDuBl : FGBL, FGBLEL, FGBLLG ;
 // PrixLibre : prix et unité non contrôlés (article gratuit de la commande, complément du dossier, élément en plus du BL) ;
-// Origine : complément AB004 (C + n° de ligne) ou élément en plus EXP011 (X + BL.élément.ligne) dont la ligne vient
+// Origine : complément AB004 (C + n° de ligne) ou élément en plus EXP011 (X + BL.élément.ligne) dont la ligne vient ;
+// Conserve : zones que le SaaS ne gère pas, relues d'une facture existante et réécrites telles quelles (FGCTC, FGNBR, FGPUA, FGMTNA)
 internal sealed record LignePrevue(
     int Numero, string CodeLigne, decimal Quantite, string Designation, decimal Pu, int Remise, string Unite, string Article, string Indice,
     decimal Montant, decimal TauxCommission, string LigneBl, string Monnaie, int LigneCommande, int Bl, int ElementBl, int LigneDuBl,
-    bool PrixLibre = false, string Origine = "")
+    bool PrixLibre = false, string Origine = "", ZonesConservees? Conserve = null)
 {
     public static string DeComplement(int ligne) => $"C{ligne}";
     public static string DEnPlus(int bl, int element, int ligne) => $"X{bl}.{element}.{ligne}";
     public bool Texte => CodeLigne == "9";
 }
+
+// Zones FAC100 d'une ligne existante que la saisie ne modifie pas : code élément produit client, nombre d'éléments, prix et montant
+// dans l'autre monnaie (gardés seulement si le montant de la ligne n'a pas changé)
+internal sealed record ZonesConservees(string CodeProduitClient, decimal Nombre, decimal PuAutreMonnaie, decimal MontantAutreMonnaie,
+    decimal MontantLu);
 
 // Élément de facture (FAC090) et ce qu'il marque comme facturé
 internal sealed record ElementPrevu(

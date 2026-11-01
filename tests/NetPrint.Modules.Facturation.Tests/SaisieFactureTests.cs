@@ -139,6 +139,17 @@ public class SaisieFactureRevueTests
     }
 
     [Fact]
+    public void Nouvelle_date_d_une_facture_modifiee()
+    {
+        var origine = new DateOnly(2026, 11, 1);
+        Assert.Null(SaisieFacture.ControlerNouvelleDate(1, origine, new DateOnly(2026, 3, 5)));      // annuelle : même année
+        Assert.NotNull(SaisieFacture.ControlerNouvelleDate(1, origine, new DateOnly(2027, 1, 2)));
+        Assert.Null(SaisieFacture.ControlerNouvelleDate(2, origine, new DateOnly(2026, 11, 30)));    // mensuelle : même mois
+        Assert.NotNull(SaisieFacture.ControlerNouvelleDate(2, origine, new DateOnly(2026, 12, 1)));
+        Assert.Null(SaisieFacture.ControlerNouvelleDate(3, origine, new DateOnly(2027, 1, 2)));      // par enseigne : libre
+    }
+
+    [Fact]
     public void Un_seul_client_facture()
     {
         Assert.Throws<RegleMetierException>(() => GenerationFactures.Regrouper([Bl(), Bl(30) with { Bl = 2 }], P));
@@ -147,6 +158,7 @@ public class SaisieFactureRevueTests
 }
 
 // Saisie sur la base de test (société 29) : BL hors facturation automatique facturé à la main, base remise à l'identique
+[Collection(EcrituresNp11f.Nom)]   // une seule classe d'écriture à la fois : compteurs et BL partagés
 public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
 {
     private static SaisieFacturesService Service(int societe)
@@ -218,6 +230,87 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
                 foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
                     await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
                         societe, n, date.Year, date.Month, date.Day);
+            foreach (var (table, rrn, colonnes, valeurs) in avant)
+                await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
+                    [.. valeurs, rrn]);
+        }
+        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+    }
+
+    // Comptes des lignes d'une facture par fichier, à une date
+    private static async Task<string> CompterAsync(System.Data.Odbc.OdbcConnection cnx, int societe, int numero, DateOnly d)
+    {
+        var bib = NetPrint.Socle.Donnees.BaseDb2.Bibliotheque(BaseDeTest.Configuration);
+        var comptes = new List<string>();
+        foreach (var (table, n, a, m, j) in new[] { ("FAC080", "RNFAC", "FDANNE", "FDMOIS", "FDJOUR"), ("FAC081", "RNFAC", "FDANNE", "FDMOIS", "FDJOUR"),
+                     ("FAC090", "RNFAC", "FEANNE", "FEMOIS", "FEJOUR"), ("FAC100", "RNFAC", "FGANNE", "FGMOIS", "FGJOUR"),
+                     ("EXP010", "HNOFAC", "HDAFAA", "HDAFAM", "HDAFAJ") })
+        {
+            await using var cmd = cnx.CreateCommand();
+            cmd.CommandText = $"SELECT COUNT(*) FROM {bib}.{table} WHERE RSOC = ? AND {n} = ? AND {a} = ? AND {m} = ? AND {j} = ?";
+            foreach (var v in new object[] { societe, numero, d.Year, d.Month, d.Day }) NetPrint.Socle.Donnees.BaseDb2.Valeur(cmd.Parameters, v);
+            comptes.Add($"{table}={Convert.ToInt32(await cmd.ExecuteScalarAsync())}");
+        }
+        return string.Join(" ", comptes);
+    }
+
+    [FactDb2Ecriture]
+    public async Task Modification_avec_changement_de_date_puis_remise_a_l_identique()
+    {
+        const int societe = 29, bl = 29379;
+        var date = DateOnly.FromDateTime(DateTime.Today);
+        var autre = date.Day < 28 ? date.AddDays(1) : date.AddDays(-1);   // même mois : valable quelle que soit la numérotation
+        var service = Service(societe);
+        var f = await service.PreparerAsync([new ElementDeBl(bl, 1)]);
+        Assert.Empty(service.Recalculer(f).Erreurs);
+
+        await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
+        await cnx.OpenAsync();
+        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        int? numero = null;
+        try
+        {
+            numero = (await service.CreerAsync(f, editerDefinitif: false)).Numero;
+            var avantModif = await CompterAsync(cnx, societe, numero.Value, date);
+
+            // Modification : nouvelle date, prix de la première ligne, texte ajouté
+            var m = await service.OuvrirAsync(numero.Value, date);
+            Assert.Equal((numero, date), (m.Numero, m.DateOrigine));
+            m.Date = autre;
+            var vente = m.Elements[0].Lignes.First(l => m.CodesLigne.Any(c => c.Code == l.CodeLigne && c.Type == "V") && l.Pu != 0);
+            vente.Pu += 1;
+            m.Elements[0].Lignes.Add(new LigneSaisie { CodeLigne = m.CodesLigne.First(c => c.Type == "T").Code, Designation = "Texte de la modification" });
+            var controle = service.Recalculer(m);
+            Assert.Empty(controle.Erreurs);
+            var r = await service.ModifierAsync(m, editerDefinitif: false);
+            Assert.Equal(autre, r.Date);
+
+            // Plus rien à l'ancienne date, tout à la nouvelle (BL compris)
+            Assert.Equal("FAC080=0 FAC081=0 FAC090=0 FAC100=0 EXP010=0", await CompterAsync(cnx, societe, numero.Value, date));
+            var apres = await CompterAsync(cnx, societe, numero.Value, autre);
+            sortie.WriteLine($"Facture {numero} : avant {avantModif} ; après, au {autre:dd/MM/yyyy} : {apres}");
+            Assert.Equal(avantModif.Replace("FAC100=4", "FAC100=5"), apres);
+            var relue = await service.OuvrirAsync(numero.Value, autre);
+            Assert.Contains(relue.Elements[0].Lignes, l => l.Designation == "Texte de la modification");
+            Assert.Equal(controle.Ventes, service.Recalculer(relue).Ventes);
+
+            // Changement d'année refusé en numérotation annuelle (société 29)
+            relue.Date = new DateOnly(autre.Year + 1, 1, 15);
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.ModifierAsync(relue, false));
+
+            // Éditée en définitif : plus modifiable
+            relue.Date = autre;
+            Assert.True((await service.ModifierAsync(relue, editerDefinitif: true)).EditeeDefinitif);
+            await Assert.ThrowsAsync<RegleMetierException>(() => service.OuvrirAsync(numero.Value, autre));
+        }
+        finally
+        {
+            if (numero is { } n)
+                foreach (var d in new[] { date, autre })
+                    foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
+                        await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
+                            societe, n, d.Year, d.Month, d.Day);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
                 await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
                     [.. valeurs, rrn]);

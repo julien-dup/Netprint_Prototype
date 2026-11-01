@@ -45,7 +45,8 @@ public sealed class LigneSaisie
     public int Remise { get; set; }
     public decimal Montant { get; set; }
     public bool PrixLibre { get; init; }
-    public string Origine { get; init; } = "";   // complément de la commande ou élément en plus du BL : supprimé, il reste à facturer
+    public string Origine { get; init; } = "";
+    public object? Conserve { get; init; }        // zones FAC100 non gérées d'une ligne existante, réécrites telles quelles   // complément de la commande ou élément en plus du BL : supprimé, il reste à facturer
     public string Article { get; init; } = "";
     public string Indice { get; init; } = "";
     public decimal TauxCommission { get; init; }
@@ -56,10 +57,11 @@ public sealed class LigneSaisie
     public int LigneDuBl { get; init; }
 }
 
-// Élément de facture : une commande et ses BL
+// Élément de facture : une commande et ses BL ; Monnaie : celle de la commande, reportée sur les lignes (FAC100.FGMON)
 public sealed class ElementSaisie
 {
     public int Numero { get; init; }
+    public string Monnaie { get; init; } = "";
     public int Commande { get; init; }
     public string Cle { get; init; } = "";
     public string Designation { get; init; } = "";
@@ -68,9 +70,13 @@ public sealed class ElementSaisie
     public decimal Ventes { get; set; }
 }
 
-// Facture en cours de saisie ; Avoir : BL de retour ; Bls : éléments de BL facturés (relus à la création)
+// Facture en cours de saisie ; Avoir : BL de retour ; Bls : éléments de BL facturés (relus à la création) ;
+// Numero et DateOrigine : facture existante en modification (null en création)
 public sealed class FactureSaisie
 {
+    public int? Numero { get; init; }
+    public DateOnly? DateOrigine { get; init; }
+    public bool Modification => Numero is not null;
     public bool Avoir { get; init; }
     public int CompteGeneral { get; init; }
     public int CompteClient { get; init; }
@@ -118,4 +124,11 @@ public interface ISaisieFactures
 
     // Création (FAC150 F9) dans une transaction : BL relus, n° pris au compteur ; puis édition définitive si demandée et sans anomalie
     Task<FactureCreee> CreerAsync(FactureSaisie facture, bool editerDefinitif, CancellationToken ct = default);
+
+    // Facture existante pas encore éditée (« à éditer » ou « à contrôler ») ouverte en modification (FAC150 mode M)
+    Task<FactureSaisie> OuvrirAsync(int numero, DateOnly date, CancellationToken ct = default);
+
+    // Enregistrement de la modification dans une transaction : en-tête, lignes réécrites, et changement de date reporté sur tous les
+    // fichiers de la facture (FAC, BL, compléments) ; puis édition définitive si demandée et sans anomalie
+    Task<FactureCreee> ModifierAsync(FactureSaisie facture, bool editerDefinitif, CancellationToken ct = default);
 }

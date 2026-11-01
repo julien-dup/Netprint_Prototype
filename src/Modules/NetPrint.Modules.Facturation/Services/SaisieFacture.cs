@@ -38,24 +38,31 @@ internal static class SaisieFacture
         Elements = [.. f.Elements.Select(e => new ElementSaisie
         {
             Numero = e.Numero,
+            Monnaie = e.Dossier.Monnaie,
             Commande = e.Dossier.Numero,
             Cle = e.Dossier.Cle,
             Designation = e.Dossier.Designation1,
             Bls = [.. e.Bls.Select(b => b.Bl).Distinct()],
             Ventes = e.Ventes,
-            Lignes = [.. e.Lignes.Select(l => new LigneSaisie
-            {
-                CodeLigne = l.CodeLigne, Designation = l.Designation, Quantite = l.Quantite, Unite = l.Unite, Remise = l.Remise,
-                // Remise en montant (complément AB004) : le montant se saisit dans le prix
-                Pu = Type(p, l.CodeLigne) == "R" && l.Remise == 0 ? l.Montant : l.Pu,
-                Montant = l.Montant, PrixLibre = l.PrixLibre, Origine = l.Origine, Article = l.Article, Indice = l.Indice, TauxCommission = l.TauxCommission, LigneBl = l.LigneBl,
-                LigneCommande = l.LigneCommande, Bl = l.Bl, ElementBl = l.ElementBl, LigneDuBl = l.LigneDuBl,
-            })],
+            Lignes = [.. e.Lignes.Select(l => VersLigne(l, p, l.PrixLibre))],
         })],
-        CodesLigne = [.. p.TypesLigne.OrderBy(t => t.Key, StringComparer.Ordinal).Select(t => new CodeLigneFacture(t.Key, t.Value.Type, t.Value.Libelle))],
+        CodesLigne = CodesLigne(p),
         Unites = p.Diviseurs,
         ModesReglement = modes,
         Representants = representants,
+    };
+
+    public static IReadOnlyList<CodeLigneFacture> CodesLigne(ParametresGeneration p) =>
+        [.. p.TypesLigne.OrderBy(t => t.Key, StringComparer.Ordinal).Select(t => new CodeLigneFacture(t.Key, t.Value.Type, t.Value.Libelle))];
+
+    // Ligne préparée ou relue → ligne modifiable ; remise en montant (complément AB004) : le montant se saisit dans le prix
+    public static LigneSaisie VersLigne(LignePrevue l, ParametresGeneration p, bool prixLibre) => new()
+    {
+        CodeLigne = l.CodeLigne, Designation = l.Designation, Quantite = l.Quantite, Unite = l.Unite, Remise = l.Remise,
+        Pu = Type(p, l.CodeLigne) == "R" && l.Remise == 0 ? l.Montant : l.Pu,
+        Montant = l.Montant, PrixLibre = prixLibre, Origine = l.Origine, Conserve = l.Conserve, Article = l.Article, Indice = l.Indice,
+        TauxCommission = l.TauxCommission, LigneBl = l.LigneBl, LigneCommande = l.LigneCommande, Bl = l.Bl, ElementBl = l.ElementBl,
+        LigneDuBl = l.LigneDuBl,
     };
 
     // Ce que la préparation a lu : la création refuse si la relecture des BL donne autre chose (BL, commande ou prix changés)
@@ -148,22 +155,46 @@ internal static class SaisieFacture
         return (ca, ventes);
     }
 
+    // Lignes FAC100 d'un élément saisi, montants recalculés ; remise : montant seul, prix à 0, comme la facturation automatique
+    public static (decimal ChiffreAffaires, decimal Ventes, List<LignePrevue> Lignes) Lignes(ElementSaisie e, ParametresGeneration p)
+    {
+        var (ca, ventes) = Calculer(e, p);
+        var lignes = e.Lignes.Select((l, i) =>
+        {
+            var type = Type(p, l.CodeLigne);
+            var texte = type == "T";
+            return new LignePrevue(i + 1, l.CodeLigne, texte || type == "R" ? 0 : l.Quantite, l.Designation.Trim(), texte || type == "R" ? 0 : l.Pu,
+                type == "R" ? l.Remise : 0, texte ? "" : l.Unite, l.Article, l.Indice, l.Montant, l.TauxCommission,
+                texte ? "" : l.LigneBl, texte ? "" : e.Monnaie, l.LigneCommande, l.Bl, l.ElementBl, l.LigneDuBl, l.PrixLibre, l.Origine,
+                l.Conserve as ZonesConservees);
+        }).ToList();
+        return (ca, ventes, lignes);
+    }
+
+    // Code vente de la facture (FAC080.FDVEN) : premier code de type vente, sinon premier code qui n'est pas un texte
+    public static string CodeVente(IEnumerable<LignePrevue> lignes, ParametresGeneration p)
+    {
+        var toutes = lignes.ToList();
+        return toutes.FirstOrDefault(l => Type(p, l.CodeLigne) == "V")?.CodeLigne
+               ?? toutes.FirstOrDefault(l => Type(p, l.CodeLigne) != "T")?.CodeLigne ?? "";
+    }
+
+    // Nouvelle date d'une facture modifiée (FAC150 R4) : même année en numérotation annuelle, même mois en mensuelle (le n° en dépend)
+    public static string? ControlerNouvelleDate(int typeNumerotation, DateOnly origine, DateOnly nouvelle) => typeNumerotation switch
+    {
+        1 when nouvelle.Year != origine.Year => $"La numérotation est annuelle : la facture doit rester en {origine.Year}.",
+        2 when nouvelle.Year != origine.Year || nouvelle.Month != origine.Month =>
+            $"La numérotation est mensuelle : la facture doit rester en {origine:MM/yyyy}.",
+        _ => null,
+    };
+
     // Facture à écrire : celle relue à la création, avec l'en-tête et les lignes saisis
     public static FacturePrevue Appliquer(FacturePrevue f, FactureSaisie s, ParametresGeneration p, IReadOnlyList<string> anomalies)
     {
         var elements = f.Elements.Select(e =>
         {
             var saisi = s.Elements.Single(x => x.Numero == e.Numero);
-            var (ca, ventes) = Calculer(saisi, p);
-            var lignes = saisi.Lignes.Select((l, i) =>
-            {
-                var type = Type(p, l.CodeLigne);
-                var texte = type == "T";
-                // Remise : montant seul, prix à 0, comme la facturation automatique
-                return new LignePrevue(i + 1, l.CodeLigne, texte || type == "R" ? 0 : l.Quantite, l.Designation.Trim(), texte || type == "R" ? 0 : l.Pu,
-                    type == "R" ? l.Remise : 0, texte ? "" : l.Unite, l.Article, l.Indice, l.Montant, l.TauxCommission,
-                    texte ? "" : l.LigneBl, texte ? "" : e.Dossier.Monnaie, l.LigneCommande, l.Bl, l.ElementBl, l.LigneDuBl, l.PrixLibre, l.Origine);
-            }).ToList();
+            var (ca, ventes, lignes) = Lignes(saisi, p);
             // Complément ou élément en plus dont toutes les lignes ont été supprimées : pas facturé, il reste à facturer
             var supprimees = e.Lignes.Select(l => l.Origine).Where(o => o != "").ToHashSet();
             supprimees.ExceptWith(lignes.Select(l => l.Origine));
@@ -174,9 +205,7 @@ internal static class SaisieFacture
                 Complements = [.. e.Complements.Where(c => !supprimees.Contains(LignePrevue.DeComplement(c)))],
             };
         }).ToList();
-        var toutes = elements.SelectMany(e => e.Lignes).ToList();
-        var codeVente = toutes.FirstOrDefault(l => Type(p, l.CodeLigne) == "V")?.CodeLigne
-                        ?? toutes.FirstOrDefault(l => Type(p, l.CodeLigne) != "T")?.CodeLigne ?? "";
+        var codeVente = CodeVente(elements.SelectMany(e => e.Lignes), p);
         int gf = s.CompteGeneralFacture ?? 0, cf = s.CompteClientFacture ?? 0;
         // Adresse de la commande seulement si le client facturé est le donneur d'ordre (FAC402P)
         var memeClient = cf == 0 || (gf == f.CompteGeneral && cf == f.CompteClient);

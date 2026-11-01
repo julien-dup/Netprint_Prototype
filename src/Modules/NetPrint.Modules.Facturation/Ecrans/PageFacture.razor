@@ -20,6 +20,11 @@
     {
         <a class="bouton-ancre" href="@($"api/facturation/factures/{Numero}/{Jour}/pdf")" target="_blank" rel="noopener"
            title="Facture en PDF, recalculée (FAC202P5) ; « BROUILLON » tant qu'elle n'est pas éditée en définitif">🖨 Imprimer</a>
+        if (fiche.Facture.Statut is StatutsFacture.AEditer or StatutsFacture.Attente)
+        {
+            <button title="Modifier l'en-tête, les lignes ou la date (reportée sur tous les fichiers de la facture)"
+                    @onclick='() => Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}/modifier")'>✏ Modifier</button>
+        }
         if (fiche.Facture.Statut == StatutsFacture.AEditer)
         {
             <button disabled="@enCours" @onclick="EditerDefinitivementAsync"

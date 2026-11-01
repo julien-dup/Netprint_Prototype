@@ -9,8 +9,9 @@ namespace NetPrint.Modules.Facturation.Services;
 // Saisie d'une facture à partir de BL (FAC085 → FAC150) : clé contrôlée, BL facturables du donneur d'ordre (même lecture que la
 // facturation automatique, sans l'exigence « à prendre en automatique »), facture préparée par le moteur commun (une commande =
 // un élément), corrigée à l'écran, puis créée par la même écriture que la facturation automatique (une transaction, n° compris).
-// Droits : interdiction PRT000P1 sur FAC150 pour saisir, sur FAC200 pour éditer en définitif.
-// Pas encore repris : facture sans BL (client ou commande seuls), ajout d'élément, modification, copie, suppression.
+// Modification d'une facture pas encore éditée (FAC150 mode M) : en-tête et lignes, changement de date reporté sur tous ses fichiers.
+// Droits : interdiction PRT000P1 sur FAC150 pour saisir (total ou création) ou modifier (total ou modification), sur FAC200 pour
+// éditer en définitif. Pas encore repris : facture sans BL, ajout d'élément ou de BL, copie, suppression.
 // =====================================================================
 internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFacturesDb2 donnees, EditionDefinitiveDb2 definitive,
     DroitsFacturationDb2 droits, IUtilisateurCourant utilisateur) : ISaisieFactures
@@ -19,13 +20,109 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
     public const int Maxi = 10000;
     public const int BlsMaxi = 500;   // BL d'une même facture (paramètres de la relecture)
 
-    private async Task<UtilisateurConnecte> ExigerDroitAsync(CancellationToken ct)
+    // PRT000P1 : « ** » en option 1 (total) ou 2 (création) interdit la saisie, en option 3 (modification) la modification
+    private async Task<UtilisateurConnecte> ExigerDroitAsync(CancellationToken ct, bool modification = false)
     {
         var u = await utilisateur.ExigerAsync();
-        // PRT000P1 : « ** » en option 1 (total) ou 2 (création) interdit la saisie
-        if (await droits.OptionsProgrammeAsync(ProgrammeSaisie, u.Profil, ct) is [var total, var creation, ..] && (total == "**" || creation == "**"))
-            throw new RegleMetierException("Vous n'avez pas le droit de créer des factures (FAC150).");
+        if (await droits.OptionsProgrammeAsync(ProgrammeSaisie, u.Profil, ct) is [var total, var creation, var modif, ..]
+            && (total == "**" || (modification ? modif : creation) == "**"))
+            throw new RegleMetierException($"Vous n'avez pas le droit de {(modification ? "modifier" : "créer")} des factures (FAC150).");
         return u;
+    }
+
+    private async Task<bool> PeutEditerAsync(UtilisateurConnecte u, CancellationToken ct) => !EditionFacturesService.EditionInterdite(
+        await droits.OptionsProgrammeAsync(EditionFacturesService.ProgrammeEdition, u.Profil, ct));
+
+    // Édition définitive enchaînée (si demandée et sans anomalie) ; un échec n'annule pas la facture enregistrée
+    private async Task<FactureCreee> TerminerAsync(UtilisateurConnecte u, int numero, DateOnly date, bool aControler, bool editerDefinitif,
+        CancellationToken ct)
+    {
+        if (!editerDefinitif || aControler) return new FactureCreee(numero, date, aControler, false, null);
+        try
+        {
+            await definitive.EditerAsync(u.Societe, numero, date, DateOnly.FromDateTime(DateTime.Today), ct);
+            return new FactureCreee(numero, date, false, true, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new FactureCreee(numero, date, false, false, $"Facture enregistrée, mais non éditée en définitif : {ex.Message}");
+        }
+    }
+
+    public async Task<FactureSaisie> OuvrirAsync(int numero, DateOnly date, CancellationToken ct = default)
+    {
+        var u = await ExigerDroitAsync(ct, modification: true);
+        var f = await bls.LireFactureAsync(u.Societe, numero, date, ct)
+                ?? throw new RegleMetierException($"La facture {numero} du {date:dd/MM/yyyy} n'existe pas.");
+        if (f.Edition == "E") throw new RegleMetierException($"La facture {numero} est déjà éditée : elle ne se modifie plus (faites un avoir).");
+        if (f.Edition == "S") throw new RegleMetierException($"La facture {numero} est supprimée.");
+        if (f.Edition is not ("O" or "A")) throw new RegleMetierException($"La facture {numero} n'est ni « à éditer » ni « à contrôler » : elle ne se modifie pas ici.");
+        var p = await bls.ParametresAsync(u.Societe, ct);
+        var (modes, representants) = await donnees.ListesAsync(u.Societe, ct);
+        var c = f.Conditions;
+        return new FactureSaisie
+        {
+            Numero = numero, DateOrigine = date, Date = date, Avoir = f.Avoir, CompteGeneral = f.CompteGeneral, CompteClient = f.CompteClient,
+            NomClient = f.NomClient,
+            CompteGeneralFacture = f.CompteClientFacture == 0 ? null : f.CompteGeneralFacture,
+            CompteClientFacture = f.CompteClientFacture == 0 ? null : f.CompteClientFacture,
+            ModeReglement = c.Mode, NombreJours = c.NombreJours, Le = c.Le, Arrete = c.Arrete, Escompte = c.Escompte,
+            Representant = f.Representant == 0 ? null : f.Representant, Reference = f.Reference, AlAttention = f.AlAttention,
+            Acompte = f.Acompte, PeutEditerDefinitif = await PeutEditerAsync(u, ct),
+            Elements = [.. f.Elements.Select(e => new ElementSaisie
+            {
+                Numero = e.Numero, Commande = e.Commande, Cle = e.Cle, Designation = e.Designation, Bls = e.Bls,
+                Monnaie = e.Lignes.Select(l => l.Monnaie).FirstOrDefault(m => m.Trim() != "") ?? e.Monnaie,
+                // Prix à 0 déjà accepté : facture « à éditer », ou article (gratuit de la commande, comme en automatique)
+                Lignes = [.. e.Lignes.Select(l => SaisieFacture.VersLigne(l, p, l.Pu == 0 && (f.Edition == "O" || l.Article.Trim() != "")))],
+            })],
+            CodesLigne = SaisieFacture.CodesLigne(p),
+            Unites = p.Diviseurs, ModesReglement = modes, Representants = representants,
+        };
+    }
+
+    public async Task<FactureCreee> ModifierAsync(FactureSaisie s, bool editerDefinitif, CancellationToken ct = default)
+    {
+        if (s.Numero is not { } numero || s.DateOrigine is not { } origine) throw new RegleMetierException("Cette facture n'est pas une facture existante.");
+        var u = await ExigerDroitAsync(ct, modification: true);
+        if (editerDefinitif && !await PeutEditerAsync(u, ct))
+            throw new RegleMetierException("Vous n'avez pas le droit d'éditer les factures en définitif (FAC200).");
+        var controle = SaisieFacture.Recalculer(s);
+        if (controle.Erreurs.Count > 0) throw new RegleMetierException(string.Join("\n", controle.Erreurs.Select(e => e.Message)));
+        var date = s.Date!.Value;
+
+        var lue = await bls.LireFactureAsync(u.Societe, numero, origine, ct)
+                  ?? throw new RegleMetierException($"La facture {numero} du {origine:dd/MM/yyyy} n'existe plus.");
+        if (lue.Elements.Select(e => e.Numero).Order().SequenceEqual(s.Elements.Select(e => e.Numero).Order()) is false)
+            throw new RegleMetierException("Les éléments de la facture ont changé depuis son ouverture : rouvrez-la.");
+        var contexte = await bls.ContexteAsync(u.Societe, lue.Enseigne, ct);
+        // Nouvelle date seulement : une facture restée « à éditer » d'une période close se corrige encore
+        if (date != origine && !contexte.Periodes.Any(x => date.Year * 100 + date.Month >= x.Debut && date.Year * 100 + date.Month <= x.Fin))
+            throw new RegleMetierException("La nouvelle date n'est pas dans une période comptable ouverte de la société.");
+        if (contexte.TypeNumerotation is { } type && !(type == 3 && contexte.GereEnseignes)
+            && SaisieFacture.ControlerNouvelleDate(type, origine, date) is { } refus)
+            throw new RegleMetierException(refus);
+        // Client facturé inchangé (même vide) : zones FAC080 gardées telles quelles, adresse figée comprise
+        int gf = s.CompteGeneralFacture ?? 0, cf = s.CompteClientFacture ?? 0;
+        var avant = lue.CompteClientFacture == 0 ? (0, 0) : (lue.CompteGeneralFacture, lue.CompteClientFacture);
+        var clientChange = (gf, cf) != avant;
+        if (!clientChange) (gf, cf) = (lue.CompteGeneralFacture, lue.CompteClientFacture);
+        else if (cf != 0 && !await donnees.ClientExisteAsync(u.Societe, gf, cf, ct))
+            throw new RegleMetierException($"Le client facturé {gf} {cf} n'existe pas.");
+
+        var p = SaisieFacture.Parametres(s);
+        var elements = s.Elements.Select(e =>
+        {
+            var (ca, ventes, lignes) = SaisieFacture.Lignes(e, p);
+            return new ElementModifie(e.Numero, ca, ventes, lignes);
+        }).ToList();
+        var escompte = Math.Truncate(s.Escompte * 10m) / 10m;   // FDESC sur 2,1
+        var conditions = new ConditionsReglement(s.ModeReglement, s.NombreJours, s.Le, escompte, s.Arrete);
+        var echeance = CalculFacture.Echeance(new ConditionsFacture(s.Avoir, date, escompte, s.Acompte, s.Le, s.NombreJours, s.Arrete, null));
+        var aControler = controle.Anomalies.Count > 0;
+        await bls.ModifierFactureAsync(u.Societe, new ModificationFacture(numero, origine, date, gf, cf, clientChange, conditions, echeance, s.Representant ?? 0, s.Reference.Trim(),
+            s.AlAttention.Trim(), SaisieFacture.CodeVente(elements.SelectMany(e => e.Lignes), p), aControler, elements), ct);
+        return await TerminerAsync(u, numero, date, aControler, editerDefinitif, ct);
     }
 
     public async Task<BlsAFacturer> ChercherBlsAsync(CleFacturation cle, CancellationToken ct = default)
@@ -76,9 +173,7 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         var u = await ExigerDroitAsync(ct);
         var (f, p, _, nom) = await RelireAsync(u.Societe, choisis, ct);
         var (modes, representants) = await donnees.ListesAsync(u.Societe, ct);
-        var peutEditer = !EditionFacturesService.EditionInterdite(
-            await droits.OptionsProgrammeAsync(EditionFacturesService.ProgrammeEdition, u.Profil, ct));
-        return SaisieFacture.VersSaisie(f, choisis, nom, p, DateOnly.FromDateTime(DateTime.Today), modes, representants, peutEditer);
+        return SaisieFacture.VersSaisie(f, choisis, nom, p, DateOnly.FromDateTime(DateTime.Today), modes, representants, await PeutEditerAsync(u, ct));
     }
 
     public ControleFactureSaisie Recalculer(FactureSaisie facture) => SaisieFacture.Recalculer(facture);
@@ -109,15 +204,6 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         var numerotation = new NumerotationFactures(type, contexte.GereEnseignes, enseigne);
         var f = SaisieFacture.Appliquer(relue, s, p, controle.Anomalies);
         var numero = await bls.EcrireAsync(u.Societe, u.Profil, numerotation, date, f, ct);
-        if (!editerDefinitif || f.AControler) return new FactureCreee(numero, date, f.AControler, false, null);
-        try
-        {
-            await definitive.EditerAsync(u.Societe, numero, date, DateOnly.FromDateTime(DateTime.Today), ct);
-            return new FactureCreee(numero, date, false, true, null);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return new FactureCreee(numero, date, false, false, $"Facture créée, mais non éditée en définitif : {ex.Message}");
-        }
+        return await TerminerAsync(u, numero, date, f.AControler, editerDefinitif, ct);
     }
 }

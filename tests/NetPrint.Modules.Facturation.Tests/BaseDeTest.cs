@@ -48,3 +48,10 @@ internal static class CultureDesTests
             System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.CurrentUICulture =
                 new System.Globalization.CultureInfo("fr-FR");
 }
+
+// Tests qui écrivent dans NP11F : exécutés l'un après l'autre (même compteur de factures, mêmes BL d'essai)
+[CollectionDefinition(Nom, DisableParallelization = true)]
+public sealed class EcrituresNp11f
+{
+    public const string Nom = "Écritures NP11F";
+}

@@ -70,13 +70,7 @@ internal sealed partial class FacturationAutoDb2
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'D', ?, ?, ?, ?, ?, ?, 'N', ?)
                     """, [.. cle, e.Numero, d.Numero, d.Cle, d.Categorie, d.SousCategorie, d.Devis, d.Modele, d.Fabrication ? d.TauxCommission : 0m,
                         e.Quantite, d.EditionBl, d.TypeElement, e.ChiffreAffaires, e.Ventes, f.CompteGeneral, f.CompteClient, d.OrdreTri]);
-                foreach (var l in e.Lignes)
-                    await Executer("""
-                        INSERT INTO {b}.FAC100 (RSOC, RNFAC, FGANNE, FGMOIS, FGJOUR, FGNEL, FGNLG, FGCDL, FGQTE, FGDES, FGPU, FGPER, FGUN, FGART, FGIND,
-                            FGMTN, FGTCOL, FGLBL, FGMON, FGLIGD, FGBL, FGBLEL, FGBLLG)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, [.. cle, e.Numero, l.Numero, l.CodeLigne, l.Quantite, Tronquer(l.Designation, 40), l.Pu, l.Remise, l.Unite, l.Article,
-                            l.Indice, l.Montant, l.TauxCommission, l.LigneBl, l.Monnaie, l.LigneCommande, l.Bl, l.ElementBl, l.LigneDuBl]);
+                foreach (var l in e.Lignes) await InsererLigneAsync(cnx, tx, cle, e.Numero, l, ct);
                 foreach (var (bl, element) in e.Bls)
                     await Executer("""
                         UPDATE {b}.EXP010 SET HBLFAC = 'O', HNOFAC = ?, HDAFAA = ?, HDAFAM = ?, HDAFAJ = ?, HNOELT = ?
@@ -158,6 +152,20 @@ internal sealed partial class FacturationAutoDb2
         }
         await executer("UPDATE {b}.FAC040 SET NFACT = ? WHERE RSOC = ? AND NAN = ? AND NMOIS = ?", [numero + 1, societe, date.Year, mois]);
         return numero;
+    }
+
+    // Ligne FAC100 d'un élément ; cle : société, n°, année, mois, jour de la facture
+    private Task<int> InsererLigneAsync(OdbcConnection cnx, OdbcTransaction tx, object[] cle, int element, LignePrevue l, CancellationToken ct)
+    {
+        var c = l.Conserve;
+        var autreMonnaie = c is not null && c.MontantLu == l.Montant;   // montant changé : l'autre monnaie n'est plus juste
+        return ExecuterAsync(cnx, tx, """
+            INSERT INTO {b}.FAC100 (RSOC, RNFAC, FGANNE, FGMOIS, FGJOUR, FGNEL, FGNLG, FGCDL, FGQTE, FGDES, FGPU, FGPER, FGUN, FGART, FGIND,
+                FGMTN, FGTCOL, FGLBL, FGMON, FGLIGD, FGBL, FGBLEL, FGBLLG, FGCTC, FGNBR, FGPUA, FGMTNA)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, ct, [.. cle, element, l.Numero, l.CodeLigne, l.Quantite, Tronquer(l.Designation, 40), l.Pu, l.Remise, l.Unite, l.Article,
+                l.Indice, l.Montant, l.TauxCommission, l.LigneBl, l.Monnaie, l.LigneCommande, l.Bl, l.ElementBl, l.LigneDuBl,
+                c?.CodeProduitClient ?? "", c?.Nombre ?? 0m, autreMonnaie ? c!.PuAutreMonnaie : 0m, autreMonnaie ? c!.MontantAutreMonnaie : 0m]);
     }
 
     // Ordre SQL dans la transaction (chaîne vide passée en blanc, comme les zones CHAR) ; nombre de lignes touchées

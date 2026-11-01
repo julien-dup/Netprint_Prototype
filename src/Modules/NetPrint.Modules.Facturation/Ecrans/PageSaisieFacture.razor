@@ -1,9 +1,12 @@
 @page "/facturation/saisie"
+@page "/facturation/factures/{Numero:int}/{Jour}/modifier"
 @* =====================================================================
    Saisie d'une facture à partir de BL (FAC085 → FAC150) : un BL, une commande ou un donneur d'ordre ; ses BL facturables pas
    encore facturés sont listés (sans exiger la facturation automatique) ; les BL cochés donnent une facture préparée comme en
    automatique (une commande = un élément), dont l'en-tête et les lignes se corrigent avant la création.
    Ouverte avec ?bl=… depuis la fiche BL : le BL est cherché d'office. Sinon rien n'est lu à l'ouverture.
+   Seconde adresse …/modifier : facture pas encore éditée ouverte en modification (FAC150 mode M), mêmes zones ; un changement
+   de date est reporté sur tous les fichiers de la facture.
    ===================================================================== *@
 @using System.Globalization
 @using NetPrint.Modules.Facturation.Services
@@ -12,14 +15,14 @@
 @inject Dialogues Dialogues
 @inject Notifications Notifications
 
-<PageTitle>Nouvelle facture · NetPrint</PageTitle>
+<PageTitle>@(EnModification ? $"Modifier la facture {Numero}" : "Nouvelle facture") · NetPrint</PageTitle>
 <HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
 
 <fieldset class="barre-outils">
     <button @onclick='() => Navigation.NavigateTo("facturation/factures")' title="Retour à la liste des factures">← Factures</button>
     @if (facture is not null && creee is null)
     {
-        <button @onclick="Abandonner" title="Revenir au choix des BL sans rien créer">✖ Abandonner</button>
+        <button @onclick="Abandonner" title="@(EnModification ? "Revenir à la facture sans rien enregistrer" : "Revenir au choix des BL sans rien créer")">✖ Abandonner</button>
         <span class="espace"></span>
         @if (facture.PeutEditerDefinitif)
         {
@@ -28,11 +31,12 @@
             </label>
         }
         <button class="bouton-principal" disabled="@(occupe || controle?.Erreurs.Count > 0)" @onclick="CreerAsync"
-                title="Crée la facture (n° pris au compteur) et marque les BL facturés">✔ Créer @(facture.Avoir ? "l'avoir" : "la facture")</button>
+                title="@(EnModification ? "Enregistre l'en-tête et les lignes ; une nouvelle date est reportée sur tous les fichiers de la facture" : "Crée la facture (n° pris au compteur) et marque les BL facturés")">
+            ✔ @(EnModification ? "Enregistrer" : $"Créer {(facture.Avoir ? "l'avoir" : "la facture")}")</button>
     }
 </fieldset>
 
-@if (facture is null)
+@if (facture is null && !EnModification)
 {
     <form class="panneau-criteres" @onsubmit="ChercherAsync">
         <label class="champ"><span>N° BL</span><input type="number" class="num6 @Err(nameof(C.Bl))" @bind="C.Bl" /></label>
@@ -77,6 +81,10 @@
                 <button @onclick="Recommencer">➕ Autre facture</button>
             </div>
         </section>
+    }
+    else if (facture is null && EnModification)
+    {
+        <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreurOuverture)</p>
     }
     else if (facture is null)
     {
@@ -135,7 +143,7 @@
     {
         var f = facture;
         <section class="carte en-tete-saisie">
-            <h3>@(f.Avoir ? "Avoir" : "Facture") pour @f.CompteGeneral @f.CompteClient <span class="discret">@f.NomClient</span></h3>
+            <h3>@(f.Avoir ? "Avoir" : "Facture") @(f.Numero is { } n ? $"n° {n} du {f.DateOrigine:dd/MM/yyyy} " : "")pour @f.CompteGeneral @f.CompteClient <span class="discret">@f.NomClient</span></h3>
             <div class="grille-champs">
                 <label class="champ"><span>Date</span><input type="date" class="@Err(nameof(f.Date))" @bind="f.Date" @bind:after="ChangerDate" /></label>
                 <div class="champ">
@@ -245,6 +253,11 @@
 
 @code {
     [SupplyParameterFromQuery(Name = "bl")] public int? BlDemande { get; set; }
+    [Parameter] public int? Numero { get; set; }   // modification d'une facture existante
+    [Parameter] public string? Jour { get; set; }
+
+    private bool EnModification => Numero is not null;
+    private string? erreurOuverture;
 
     private CleFacturation C { get; set; } = new();
     private BlsAFacturer? bls;
@@ -259,6 +272,11 @@
 
     protected override async Task OnInitializedAsync()
     {
+        if (EnModification)
+        {
+            await OuvrirAsync();
+            return;
+        }
         if (BlDemande is not > 0) return;
         C.Bl = BlDemande;
         await ChercherAsync();
@@ -353,9 +371,28 @@
         Recalculer();
     }
 
+    private async Task OuvrirAsync()
+    {
+        if (!DateOnly.TryParseExact(Jour, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            erreurOuverture = "Date de facture invalide.";
+            return;
+        }
+        occupe = true;
+        try
+        {
+            facture = await Saisie.OuvrirAsync(Numero!.Value, date);
+            Recalculer();
+        }
+        catch (RegleMetierException ex) { erreurOuverture = ex.Message; }
+        catch (Exception ex) { erreurOuverture = $"Ouverture de la facture impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
     private void Abandonner()
     {
-        (facture, controle) = (null, null);
+        if (EnModification) Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}");
+        else (facture, controle) = (null, null);
     }
 
     private void Recommencer()
@@ -374,6 +411,20 @@
         try
         {
             var f = facture;
+            if (f.Modification)
+            {
+                var autreDate = f.Date != f.DateOrigine;
+                var question = $"Enregistrer la {(f.Avoir ? "modification de l'avoir" : "modification de la facture")} {f.Numero} ({E(controle!.Ventes)} HT) ?"
+                    + (autreDate ? $"\nSa date passe du {f.DateOrigine:dd/MM/yyyy} au {f.Date:dd/MM/yyyy}, dans tous ses fichiers (BL facturés compris)." : "")
+                    + (controle.Anomalies.Count > 0 ? $"\nElle sera « à contrôler » : {string.Join(", ", controle.Anomalies)}." : "")
+                    + (editerDefinitif && controle.Anomalies.Count == 0 ? "\nElle sera éditée en définitif." : "");
+                if (!await Dialogues.ConfirmerAsync(question, "Modifier la facture", "Enregistrer")) return;
+                var r = await Saisie.ModifierAsync(f, editerDefinitif);
+                Notifications.Succes($"{(f.Avoir ? "Avoir" : "Facture")} {r.Numero} enregistré{(f.Avoir ? "" : "e")}.");
+                if (r.Avertissement is not null) Notifications.Erreur(r.Avertissement);
+                Navigation.NavigateTo($"facturation/factures/{r.Numero}/{r.Date:yyyyMMdd}");
+                return;
+            }
             var message = $"Créer {(f.Avoir ? "l'avoir" : "la facture")} de {E(controle!.Ventes)} HT au {f.Date:dd/MM/yyyy} ?"
                 + "\nLe n° est pris sur le compteur et les BL sont marqués facturés."
                 + (controle.Anomalies.Count > 0 ? $"\nElle sera « à contrôler » : {string.Join(", ", controle.Anomalies)}." : "")
@@ -384,7 +435,7 @@
         }
         catch (CompteurFacturesAbsentException ex) { compteurAbsent = ex; }
         catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
-        catch (Exception ex) { Notifications.Erreur($"Création impossible : {ex.Message}"); }
+        catch (Exception ex) { Notifications.Erreur($"{(facture?.Modification == true ? "Enregistrement" : "Création")} impossible : {ex.Message}"); }
         finally { occupe = false; }
     }
 

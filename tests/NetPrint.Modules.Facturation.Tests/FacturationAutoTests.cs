@@ -130,6 +130,7 @@ public class GenerationFacturesTests
 }
 
 // Facturation automatique sur la base de test : simulation (lecture seule) puis génération d'une facture, base remise à l'identique
+[Collection(EcrituresNp11f.Nom)]   // une seule classe d'écriture à la fois : compteurs et BL partagés
 public class FacturationAutoBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
 {
     internal sealed class Utilisateur(int societe) : NetPrint.Socle.Session.IUtilisateurCourant

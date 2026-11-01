@@ -8,6 +8,7 @@ namespace NetPrint.Modules.Facturation.Tests;
 
 // Édition définitive (FAC201 en définitif) sur la base de test : facture d'essai 100544 du 23/10/2008 (société 8, « à éditer »).
 // Tout ce que l'édition touche (FAC080, FAC090, EXP010, AB001, NEG100) est relevé avant, puis remis à l'identique.
+[Collection(EcrituresNp11f.Nom)]   // une seule classe d'écriture à la fois : compteurs et BL partagés
 public class EditionDefinitiveTests
 {
     private const int Societe = 8, Numero = 100544;
