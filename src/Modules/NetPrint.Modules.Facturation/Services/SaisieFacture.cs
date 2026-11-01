@@ -19,6 +19,7 @@ internal static class SaisieFacture
         IReadOnlyList<CodeLibelle>? sousCategories = null) => new()
     {
         SansCommande = categories is not null,
+        CodeVente = f.DernierDossier.CodeVente,
         Categories = categories ?? [],
         SousCategories = sousCategories ?? [],
         CommandeSansBl = commandeSansBl,
@@ -117,6 +118,11 @@ internal static class SaisieFacture
 
         // Ajout à une facture existante : son en-tête ne change pas (ni saisi ni écrit), il n'est pas contrôlé
         if (!s.Ajout) ControlerEnTete(s, Erreur);
+        // Période de référence d'un avoir (FAC150 R14) : début et fin, dans l'ordre
+        if ((s.PeriodeDebut is null) != (s.PeriodeFin is null))
+            Erreur(nameof(s.PeriodeDebut), "Période de référence : indiquez le début et la fin, ou ni l'un ni l'autre.");
+        else if (s.PeriodeDebut > s.PeriodeFin) Erreur(nameof(s.PeriodeDebut), "Période de référence : le début est après la fin.");
+        else if (s.PeriodeDebut is not null && !s.Avoir) Erreur(nameof(s.PeriodeDebut), "La période de référence ne concerne que les avoirs.");
         // Sans commande (FAC150 R18, R21) : catégorie et sous-catégorie obligatoires et existantes, au moins une ligne
         if (s.SansCommande)
             foreach (var e in s.Elements)

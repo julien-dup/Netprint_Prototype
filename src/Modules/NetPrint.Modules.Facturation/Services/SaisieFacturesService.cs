@@ -1,6 +1,7 @@
 using NetPrint.Modules.Facturation.Contrats;
 using NetPrint.Modules.Facturation.Donnees;
 using NetPrint.Socle;
+using NetPrint.Socle.Donnees;
 using NetPrint.Socle.Session;
 
 namespace NetPrint.Modules.Facturation.Services;
@@ -253,7 +254,7 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
     // Client sans commande : en-tête de la fiche client, un élément sans dossier (FETYP 4, 3 pour la catégorie $1, 2 pour $2 :
     // FAC150), catégorie et sous-catégorie de l'élément saisi (vides à la préparation)
     private async Task<(FacturePrevue Facture, ParametresGeneration Parametres, string Enseigne, string Nom)> RelireClientAsync(int societe,
-        int general, int client, ElementSaisie? saisi, CancellationToken ct)
+        int general, int client, ElementSaisie? saisi, bool avoir, CancellationToken ct)
     {
         var c = await bls.LireClientAsync(societe, general, client, ct)
                 ?? throw new RegleMetierException($"Le client {general} {client} n'existe pas.");
@@ -263,14 +264,23 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         var d = new DossierAFacturer(0, "", type, c.CodeVente, "", "", "", 0, 0, "", null, categorie, sousCategorie, 0, 0, 0, "E", 0, "", "", "O",
             AdresseEnvoi.Aucune, true, c.Releve, c.Presentation, []);
         var element = new ElementPrevu(1, d, 0, 0, 0, [], [], [], [], []);
-        return (new FacturePrevue(false, general, client, 0, 0, 6, c.Conditions, c.Representant, AdresseEnvoi.Aucune, d, "", [element], [], 0),
+        return (new FacturePrevue(avoir, general, client, 0, 0, 6, c.Conditions, c.Representant, AdresseEnvoi.Aucune, d, "", [element], [], 0),
             p, "", c.Nom);
     }
 
-    public async Task<FactureSaisie> PreparerClientAsync(int compteGeneral, int compteClient, CancellationToken ct = default)
+    public async Task<ChiffreAffairesPeriode> ChiffreAffairesAsync(int compteGeneral, int compteClient, DateOnly du, DateOnly au,
+        CancellationToken ct = default)
     {
         var u = await ExigerDroitAsync(ct);
-        var (f, p, _, nom) = await RelireClientAsync(u.Societe, compteGeneral, compteClient, null, ct);
+        if (du > au) throw new RegleMetierException("Période : le début est après la fin.");
+        var (ca, documents) = await bls.ChiffreAffairesAsync(u.Societe, compteGeneral, compteClient, du, au, ct);
+        return new ChiffreAffairesPeriode(ca, documents);
+    }
+
+    public async Task<FactureSaisie> PreparerClientAsync(int compteGeneral, int compteClient, bool avoir = false, CancellationToken ct = default)
+    {
+        var u = await ExigerDroitAsync(ct);
+        var (f, p, _, nom) = await RelireClientAsync(u.Societe, compteGeneral, compteClient, null, avoir, ct);
         var (modes, representants) = await donnees.ListesAsync(u.Societe, ct);
         var (categories, sousCategories) = await bls.CategoriesAsync(u.Societe, ct);
         return SaisieFacture.VersSaisie(f, [], nom, p, DateOnly.FromDateTime(DateTime.Today), modes, representants, await PeutEditerAsync(u, ct),
@@ -372,7 +382,7 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
         if (controle.Erreurs.Count > 0) throw new RegleMetierException(string.Join("\n", controle.Erreurs.Select(e => e.Message)));
         var date = s.Date!.Value;
 
-        var (relue, p, enseigne, _) = s.SansCommande ? await RelireClientAsync(u.Societe, s.CompteGeneral, s.CompteClient, s.Elements.Single(), ct)
+        var (relue, p, enseigne, _) = s.SansCommande ? await RelireClientAsync(u.Societe, s.CompteGeneral, s.CompteClient, s.Elements.Single(), s.Avoir, ct)
             : s.CommandeSansBl is { } commande ? await RelireCommandeAsync(u.Societe, commande.Numero, commande.Cle, ct)
             : await RelireAsync(u.Societe, s.Bls, ct);
         if (s.SansCommande)
@@ -386,6 +396,10 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
                 throw new RegleMetierException($"Le code vente {absent} n'existe pas pour la catégorie {categorie} (FAC030).");
             if (s.Escompte != 0 && !trouves.GetValueOrDefault("ES"))
                 throw new RegleMetierException($"Pas de compte d'escompte (ES) pour la catégorie {categorie} (FAC030) : l'escompte ne peut pas être comptabilisé.");
+            // FAC150 R15 : avoir d'un client facturé par EDI : facture d'origine ou période de référence obligatoire
+            if (s.Avoir && s.PeriodeDebut is null
+                && await bls.FactureParEdiAsync(u.Societe, s.CompteGeneralFacture ?? s.CompteGeneral, s.CompteClientFacture ?? s.CompteClient, ct))
+                throw new RegleMetierException("Le client facturé reçoit ses factures par EDI : indiquez la période de référence de l'avoir.");
         }
         if (SaisieFacture.Empreinte(relue) != s.Empreinte)
             throw new RegleMetierException(s.SansCommande ? "Le client a changé depuis la préparation de la facture : recommencez."
@@ -404,7 +418,10 @@ internal sealed class SaisieFacturesService(FacturationAutoDb2 bls, SaisieFactur
 
         // Compteur absent : CompteurFacturesAbsentException levée à l'écriture (transaction annulée), l'écran propose de le créer
         var numerotation = new NumerotationFactures(type, contexte.GereEnseignes, enseigne);
-        var f = SaisieFacture.Appliquer(relue, s, p, controle.Anomalies);
+        var f = SaisieFacture.Appliquer(relue, s, p, controle.Anomalies) with
+        {
+            Periode = s.Avoir && s.PeriodeDebut is { } du && s.PeriodeFin is { } au ? (BaseDb2.AAAAMMJJ(du), BaseDb2.AAAAMMJJ(au)) : (0, 0),
+        };
         var numero = await bls.EcrireAsync(u.Societe, u.Profil, numerotation, date, f, ct);
         return await TerminerAsync(u, numero, date, f.AControler, editerDefinitif, ct);
     }

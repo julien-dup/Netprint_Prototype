@@ -62,14 +62,14 @@ internal sealed partial class FacturationAutoDb2
                 INSERT INTO {b}.FAC080 (RSOC, RNFAC, FDANNE, FDMOIS, FDJOUR, FDTYPE, FDREF, FDCNNE, FDCOIS, FDCOUR, FDGEND, FDCLID, FDGENF, FDCLIF,
                     FDRGLT, FDRELE, FDECHA, FDECHM, FDECHJ, FDNECH, FDNLE, FDART, FDESC, FDCPT, FDEDIT, FDPLEL, FDFJ, FDNOM, FDRUE1, FDRUE2,
                     FDPOST, FDVILL, FDPAYS, FDENS, FDREP, FDCOMP, FDJALP, FDJALM, FDTRAT, FDEDT, FDBROU, FDTAGR, FDVEN, FDATT, FDMON, FDCDEV,
-                    FDCOURD, FDPROF, FDPRES)
+                    FDCOURD, FDPROF, FDPRES, FDRFAD, FDRFAF)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    'N', 'N', 'N', 'N', 'N', 'N', 'N', ?, ?, 'E', 'EUR', 1, ?, ?)
+                    'N', 'N', 'N', 'N', 'N', 'N', 'N', ?, ?, 'E', 'EUR', 1, ?, ?, ?, ?)
                 """, [.. cle, f.Avoir ? "A" : "F", dd.Reference, dd.DateCommande?.Year ?? 0, dd.DateCommande?.Month ?? 0, dd.DateCommande?.Day ?? 0,
                     f.CompteGeneral, f.CompteClient, f.CompteGeneralFacture, f.CompteClientFacture, c.Mode, dd.Releve, echeance.Year,
                     echeance.Month, echeance.Day, c.NombreJours, c.Le, c.Arrete, escompte, acompte, f.AControler ? "A" : "O", f.Elements.Count,
                     a.FormeJuridique, a.Nom, a.Rue1, a.Rue2, a.CodePostal, a.Ville, a.Pays, numerotation.Enseigne, f.Representant, f.CodeVente,
-                    dd.AlAttention, Tronquer(profil, 10), dd.Presentation]);
+                    dd.AlAttention, Tronquer(profil, 10), dd.Presentation, f.Periode.Debut, f.Periode.Fin]);
             // Textes de pied du client (CLITXF)
             var (gen, cli) = f.Pied;
             await Executer("""

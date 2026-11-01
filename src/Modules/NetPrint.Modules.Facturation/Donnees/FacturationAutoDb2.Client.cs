@@ -1,5 +1,6 @@
 using NetPrint.Modules.Facturation.Contrats;
 using NetPrint.Modules.Facturation.Services;
+using NetPrint.Socle.Donnees;
 
 namespace NetPrint.Modules.Facturation.Donnees;
 
@@ -10,7 +11,8 @@ internal sealed record ClientAFacturer(string Nom, ConditionsReglement Condition
 
 // =====================================================================
 // Facture d'un client sans commande (FAC085 clé client → FAC150, élément sans dossier) : fiche du client, catégories (AA0009) et
-// sous-catégories (AE0003) non supprimées, codes vente par catégorie (FAC030, catégorie « ** » à défaut : R20, R34).
+// sous-catégories (AE0003) non supprimées, codes vente par catégorie (FAC030, catégorie « ** » à défaut : R20, R34). Avoir d'un client
+// sans facture d'origine (remise de fin d'année) : période de référence FDRFAD / FDRFAF, obligatoire pour un client EDI (R14, R15).
 // =====================================================================
 internal sealed partial class FacturationAutoDb2
 {
@@ -39,6 +41,30 @@ internal sealed partial class FacturationAutoDb2
                          ct, societe))
             while (await rd.ReadAsync(ct)) sous.Add(new CodeLibelle($"{rd.Texte(0).Trim()}/{rd.Texte(1).Trim()}", rd.Texte(2).Trim()));
         return (categories, sous);
+    }
+
+    // Client facturé par EDI (PRT057F.PFFMT commence par EDI) : un avoir doit citer sa facture d'origine ou une période (FAC150 R15)
+    public async Task<bool> FactureParEdiAsync(int societe, int general, int client, CancellationToken ct)
+    {
+        await using var cnx = await OuvrirAsync(ct);
+        await using var rd = await Lire(cnx, null, "SELECT 1 FROM {b}.PRT057F WHERE RSOC = ? AND RGEN = ? AND RCLI = ? AND PFFMT LIKE 'EDI%'",
+            ct, societe, general, client);
+        return await rd.ReadAsync(ct);
+    }
+
+    // Chiffre d'affaires HT facturé au client sur une période (remise de fin d'année) : factures et avoirs édités dont il est le client
+    // facturé (ou le donneur d'ordre sans autre client facturé), avoirs déduits, hors avoirs de remise de fin d'année (période FDRFAD ;
+    // un avoir EDI qui porte une période pour une autre raison est donc écarté aussi)
+    public async Task<(decimal ChiffreAffaires, int Documents)> ChiffreAffairesAsync(int societe, int general, int client, DateOnly du, DateOnly au,
+        CancellationToken ct)
+    {
+        await using var cnx = await OuvrirAsync(ct);
+        await using var rd = await Lire(cnx, null, """
+            SELECT COALESCE(SUM(CASE WHEN FDTYPE = 'A' THEN -FDMTN ELSE FDMTN END), 0), COUNT(*) FROM {b}.FAC080
+            WHERE RSOC = ? AND FDEDIT = 'E' AND FDRFAD = 0 AND FDANNE * 10000 + FDMOIS * 100 + FDJOUR BETWEEN ? AND ?
+              AND ((FDGENF = ? AND FDCLIF = ?) OR (FDCLIF = 0 AND FDGEND = ? AND FDCLID = ?))
+            """, ct, societe, BaseDb2.AAAAMMJJ(du), BaseDb2.AAAAMMJJ(au), general, client, general, client);
+        return await rd.ReadAsync(ct) ? (rd.Nombre(0), rd.Entier(1)) : (0, 0);
     }
 
     // Codes de FAC030 (codes vente, ES pour l'escompte) utilisables pour la catégorie, ou à défaut pour la catégorie « ** », et s'ils

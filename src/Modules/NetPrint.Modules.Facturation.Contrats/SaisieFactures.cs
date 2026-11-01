@@ -83,6 +83,9 @@ public sealed class FactureSaisie
     public (int Numero, string Cle)? CommandeSansBl { get; init; }   // facture d'une commande sans BL (relue à la création)
     public string? Avertissement { get; init; }   // à lire avant de créer (ex. : commande déjà sur une facture pas encore éditée)
     public bool SansCommande { get; init; }   // facture d'un client sans commande : catégorie et sous-catégorie à choisir
+    public string CodeVente { get; init; } = "";   // code vente par défaut (client ou commande), pour les lignes ajoutées
+    public DateOnly? PeriodeDebut { get; set; }   // avoir sans facture d'origine : période de référence (remise de fin d'année)
+    public DateOnly? PeriodeFin { get; set; }
     public bool Modification => Numero is not null && !Ajout;
     public bool Avoir { get; init; }
     public int CompteGeneral { get; init; }
@@ -117,6 +120,8 @@ public sealed class FactureSaisie
 // Contrôle de la saisie : Erreurs bloquantes ; Anomalies : la facture sera créée « à contrôler » (comme en automatique)
 public sealed record ControleFactureSaisie(IReadOnlyList<ErreurLancement> Erreurs, IReadOnlyList<string> Anomalies, decimal Ventes);
 
+public sealed record ChiffreAffairesPeriode(decimal ChiffreAffaires, int Documents);
+
 // Facture créée ; Avertissement : créée, mais l'édition définitive demandée a échoué
 public sealed record FactureCreee(int Numero, DateOnly Date, bool AControler, bool EditeeDefinitif, string? Avertissement);
 
@@ -134,7 +139,12 @@ public interface ISaisieFactures
 
     // Facture d'un client sans commande (FAC085 clé client, élément sans dossier) : en-tête du client, catégorie et sous-catégorie
     // à choisir, lignes saisies
-    Task<FactureSaisie> PreparerClientAsync(int compteGeneral, int compteClient, CancellationToken ct = default);
+    // avoir : avoir du client sans facture d'origine (remise de fin d'année : période de référence)
+    Task<FactureSaisie> PreparerClientAsync(int compteGeneral, int compteClient, bool avoir = false, CancellationToken ct = default);
+
+    // Chiffre d'affaires HT facturé au client sur une période (factures − avoirs édités, hors remises de fin d'année), pour calculer
+    // une remise de fin d'année
+    Task<ChiffreAffairesPeriode> ChiffreAffairesAsync(int compteGeneral, int compteClient, DateOnly du, DateOnly au, CancellationToken ct = default);
 
     // Montants des lignes et des éléments recalculés, saisie contrôlée (sans base)
     ControleFactureSaisie Recalculer(FactureSaisie facture);

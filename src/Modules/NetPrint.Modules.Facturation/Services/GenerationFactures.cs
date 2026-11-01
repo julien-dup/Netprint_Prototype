@@ -109,6 +109,9 @@ internal sealed record FacturePrevue(
     public bool AControler => Anomalies.Count > 0;
     public decimal Ventes => Elements.Sum(e => e.Ventes);
 
+    // Avoir : période de référence (remise de fin d'année, FDRFAD / FDRFAF en AAAAMMJJ), 0 sinon
+    public (int Debut, int Fin) Periode { get; init; }
+
     // Textes de pied : ceux du donneur d'ordre ou du client facturé, selon la dernière commande (FAC402P SPAB001)
     public (int General, int Client) Pied => DernierDossier.PiedDuDonneurOrdre || CompteClientFacture == 0
         ? (CompteGeneral, CompteClient) : (CompteGeneralFacture, CompteClientFacture);

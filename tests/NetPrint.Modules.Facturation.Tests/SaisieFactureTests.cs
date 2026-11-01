@@ -171,6 +171,17 @@ public class SaisieFactureRevueTests
     }
 
     [Fact]
+    public void Periode_de_reference_d_un_avoir()
+    {
+        var f = new FactureSaisie { Numero = 1, DateOrigine = new DateOnly(2026, 11, 1), Ajout = true, Avoir = true, PeriodeDebut = new DateOnly(2025, 1, 1) };
+        Assert.Contains(SaisieFacture.Recalculer(f).Erreurs, e => e.Message.Contains("le début et la fin"));
+        f.PeriodeFin = new DateOnly(2024, 12, 31);
+        Assert.Contains(SaisieFacture.Recalculer(f).Erreurs, e => e.Message.Contains("après la fin"));
+        f.PeriodeFin = new DateOnly(2025, 12, 31);
+        Assert.Empty(SaisieFacture.Recalculer(f).Erreurs);
+    }
+
+    [Fact]
     public void Ajout_a_une_facture_sans_controle_de_l_en_tete()
     {
         // En-tête vide (pas de représentant, de règlement ni de date) : bloquant en création, ignoré en ajout (il n'est pas écrit)
@@ -581,6 +592,58 @@ public class SaisieFactureBaseTests(Xunit.Abstractions.ITestOutputHelper sortie)
         {
             foreach (var n in numeros)
                 foreach (var table in new[] { ("FAC100", "FG"), ("FAC105", "FT"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
+                    await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
+                        societe, n, date.Year, date.Month, date.Day);
+            foreach (var (table, rrn, colonnes, valeurs) in avant)
+                await FacturationAutoBaseTests.ExecuterAsync(cnx, $"UPDATE {{b}}.{table} t SET {string.Join(", ", colonnes.Split(',').Select(x => $"{x.Trim()} = ?"))} WHERE RRN(t) = ?",
+                    [.. valeurs, rrn]);
+        }
+        var remis = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);
+        Assert.Equal(avant.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))), remis.Select(x => (x.Table, x.Rrn, string.Join("|", x.Valeurs))));
+    }
+
+    [FactDb2Ecriture]
+    public async Task Avoir_de_remise_de_fin_d_annee_puis_remise_a_l_identique()
+    {
+        const int societe = 29, bl = 29379;
+        var date = DateOnly.FromDateTime(DateTime.Today);
+        var service = Service(societe);
+        DateOnly du = new(2025, 1, 1), au = new(2025, 12, 31);
+        var ca = await service.ChiffreAffairesAsync(411029, 1, du, au);
+        sortie.WriteLine($"CA 2025 de 411029 1 : {ca.ChiffreAffaires:N2} € ({ca.Documents} documents)");
+
+        var f = await service.PreparerClientAsync(411029, 1, avoir: true);
+        Assert.True(f.Avoir && f.SansCommande);
+        var e = f.Elements[0];
+        (e.Categorie, e.SousCategorie) = ("DC", "DC");
+        f.Representant ??= int.Parse(f.Representants[0].Code);
+        (f.PeriodeDebut, f.PeriodeFin) = (du, au);
+        e.Lignes.Add(new LigneSaisie { CodeLigne = "0", Designation = "Remise de fin d'année 2025", Quantite = 1, Unite = f.Unites.Keys.First(), Pu = 12.34m });
+        Assert.Empty(service.Recalculer(f).Erreurs);
+
+        await using var cnx = NetPrint.Socle.Donnees.BaseDb2.Connexion(BaseDeTest.Configuration);
+        await cnx.OpenAsync();
+        var avant = await FacturationAutoBaseTests.ReleverAsync(cnx, societe, bl, date);   // compteur FAC040 compris
+        int? numero = null;
+        try
+        {
+            numero = (await service.CreerAsync(f, editerDefinitif: false)).Numero;
+            await using var cmd = cnx.CreateCommand();
+            cmd.CommandText = $"SELECT FDTYPE, FDRFAD, FDRFAF, FDFACO FROM {NetPrint.Socle.Donnees.BaseDb2.Bibliotheque(BaseDeTest.Configuration)}.FAC080 "
+                + "WHERE RSOC = ? AND RNFAC = ? AND FDANNE = ? AND FDMOIS = ? AND FDJOUR = ?";
+            foreach (var v in new object[] { societe, numero.Value, date.Year, date.Month, date.Day }) NetPrint.Socle.Donnees.BaseDb2.Valeur(cmd.Parameters, v);
+            await using var rd = await cmd.ExecuteReaderAsync();
+            Assert.True(await rd.ReadAsync());
+            Assert.Equal(("A", 20250101m, 20251231m, 0m), ($"{rd.GetValue(0)}".Trim(), Convert.ToDecimal(rd.GetValue(1)), Convert.ToDecimal(rd.GetValue(2)),
+                Convert.ToDecimal(rd.GetValue(3))));
+            var relue = await service.OuvrirAsync(numero.Value, date);
+            Assert.True(relue.Avoir);
+            sortie.WriteLine($"Avoir {numero} de remise de fin d'année 2025 pour 411029 1");
+        }
+        finally
+        {
+            if (numero is { } n)
+                foreach (var table in new[] { ("FAC100", "FG"), ("FAC090", "FE"), ("FAC081", "FD"), ("FAC080", "FD") })
                     await FacturationAutoBaseTests.ExecuterAsync(cnx, $"DELETE FROM {{b}}.{table.Item1} WHERE RSOC = ? AND RNFAC = ? AND {table.Item2}ANNE = ? AND {table.Item2}MOIS = ? AND {table.Item2}JOUR = ?",
                         societe, n, date.Year, date.Month, date.Day);
             foreach (var (table, rrn, colonnes, valeurs) in avant)
