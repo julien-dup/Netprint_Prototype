@@ -98,8 +98,7 @@ réel. F1 peut démarrer avant, en lecture seule, avec un PDF provisoire.
 1. ~~PDF de référence~~ : **réponse de David (01/11)** : on garde le fonctionnement actuel, PDF recalculé, pas de stockage pour l'instant (fonction intéressante pour plus tard).
 2. **VisuFacture** : qui le lance, sert-il encore ? (aucune référence trouvée dans NP11 ni dans les autres projets WinDev)
 3. ~~Modification d'une facture comptabilisée~~ : **réponse de David (01/11)** : interdite (on passe par un avoir).
-4. **Avoir** : un avoir total doit-il toujours remettre les BL « à facturer » (le RPG le fait, la facturation automatique peut alors
-   les refacturer) ?
+4. ~~Avoir total et BL~~ : **réponse de David (01/11)** : oui, l'avoir total libère les BL (ils redeviennent à facturer), comme le RPG. Proposé : une case « ne plus facturer ces BL » (HFACTU = N) pour une annulation définitive, en attente de son accord.
 5. **CCTYPC 2** : FAC085 refuse le type 2 (« mise en stock »), le glossaire dit 2 = fabrication : lequel est juste ?
 6. **FDTAGR** : décrit « facture réglée » dans la DDS, utilisé comme « exclure du CA » : confirmer.
 7. **Envoi FTP / EDI** : quels formats PRT057F (CSV1/2, TXT1, EDI1/2, EDIP) sont réellement utilisés, et chez quels clients ?
