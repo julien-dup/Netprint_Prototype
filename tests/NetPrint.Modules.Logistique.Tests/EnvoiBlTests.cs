@@ -40,7 +40,7 @@ public class EnvoiBlTests
         public Task MarquerEditeAsync(int numeroBl, CancellationToken ct = default) { Marques++; return Task.CompletedTask; }
     }
 
-    private sealed class Contacts(params ContactEnvoi[] liste) : IContactsTiers
+    internal sealed class Contacts(params ContactEnvoi[] liste) : IContactsTiers
     {
         public DocumentEnvoye? Demande;
         public Task<IReadOnlyList<ContactEnvoi>> LireAsync(int societe, int compteGeneral, int compteClient, DocumentEnvoye document,
@@ -51,7 +51,7 @@ public class EnvoiBlTests
         }
     }
 
-    private sealed class Messagerie(bool disponible = true, bool echec = false) : IMessagerie
+    internal sealed class Messagerie(bool disponible = true, bool echec = false) : IMessagerie
     {
         public readonly List<MessageBrouillon> Envoyes = [];
         public Task<EtatMessagerie> EtatAsync(int societe, string? expediteur = null, CancellationToken ct = default) =>
@@ -64,7 +64,7 @@ public class EnvoiBlTests
         }
     }
 
-    private sealed class Journal : IJournalEnvois
+    internal sealed class Journal : IJournalEnvois
     {
         public readonly List<EnvoiDocument> Lignes = [];
         public Task EcrireAsync(IReadOnlyList<EnvoiDocument> envois, CancellationToken ct = default) { Lignes.AddRange(envois); return Task.CompletedTask; }
@@ -80,12 +80,12 @@ public class EnvoiBlTests
             Task.FromResult<(string, byte[])?>(Lignes.Count >= id && Lignes[(int)id - 1].Pdf is { } pdf ? (Lignes[(int)id - 1].NomPdf, pdf) : null);
     }
 
-    private sealed class Utilisateurs : IUtilisateurs
+    internal sealed class Utilisateurs : IUtilisateurs
     {
         public Task<string> EmailAsync(string profil, CancellationToken ct = default) => Task.FromResult("np11@exemple.fr");
     }
 
-    private sealed class Societes : ISocietes
+    internal sealed class Societes : ISocietes
     {
         public Task<string?> LireNomAsync(int societe, CancellationToken ct = default) => Task.FromResult<string?>("IMPRIMERIE TEST");
         public Task<IdentiteSociete?> LireIdentiteAsync(int societe, string enseigne = "", string typeLogo = "", CancellationToken ct = default) =>

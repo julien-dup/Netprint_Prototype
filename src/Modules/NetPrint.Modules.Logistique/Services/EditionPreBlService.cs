@@ -47,7 +47,7 @@ internal sealed class EditionPreBlService(EditionBlDb2 donnees, PreBlDb2 preBl, 
         var feuille = new FeuilleCamion(await societes.LireNomAsync(u.Societe, ct) ?? "", entetes[0], lignes, totaux, parDepot, totaux.Sum(t => t.Palettes),
             totaux.Sum(t => t.PoidsSaisi > 0 ? t.PoidsSaisi : t.Poids), valorisee);
         return await Task.Run(() => DocumentsPdf.Generer(entetes.Count == 1 ? $"Feuille camion {entetes[0].Numero}.pdf"
-                : $"Feuille camion {entetes[0].Numero} et {entetes.Count - 1} autres.pdf",
+                : $"Feuille camion {entetes[0].Numero} et {entetes.Count - 1} autre{(entetes.Count > 2 ? "s" : "")}.pdf",
             new DocumentFeuilleCamion(feuille)), ct);
     }
 

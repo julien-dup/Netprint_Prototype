@@ -76,6 +76,7 @@ public static class LogistiqueModule
         services.AddScoped<IPreBl, PreBlService>();                         // WinDev PreBL / PreBLSansPalette
         services.AddScoped<ISaisiePreBl, SaisiePreBlService>();             // FEN_CreationPREBL, FEN_SaisiePREBL
         services.AddScoped<IEditionPreBl, EditionPreBlService>();           // EXP530NAV / EXP535P2
+        services.AddScoped<IEnvoiPreBl, EnvoiPreBlService>();               // FEN_EnvoideBL (envoi groupé)
         services.AddScoped<Ecrans.PreBl.EtatListePreBl>();
         return services;
     }

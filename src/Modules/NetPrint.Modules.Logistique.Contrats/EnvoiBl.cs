@@ -18,8 +18,9 @@ public interface IEnvoiBl
 // Propose : contact coché d'office (contacts « par défaut » du client pour les BL)
 public sealed record ContactBl(string Nom, string Email, bool ParDefaut, bool Propose);
 
+// Document : n° du pré-BL dans un envoi groupé (0 pour un BL)
 public sealed record EnvoiBlJournalise(long Id, DateTime Date, string Profil, string Canal, string Statut, string Destinataires, string Copies,
-    string Redirection, string Erreur, bool AvecPdf);
+    string Redirection, string Erreur, bool AvecPdf, int Document = 0);
 
 public sealed record OptionsEnvoiBl(
     IReadOnlyList<ContactBl> Contacts, bool MessagerieDisponible, string RaisonIndisponible, string Expediteur, string? Redirection,

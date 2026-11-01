@@ -17,6 +17,9 @@
     <button disabled="@(!droits.Creer)" title="Préparer une expédition : client, adresse, lignes de commande, lots et palettes"
             @onclick='() => Navigation.NavigateTo("logistique/prebl/nouveau")'>➕ Nouveau pré-BL</button>
     <span class="espace"></span>
+    <button disabled="@(coches.Count == 0 || LivreCoche)"
+            title="@(LivreCoche ? "Un pré-BL coché est déjà transformé en BL : décochez-le" : "Envoyer au client les pré-BL cochés (même client), en bons de livraison PDF")"
+            @onclick="() => envoi = true">✉ Envoyer@(coches.Count > 0 ? $" ({coches.Count})" : "")</button>
     <label class="champ-case" title="Montants des frais sur la feuille camion"><input type="checkbox" @bind="valorisee" /> Valorisée</label>
     @if (coches.Count == 0)
     {
@@ -116,8 +119,19 @@
     </section>
 </div>
 
+@if (envoi)
+{
+    <NetPrint.Modules.Logistique.Ecrans.Bl.FenetreEnvoiBl PreBls="@coches.Order().ToList()" Client="@NomClientCoche"
+                                                          OnFermer="() => envoi = false" />
+}
+
 @code {
     private CriteresPreBl C => Etat.Criteres;
+    private bool envoi;
+
+    private bool LivreCoche => Etat.Resultat?.Lignes.Any(e => coches.Contains(e.Numero) && e.Etat == EtatsPreBl.Livre) == true;
+
+    private string NomClientCoche => Etat.Resultat?.Lignes.FirstOrDefault(e => coches.Contains(e.Numero))?.NomClient ?? "";
     private bool chargement;
     private DroitsOpr droits = new(true, false, false, false);
 

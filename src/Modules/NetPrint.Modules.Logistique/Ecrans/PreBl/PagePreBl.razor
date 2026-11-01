@@ -21,6 +21,10 @@
            title="Palettes à prendre, par dépôt et emplacement, avec leurs codes-barres">📋 Feuille de préparation</a>
         <a class="bouton-ancre" href="@($"api/logistique/prebl/camion?n={Numero}")" target="_blank" rel="noopener"
            title="Feuille camion de ce pré-BL (plusieurs pré-BL : depuis la liste)">🚛 Feuille camion</a>
+        @if (fiche.Etat != EtatsPreBl.Livre)
+        {
+            <button title="Envoyer le pré-BL au client (bon de livraison en PDF)" @onclick="() => envoi = true">✉ Envoyer</button>
+        }
     }
     @if (fiche?.Etat == EtatsPreBl.Livre)
     {
@@ -38,6 +42,11 @@
                 @onclick="TransformerAsync">🚚 Transformer en BL</button>
     }
 </fieldset>
+
+@if (envoi && fiche is not null)
+{
+    <NetPrint.Modules.Logistique.Ecrans.Bl.FenetreEnvoiBl PreBls="@([Numero])" Client="@fiche.NomClient" OnFermer="() => envoi = false" />
+}
 
 <div class="contenu contenu-detail fiche-bl">
     @if (fiche is null)
@@ -170,13 +179,14 @@
         { ["F"] = "franco", ["D"] = "dû", ["A"] = "avancé", ["E"] = "enlèvement", ["P"] = "payé" };
 
     private FichePreBl? fiche;
+    private bool envoi;
     private DroitsOpr droits = new(true, false, false, false);
     private string? erreur;
     private bool occupe;
 
     protected override async Task OnParametersSetAsync()
     {
-        (fiche, erreur, occupe) = (null, null, true);
+        (fiche, erreur, occupe, envoi) = (null, null, true, false);
         try
         {
             droits = await PreBls.DroitsAsync();
