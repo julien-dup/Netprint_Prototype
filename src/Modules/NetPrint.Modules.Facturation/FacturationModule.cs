@@ -24,6 +24,7 @@ public static class FacturationModule
         services.AddScoped<ConsultationFacturesDb2>();
         services.AddScoped<IConsultationFactures, ConsultationFacturesService>();   // ConsultationFactures, FAC080S en lecture
         services.AddScoped<Ecrans.EtatListeFactures>();
+        services.AddScoped<CalculFacturesDb2>();                                    // FAC199 / FAC201 (calcul)
         return services;
     }
 
