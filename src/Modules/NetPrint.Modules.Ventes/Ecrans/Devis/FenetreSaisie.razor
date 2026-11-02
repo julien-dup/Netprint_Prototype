@@ -1,0 +1,126 @@
+@* =====================================================================
+   Saisie à partir du devis sélectionné (maquette validée le 30/10/2026) : rappel du devis, puis une carte par action
+   — Modifier, Nouvelle version, Copier, Renouveler. Carte cliquable (double-clic = Valider), flèches du clavier
+   pour passer d'une carte à l'autre, Entrée = Valider, Échap = Annuler.
+   Étape 1 : fenêtre seule. Les actions, leurs paramètres (client de la copie, date de renouvellement…) et les cas
+   où une action est impossible (carte grisée + raison) viendront après l'analyse de FEN_Modification (Devis2017).
+   La création d'un devis est un bouton à part (« ＋ Nouveau devis ») : elle ne part pas d'un devis existant.
+   ===================================================================== *@
+@inject Notifications Notifications
+
+<div class="voile" @onclick="AnnulerAsync">
+    <div class="fenetre complement saisie-devis" role="dialog" aria-modal="true"
+         @onclick:stopPropagation="true" @onkeydown="ClavierFenetre">
+        <div class="titre-fenetre">✏️ Saisie à partir du devis @Ligne.Numero</div>
+        <div class="corps-fenetre">
+            <div class="rappel-devis">
+                <div class="rappel-titre">
+                    <span class="code-titre">@Ligne.Numero</span>
+                    @if (Ligne.Cle.TypeCout == "T")
+                    {
+                        <span class="badge badge-offre">Devis type</span>
+                    }
+                    @if (Ligne.AvecOffre)
+                    {
+                        <span class="badge badge-offre">Offre</span>
+                    }
+                    @if (Ligne.EnCommande)
+                    {
+                        <span class="badge badge-commande">En commande @Ligne.Dossier</span>
+                    }
+                    @if (Ligne.MotifEchec != "")
+                    {
+                        <span class="badge badge-echec">Échec @Ligne.MotifEchec @Affichage.Date(Ligne.DateEchec)</span>
+                    }
+                </div>
+                <div class="rappel-infos">
+                    <div><span class="libelle-info">Client</span> <b>@Ligne.CodeClientProspect</b> @Ligne.NomClientProspect</div>
+                    <div><span class="libelle-info">Désignation</span> <b>@Ligne.Designation1</b> @Ligne.Designation2</div>
+                    <div>
+                        <span class="libelle-info">Quantité</span> <b>@Affichage.Entier(Ligne.Quantite)</b>
+                        <span class="libelle-info">Date</span> <b>@Affichage.Date(Ligne.DateDevis)</b>
+                        <span class="libelle-info">Format fini</span> <b>@Ligne.FormatFini</b>
+                        <span class="libelle-info">PV remis</span> <b>@Affichage.Montant(Ligne.PvRemis)</b>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cartes-saisie" role="radiogroup" aria-label="Action à réaliser" tabindex="0" @ref="cartes"
+                 @onkeydown="ClavierCartes">
+                @foreach (var a in Actions)
+                {
+                    var action = a;
+                    <div class="carte-saisie @(choix == action.Code ? "choisie" : "")" role="radio" aria-checked="@(choix == action.Code ? "true" : "false")"
+                         @onclick="() => choix = action.Code" @ondblclick="() => ValiderAsync(action.Code)">
+                        <div class="carte-saisie-titre">
+                            <span class="carte-saisie-icone">@action.Icone</span>
+                            <span>@action.Titre</span>
+                            <span class="carte-saisie-coche">@(choix == action.Code ? "●" : "○")</span>
+                        </div>
+                        <p class="carte-saisie-texte">@action.Description(Ligne)</p>
+                    </div>
+                }
+            </div>
+        </div>
+        <div class="pied-fenetre">
+            <span class="aide">Double-clic sur une carte = Valider · flèches = changer d'action</span>
+            <span class="espace"></span>
+            <button type="button" @onclick="AnnulerAsync">Annuler</button>
+            <button type="button" class="bouton-principal" disabled="@(choix is null)" @onclick="() => ValiderAsync(choix)">Valider</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public LigneListeDevis Ligne { get; set; } = default!;
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private sealed record ActionSaisie(string Code, string Icone, string Titre, Func<LigneListeDevis, string> Description);
+
+    // Descriptions provisoires : elles seront précisées après l'analyse du WinDev (tables copiées, numérotation, calcul)
+    private static readonly ActionSaisie[] Actions =
+    [
+        new("modifier", "✏️", "Modifier",
+            l => $"Reprendre la saisie du devis {l.Numero} lui-même : caractéristiques, éléments, fabrication, puis nouveau calcul. Le n°, la version et l'hypothèse ne changent pas."),
+        new("version", "🗂", "Nouvelle version",
+            l => $"Créer la version suivante du devis n° {l.Cle.Numero:00000} à partir de celle-ci, puis la saisir. La version {l.Cle.Version} est conservée telle quelle."),
+        new("copier", "⧉", "Copier",
+            l => $"Créer un nouveau devis (nouveau n°) à partir du devis {l.Numero}, pour le même client ou un autre, puis le saisir. Le devis d'origine n'est pas modifié."),
+        new("renouveler", "♻", "Renouveler",
+            l => $"Refaire le devis {l.Numero} à la date du jour, avec les prix et les taux actuels, pour le proposer de nouveau au client."),
+    ];
+
+    private ElementReference cartes;
+    private string? choix = "modifier";
+
+    protected override async Task OnAfterRenderAsync(bool premierAffichage)
+    {
+        if (premierAffichage) await cartes.FocusAsync();
+    }
+
+    private async Task ValiderAsync(string? code)
+    {
+        if (Actions.FirstOrDefault(a => a.Code == code) is not { } action) return;
+        Notifications.Info($"« {action.Titre} » : disponible à l'étape suivante (analyse du WinDev en cours).");
+        await OnFermer.InvokeAsync();
+    }
+
+    private Task AnnulerAsync() => OnFermer.InvokeAsync();
+
+    private async Task ClavierFenetre(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await AnnulerAsync();
+    }
+
+    // Sur les cartes (qui ont le focus à l'ouverture) : flèches = action suivante / précédente, Entrée = Valider
+    private async Task ClavierCartes(KeyboardEventArgs e)
+    {
+        var i = Array.FindIndex(Actions, a => a.Code == choix);
+        switch (e.Key)
+        {
+            case "Enter": await ValiderAsync(choix); break;
+            case "ArrowRight" or "ArrowDown": choix = Actions[(i + 1) % Actions.Length].Code; break;
+            case "ArrowLeft" or "ArrowUp": choix = Actions[(i - 1 + Actions.Length) % Actions.Length].Code; break;
+        }
+    }
+}

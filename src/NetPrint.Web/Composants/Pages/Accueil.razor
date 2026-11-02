@@ -1,7 +1,13 @@
 @page "/"
-@* Accueil : une tuile par module branché. Plus tard : page « ma journée » par rôle (cadrage, refonte UX). *@
+@* Accueil : une tuile par module branché, puis une par application web externe (sous-application IIS, ex. GestionOutils,
+   section « ApplicationsExternes » de la configuration). Plus tard : page « ma journée » par rôle (cadrage, refonte UX).
+   ?retour=<adresse> : une application externe sans session renvoie ici (ex-Portail NetPrint) ; une fois connecté,
+   l'utilisateur y retourne. *@
 @inject IUtilisateurCourant UtilisateurCourant
 @inject IEnumerable<DescriptionModule> Modules
+@using Microsoft.Extensions.Configuration
+@inject IConfiguration Configuration
+@inject NavigationManager Navigation
 
 <PageTitle>Accueil · NetPrint</PageTitle>
 
@@ -20,13 +26,54 @@
                     </span>
                 </a>
             }
+            @foreach (var a in applicationsExternes)
+            {
+                @* Chargement complet de la page : ce n'est pas un écran Blazor (target="_top" évite l'interception du routeur) *@
+                <a href="@a.Url" class="tuile" target="_top" data-enhance-nav="false">
+                    <span class="tuile-icone">@a.Icone</span>
+                    <span>
+                        <span class="tuile-titre">@a.Nom</span>
+                        <span class="tuile-texte">@a.Description</span>
+                    </span>
+                </a>
+            }
         </div>
     </div>
 </div>
 
 @code {
-    private UtilisateurConnecte utilisateur = UtilisateurConnecte.Anonyme;
+    [SupplyParameterFromQuery(Name = "retour")] public string? Retour { get; set; }
 
-    protected override async Task OnInitializedAsync() =>
+    private UtilisateurConnecte utilisateur = UtilisateurConnecte.Anonyme;
+    private List<ApplicationExterne> applicationsExternes = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Retour vers l'application externe qui a demandé la connexion (adresse du même site uniquement)
+        if (AdresseRetour(Retour) is { } retour)
+        {
+            Navigation.NavigateTo(retour, forceLoad: true);
+            return;
+        }
         utilisateur = await UtilisateurCourant.LireAsync();
+        applicationsExternes = Configuration.GetSection("ApplicationsExternes").Get<List<ApplicationExterne>>() ?? [];
+    }
+
+    private string? AdresseRetour(string? retour)
+    {
+        if (string.IsNullOrWhiteSpace(retour)) return null;
+        var site = new Uri(Navigation.BaseUri);
+        if (!Uri.TryCreate(site, retour, out var adresse)) return null;
+        if (adresse.Scheme != site.Scheme || !string.Equals(adresse.Authority, site.Authority, StringComparison.OrdinalIgnoreCase))
+            return null;
+        return adresse.AbsolutePath == "/" ? null : adresse.PathAndQuery + adresse.Fragment;
+    }
+
+    private sealed class ApplicationExterne
+    {
+        public string Nom { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string Url { get; set; } = "";
+        public string Icone { get; set; } = "";
+    }
 }

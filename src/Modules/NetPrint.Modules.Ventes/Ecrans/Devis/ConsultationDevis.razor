@@ -3,7 +3,7 @@
    Consultation des devis — reprise de FEN_ConsultationDevis (WinDev, branche DLLNew).
    Critères (zones SAI_*), bouton Chargement, liste TABLE_Devis, menu contextuel, légende.
    Compléments repris : texte libre, sous-totaux, coefficients, valeurs par défaut, échec, documents, tags,
-   tableau des prix, récapitulatif PDF, recherches F4 (bouton « … »). Pas encore repris (grisés) : offre, modification.
+   tableau des prix, récapitulatif PDF, recherches F4 (bouton « … »). Pas encore repris (grisés) : offre. Saisie : fenêtre des actions seulement (étape 1).
    ===================================================================== *@
 @inject IConsultationDevis Consultation
 @inject EtatConsultationDevis Etat
@@ -18,6 +18,10 @@
 <PageTitle>Consultation des devis · NetPrint</PageTitle>
 
 <fieldset class="barre-outils">
+    <button title="Créer un nouveau devis" @onclick="NouveauDevis">＋ Nouveau devis</button>
+    <button disabled="@(Selection is null)" title="Modifier, nouvelle version, copier ou renouveler le devis sélectionné"
+            @onclick="() => OuvrirSaisie(Selection)">✏️ Saisie…</button>
+    <span class="separateur-vertical"></span>
     <button class="bouton-principal" disabled="@(Selection is null)" @onclick="() => Ouvrir(Selection)"
             title="Détail du devis sélectionné (double-clic)">🔎 Détail du devis</button>
     <span class="separateur-vertical"></span>
@@ -48,7 +52,6 @@
     <span class="espace"></span>
     <button title="Filtres « Devis » et « Type devis » proposés à l'ouverture, présentation du détail"
             @onclick="() => valeursDefaut = true">⚙ Valeurs par défaut</button>
-    <button disabled title="Prochaine étape (saisie du devis)">✏️ Modifier</button>
 </fieldset>
 
 <form class="panneau-criteres" @onsubmit="RechercherAsync">
@@ -373,7 +376,7 @@
     <ul class="menu-contextuel" style="left:@(menu.X)px; top:@(menu.Y)px">
         <li @onclick="OuvrirDepuisMenu">🔎 Détail du devis</li>
         <li class="separateur"></li>
-        <li class="inactif" title="Prochaine étape">✏️ Modification</li>
+        <li @onclick="SaisieDepuisMenu">✏️ Saisie (modifier, version, copier, renouveler)…</li>
         <li @onclick='() => ComplementDepuisMenu("prix")'>💶 Tableau des prix</li>
         <li @onclick='() => ComplementDepuisMenu("coefficients")'>🧮 Tableau des coefficients</li>
         <li @onclick='() => ComplementDepuisMenu("soustotaux")'>Σ Récapitulatif des sous-totaux</li>
@@ -394,6 +397,11 @@
             <li class="inactif" title="Module Production">📁 Historique du dossier @menu.Ligne.Dossier</li>
         }
     </ul>
+}
+
+@if (saisie is not null)
+{
+    <FenetreSaisie Ligne="saisie" OnFermer="() => saisie = null" />
 }
 
 @if (complement is { Type: "echec" })
@@ -618,6 +626,24 @@ else if (complement is not null)
         C.CompteClient = l.Codes.Count > 1 ? Entier(l.Codes[1]) : null;
         C.Prospect = null;
     }
+
+    // ---------- Saisie (lot « saisie du devis », étape 1 : fenêtre des actions) ----------
+    private LigneListeDevis? saisie;
+
+    private void OuvrirSaisie(CleDevis? cle)
+    {
+        if (cle is not null) saisie = Etat.Lignes?.FirstOrDefault(l => l.Cle == cle);
+    }
+
+    private void SaisieDepuisMenu()
+    {
+        var cle = menu?.Ligne.Cle;
+        menu = null;
+        OuvrirSaisie(cle);
+    }
+
+    private void NouveauDevis() =>
+        Notifications.Info("La création d'un devis arrivera avec l'écran de saisie (étape suivante).");
 
     private void OuvrirComplement(string type, CleDevis? cle)
     {

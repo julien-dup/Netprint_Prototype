@@ -716,3 +716,29 @@ a.bouton-ancre:hover { background: var(--surface-2); border-color: var(--texte-3
 .valeur-chapitre { display: flex; align-items: center; gap: 6px; }
 .valeur-chapitre input { flex: 1; min-width: 0; min-height: 28px; padding: 3px 6px; }
 .numero-valeur { width: 34px; flex: none; font: 12px ui-monospace, Consolas, monospace; color: var(--texte-2); text-align: right; }
+
+/* ---------- Saisie du devis : fenêtre des actions (Modifier, Nouvelle version, Copier, Renouveler) ---------- */
+.fenetre.complement.saisie-devis { width: 1000px; }
+.rappel-devis {
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--bord); border-left: 4px solid var(--accent); border-radius: var(--rayon);
+}
+.rappel-titre { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rappel-infos { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.rappel-infos .libelle-info { margin: 0 4px 0 0; }
+.rappel-infos b { margin-right: 16px; }
+.cartes-saisie { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 2px; border-radius: var(--rayon); }
+.cartes-saisie:focus { outline: none; }
+.cartes-saisie:focus-visible .carte-saisie.choisie { box-shadow: 0 0 0 3px rgba(37, 99, 235, .25); }
+.carte-saisie {
+  display: flex; flex-direction: column; gap: 8px; min-height: 190px; padding: 14px; cursor: pointer; user-select: none;
+  background: var(--surface); border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--ombre);
+  transition: border-color .12s, box-shadow .12s, background .12s;
+}
+.carte-saisie:hover { border-color: var(--accent); }
+.carte-saisie.choisie { border: 2px solid var(--accent); background: var(--accent-clair); padding: 13px; }
+.carte-saisie-titre { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.carte-saisie-icone { font-size: 20px; }
+.carte-saisie-coche { margin-left: auto; color: var(--accent); font-size: 14px; }
+.carte-saisie-texte { margin: 0; color: var(--texte-2); font-size: 13px; line-height: 1.45; }
+@media (max-width: 900px) { .cartes-saisie { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
