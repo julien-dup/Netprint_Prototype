@@ -1,6 +1,6 @@
 @* =====================================================================
    Saisie à partir du devis sélectionné (maquette validée le 30/10/2026) : rappel du devis, puis une carte par action
-   — Modifier, Nouvelle version, Copier, Renouveler. Carte cliquable (double-clic = Valider), flèches du clavier
+   — Modifier, Nouvelle version, Copier, Renouveler, Réactualiser. Carte cliquable (double-clic = Valider), flèches du clavier
    pour passer d'une carte à l'autre, Entrée = Valider, Échap = Annuler.
    Étape 1 : fenêtre seule. Les actions, leurs paramètres (client de la copie, date de renouvellement…) et les cas
    où une action est impossible (carte grisée + raison) viendront après l'analyse de FEN_Modification (Devis2017).
@@ -86,8 +86,12 @@
             l => $"Créer la version suivante du devis n° {l.Cle.Numero:00000} à partir de celle-ci, puis la saisir. La version {l.Cle.Version} est conservée telle quelle."),
         new("copier", "⧉", "Copier",
             l => $"Créer un nouveau devis (nouveau n°) à partir du devis {l.Numero}, pour le même client ou un autre, puis le saisir. Le devis d'origine n'est pas modifié."),
+        // Glossaire DEV100 : renouvellement = nouveau devis à partir d'un devis déjà commandé (ou d'un modèle) ;
+        // réactualisation = mise à jour du devis avec les tarifs et cadences du jour.
         new("renouveler", "♻", "Renouveler",
-            l => $"Refaire le devis {l.Numero} à la date du jour, avec les prix et les taux actuels, pour le proposer de nouveau au client."),
+            l => $"Créer un nouveau devis (nouveau n°) à partir du devis {l.Numero} déjà commandé, pour une réimpression ou un client fidèle : il reprend sa fabrication."),
+        new("reactualiser", "🔄", "Réactualiser",
+            l => $"Recalculer le devis {l.Numero} avec les tarifs (papier, matières) et les taux machines du jour, pour le proposer de nouveau au client."),
     ];
 
     private ElementReference cartes;

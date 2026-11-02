@@ -13,6 +13,7 @@
 @inject Notifications Notifications
 @inject IPreferencesGrilles PreferencesGrilles
 @inject IJSRuntime JS
+@inject Glossaire Glossaire
 @implements IAsyncDisposable
 
 <PageTitle>Consultation des devis · NetPrint</PageTitle>
@@ -60,7 +61,7 @@
         <input type="number" class="num6" @bind="C.Numero" />
     </label>
     <div class="champ">
-        <span>Client</span>
+        <span>Client <Explication Terme="devis.client-prospect" /></span>
         <div class="ligne-champs">
             <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
             <input type="number" class="num7" title="Compte client (auxiliaire)" @bind="C.CompteClient" />
@@ -87,7 +88,7 @@
         <input type="date" @bind="C.DateAu" @bind:format="yyyy-MM-dd" />
     </label>
     <div class="champ">
-        <span>Représentant</span>
+        <span>Représentant <Explication Terme="devis.representant" /></span>
         <div class="ligne-champs">
             <input type="number" class="num6" @bind="C.Representant" disabled="@(contexte?.RepresentantImpose is not null)"
                    title="@(contexte?.RepresentantImpose is not null ? "Vous ne voyez que vos devis" : null)" />
@@ -102,7 +103,7 @@
         </div>
     </div>
     <label class="champ">
-        <span>Devis</span>
+        <span>Devis <Explication Terme="devis.etat" /></span>
         <select @bind="C.EtatDevis">
             <option value="">Tous</option>
             <option value="1">Uniquement en cours</option>
@@ -110,7 +111,7 @@
         </select>
     </label>
     <label class="champ">
-        <span>Type devis</span>
+        <span>Type devis <Explication Terme="devis.type" /></span>
         <select @bind="C.TypeDevis">
             <option value="">Tous</option>
             <option value="T">Devis type</option>
@@ -119,6 +120,7 @@
     </label>
     <div class="boutons-criteres">
         <button type="submit" class="bouton-principal" disabled="@chargement">🔍 Rechercher</button>
+        <Explication Terme="devis.criteres" />
         <button type="button" class="bouton-gomme" title="Réinitialiser tous les critères" @onclick="Effacer">
             <img src="gomme.png" alt="" /> Effacer
         </button>
@@ -131,7 +133,7 @@
     {
         <div class="groupe-criteres">
             <span class="titre-groupe">Commercial</span>
-            <label class="champ"><span>Étude</span><input type="number" class="num6" @bind="C.Etude" /></label>
+            <label class="champ"><span>Étude <Explication Terme="devis.etude" /></span><input type="number" class="num6" @bind="C.Etude" /></label>
             <div class="champ"><span>Profil</span><div class="ligne-champs"><input class="code" maxlength="10" @bind="C.Profil" /><BoutonRecherche Liste="ListeChoix.Profil" OnChoix='l => C.Profil = l.Code' /></div></div>
             <div class="champ"><span>Sous-catégorie</span><div class="ligne-champs"><input class="code" maxlength="2" @bind="C.SousCategorie" /><BoutonRecherche Liste="ListeChoix.SousCategorie" Parent="@C.Categorie" OnChoix='l => C.SousCategorie = l.Code' /></div></div>
             <div class="champ"><span>Fabricant</span><div class="ligne-champs"><input class="code" maxlength="3" @bind="C.Fabricant" /><BoutonRecherche Liste="ListeChoix.Fabricant" OnChoix='l => C.Fabricant = l.Code' /></div></div>
@@ -140,8 +142,8 @@
             <label class="champ"><span>à</span><input type="number" class="num7" @bind="C.QuantiteA" /></label>
             <label class="champ"><span>Nb éléments</span><input type="number" class="num3" @bind="C.NbElements" /></label>
             <label class="champ"><span>Nb élément/ex</span><input type="number" class="num3" @bind="C.NbElementsExemplaire" /></label>
-            <label class="champ"><span>Modèle</span><input type="number" class="num6" @bind="C.Modele" /></label>
-            <div class="champ"><span>N° OF</span><div class="ligne-champs"><input type="number" class="num6" @bind="C.Dossier" /><BoutonRecherche Liste="ListeChoix.Dossier" OnChoix='l => C.Dossier = Entier(l.Code)' /></div></div>
+            <label class="champ"><span>Modèle <Explication Terme="devis.modele" /></span><input type="number" class="num6" @bind="C.Modele" /></label>
+            <div class="champ"><span>N° OF <Explication Terme="devis.of" /></span><div class="ligne-champs"><input type="number" class="num6" @bind="C.Dossier" /><BoutonRecherche Liste="ListeChoix.Dossier" OnChoix='l => C.Dossier = Entier(l.Code)' /></div></div>
             <div class="champ"><span>N° OF préc.</span><div class="ligne-champs"><input type="number" class="num6" @bind="C.DossierPrecedent" /><BoutonRecherche Liste="ListeChoix.Dossier" OnChoix='l => C.DossierPrecedent = Entier(l.Code)' /></div></div>
             <label class="champ"><span>Réf. imprimé</span><input class="court" @bind="C.ReferenceImprime" /></label>
             <div class="champ"><span>Motif échec</span><div class="ligne-champs"><input class="code" @bind="C.MotifEchec" /><BoutonRecherche Liste="ListeChoix.MotifEchec" OnChoix='l => C.MotifEchec = l.Code' /></div></div>
@@ -149,7 +151,7 @@
             <label class="champ"><span>au</span><input type="date" @bind="C.EchecAu" @bind:format="yyyy-MM-dd" /></label>
         </div>
         <div class="groupe-criteres">
-            <span class="titre-groupe">Formats</span>
+            <span class="titre-groupe">Formats <Explication Terme="devis.formats" /></span>
             <div class="champ">
                 <span>Format fini</span>
                 <div class="ligne-champs">
@@ -208,7 +210,7 @@
             <div class="champ"><span>Autre machine</span><div class="ligne-champs"><input class="code" maxlength="3" @bind="C.Section" /><BoutonRecherche Liste="ListeChoix.Section" OnChoix='l => C.Section = l.Code' /></div></div>
             <div class="champ"><span>Opération</span><div class="ligne-champs"><input type="number" class="num3" @bind="C.Operation" /><BoutonRecherche Liste="ListeChoix.Operation" Parent="@C.Section" OnChoix='l => C.Operation = Entier(l.Code)' /></div></div>
             <div class="champ"><span>Matière</span><div class="ligne-champs"><input type="number" class="num6" @bind="C.Matiere" /><BoutonRecherche Liste="ListeChoix.Matiere" OnChoix='l => C.Matiere = Entier(l.Code)' /></div></div>
-            <div class="champ"><span>Fournisseur STR</span><div class="ligne-champs"><input type="number" class="num3" @bind="C.FournisseurSousTraitance" /><BoutonRecherche Liste="ListeChoix.Fournisseur" OnChoix='l => C.FournisseurSousTraitance = Entier(l.Code)' /></div></div>
+            <div class="champ"><span>Fournisseur STR <Explication Terme="devis.sous-traitance" /></span><div class="ligne-champs"><input type="number" class="num3" @bind="C.FournisseurSousTraitance" /><BoutonRecherche Liste="ListeChoix.Fournisseur" OnChoix='l => C.FournisseurSousTraitance = Entier(l.Code)' /></div></div>
             <div class="champ"><span>Opération STR</span><div class="ligne-champs"><input type="number" class="num3" @bind="C.OperationSousTraitance" /><BoutonRecherche Liste="ListeChoix.OperationSousTraitance" Parent="@(C.FournisseurSousTraitance?.ToString())" OnChoix='l => C.OperationSousTraitance = Entier(l.Code)' /></div></div>
         </div>
     }
@@ -268,9 +270,9 @@
             </div>
             <div class="legende">
                 <span class="titre-legende">Légende :</span>
-                <span class="badge badge-offre">Offre</span>
-                <span class="badge badge-commande">En commande</span>
-                <span class="badge badge-echec">Échec</span>
+                <span class="badge badge-offre" title="@(Glossaire.Definition("devis.etat.offre"))">Offre</span>
+                <span class="badge badge-commande" title="@(Glossaire.Definition("devis.etat.commande"))">En commande</span>
+                <span class="badge badge-echec" title="@(Glossaire.Definition("devis.etat.echec"))">Échec</span>
             </div>
         </div>
 
@@ -305,7 +307,7 @@
                             <EnteteColonne @key="c.Cle" Cle="@c.Cle" Libelle="@c.Libelle" Classe="@c.Classe" Type="c.Type"
                                            TriCle="@Etat.TriCle" Descendant="@Etat.TriDescendant" OnTri="TrierAsync"
                                            Filtre="@(Etat.Filtres.FirstOrDefault(f => f.Colonne == c.Cle))" OnFiltre="Filtrer"
-                                           Redimensionnable="true" />
+                                           Redimensionnable="true" Explication="@(Glossaire.Definition($"devis.colonne.{c.Cle}"))" />
                         }
                     </tr>
                 </thead>
@@ -830,8 +832,26 @@ else if (complement is not null)
     private static string? Bulle(string cle, LigneListeDevis l) => cle switch
     {
         "designation" => l.Designation2 != "" ? $"{l.Designation1}\n{l.Designation2}" : l.Designation1,
-        "pvmini" or "pvconseille" or "pvremis" => l.Observations != "" ? l.Observations : null,
+        "pvmini" or "pvconseille" or "pvremis" => PrixAvecUnite(Texte(cle, l), l),
+        "valeur" => CalculValeur(l),
         "nom" or "representant" or "categorie" or "souscategorie" or "fabricant" => Texte(cle, l),
         _ => null,
     };
+
+    // Bulle des prix : l'unité de vente du devis (« 45,00 € pour 1 000 »), puis l'observation de prix
+    private static string? PrixAvecUnite(string montant, LigneListeDevis l)
+    {
+        if (montant == "") return l.Observations != "" ? l.Observations : null;
+        var prix = $"{montant} € {Affichage.UniteVente(l.Tnum)}".TrimEnd();
+        return l.Observations != "" ? $"{prix}\n{l.Observations}" : prix;
+    }
+
+    // Bulle de la valeur du devis (R7b) : le calcul avec les chiffres de la ligne
+    private static string? CalculValeur(LigneListeDevis l)
+    {
+        if (l.ValeurDevis is not { } valeur) return null;
+        return l.Tnum == 999999999
+            ? $"Prix « le tout » : valeur = PV remis = {valeur:N2} €"
+            : $"PV remis {l.PvRemis:N2} € {Affichage.UniteVente(l.Tnum)} × {l.Quantite:N0} ex. ÷ {l.Tnum:N0} = {valeur:N2} €";
+    }
 }

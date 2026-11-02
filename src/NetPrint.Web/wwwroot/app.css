@@ -718,7 +718,7 @@ a.bouton-ancre:hover { background: var(--surface-2); border-color: var(--texte-3
 .numero-valeur { width: 34px; flex: none; font: 12px ui-monospace, Consolas, monospace; color: var(--texte-2); text-align: right; }
 
 /* ---------- Saisie du devis : fenêtre des actions (Modifier, Nouvelle version, Copier, Renouveler) ---------- */
-.fenetre.complement.saisie-devis { width: 1000px; }
+.fenetre.complement.saisie-devis { width: 1180px; }
 .rappel-devis {
   display: flex; flex-direction: column; gap: 6px; padding: 12px 14px;
   background: var(--surface); border: 1px solid var(--bord); border-left: 4px solid var(--accent); border-radius: var(--rayon);
@@ -727,7 +727,7 @@ a.bouton-ancre:hover { background: var(--surface-2); border-color: var(--texte-3
 .rappel-infos { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .rappel-infos .libelle-info { margin: 0 4px 0 0; }
 .rappel-infos b { margin-right: 16px; }
-.cartes-saisie { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 2px; border-radius: var(--rayon); }
+.cartes-saisie { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; padding: 2px; border-radius: var(--rayon); }
 .cartes-saisie:focus { outline: none; }
 .cartes-saisie:focus-visible .carte-saisie.choisie { box-shadow: 0 0 0 3px rgba(37, 99, 235, .25); }
 .carte-saisie {
@@ -764,3 +764,29 @@ a.bouton-ancre:hover { background: var(--surface-2); border-color: var(--texte-3
 .fenetre-evenement .erreur-saisie, .evenements .erreur-saisie { margin: 0; color: var(--danger); font-weight: 600; }
 .fenetre-evenement .avertissement-saisie { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--orange-clair); color: var(--orange); }
 .fenetre.fenetre-evenements { width: 820px; }
+
+/* ---------- Explications (composant Explication, glossaire) ---------- */
+.explication { position: relative; display: inline-flex; vertical-align: middle; margin-left: 3px; }
+.bouton-explication {
+  cursor: help; color: var(--texte-3); font-size: 13px; font-weight: 400; line-height: 1; border-radius: 50%;
+  text-transform: none; letter-spacing: normal;
+}
+.bouton-explication:hover, .explication.epinglee .bouton-explication { color: var(--accent); }
+.bouton-explication:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bulle-explication {
+  display: none; position: absolute; z-index: 60; top: calc(100% + 6px); left: -10px; width: 320px;
+  flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 8px; box-shadow: var(--ombre-forte);
+  background: #1c2433; color: #fff; font-size: 12.5px; font-weight: 400; line-height: 1.45; text-align: left;
+  text-transform: none; letter-spacing: normal; white-space: normal;
+}
+.explication:hover .bulle-explication, .explication.epinglee .bulle-explication,
+.bouton-explication:focus-visible + .bulle-explication { display: flex; }
+.bulle-explication-titre { font-weight: 700; }
+.bulle-explication-calcul {
+  margin-top: 4px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .2); font-variant-numeric: tabular-nums;
+}
+.boutons-criteres .explication { align-self: center; }
+.bulle-explication-colonne {
+  margin: 0 0 8px; padding: 6px 8px; border-radius: 6px; background: var(--accent-clair); color: var(--texte);
+  font-size: 12px; font-weight: 400; line-height: 1.4; white-space: normal; text-transform: none; letter-spacing: normal;
+}

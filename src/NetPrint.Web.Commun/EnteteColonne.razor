@@ -4,6 +4,7 @@
      un clic sur ce bouton trie directement (▲, puis ▼, puis ordre par défaut) ;
    - clic sur le titre = bulle de filtre (contient, commence par…, selon le type de la colonne) ;
    - ⏷ bleu à côté du titre quand un filtre est posé sur la colonne ;
+   - Explication (facultatif) : définition de la donnée, au survol du titre et en tête de la bulle de filtre ;
    - poignée sur le bord droit : tirer pour élargir, double-clic = largeur d'origine (wwwroot/grille.js).
    La bulle se ferme sur un choix, Échap ou un clic à côté.
    ===================================================================== *@
@@ -12,7 +13,7 @@
 
 <th @ref="th" class="entete-colonne @Classe @(TriActif ? "triee" : "") @(ouvert ? "filtre-ouvert" : "")"
     @onclick="OuvrirAsync">
-    <span class="entete-contenu" title="Filtrer « @Libelle »">
+    <span class="entete-contenu" title="@TitreEntete">
         <span class="entete-libelle">@Libelle</span>
         @if (Filtre is not null)
         {
@@ -33,6 +34,10 @@
              @onclick:stopPropagation="true" @onkeydown="Clavier">
             <form @onsubmit="AppliquerAsync">
                 <div class="bulle-titre">Filtrer « @Libelle »</div>
+                @if (!string.IsNullOrWhiteSpace(Explication))
+                {
+                    <p class="bulle-explication-colonne">ⓘ @Explication</p>
+                }
                 <select value="@operateur" @onchange="ChangerOperateur">
                     @foreach (var o in FiltresColonnes.Operateurs(Type))
                     {
@@ -79,6 +84,8 @@
     [Parameter] public bool Descendant { get; set; }
     [Parameter] public FiltreColonne? Filtre { get; set; }
     [Parameter] public bool Redimensionnable { get; set; }
+    // Définition de la donnée (glossaire) : bulle au survol du titre et rappel en tête de la bulle de filtre
+    [Parameter] public string? Explication { get; set; }
     [Parameter] public EventCallback<ChangementTri> OnTri { get; set; }
     [Parameter] public EventCallback<ChangementFiltre> OnFiltre { get; set; }
 
@@ -92,6 +99,9 @@
     private string? valeur, valeur2, erreur;
 
     private bool TriActif => TriCle == Cle;
+    private string TitreEntete => string.IsNullOrWhiteSpace(Explication)
+        ? $"Filtrer « {Libelle} »"
+        : $"{Libelle} : {Explication}\n\nClic : filtrer « {Libelle} »";
     private int NbValeurs => FiltresColonnes.NbValeurs(Type, operateur);
     private string Fleche => TriActif && Descendant ? "▼" : "▲";
     private string TitreFleche => !TriActif ? "Trier (croissant)"

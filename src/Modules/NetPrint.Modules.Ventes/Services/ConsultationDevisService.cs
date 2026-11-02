@@ -109,7 +109,8 @@ internal sealed class ConsultationDevisService(ConsultationDevisDb2 donnees, IUt
             ValeurDevis: valeur,
             ReferenceImprime: l.Derfim,
             DateDemande: l.Deddem != 0 ? BaseDb2.DateAAAAMMJJ(l.Deddem) : null,
-            Observations: l.Deobsp);
+            Observations: l.Deobsp,
+            Tnum: l.Tnum);
     }
 
     // ------------------------------------------------------------------

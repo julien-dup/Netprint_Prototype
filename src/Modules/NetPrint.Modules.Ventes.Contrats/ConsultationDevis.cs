@@ -135,7 +135,8 @@ public sealed record LigneListeDevis(
     decimal? ValeurDevis,
     string ReferenceImprime,
     DateOnly? DateDemande,
-    string Observations)
+    string Observations,
+    int Tnum = 0)              // diviseur de l'unité de vente des PV (1000 = « pour 1000 », 999999999 = « le tout »)
 {
     public string Numero => Cle.Libelle;
     public bool EnEchec => MotifEchec != "";

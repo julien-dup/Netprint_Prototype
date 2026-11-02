@@ -37,6 +37,7 @@ public static class VentesModule
         services.AddScoped<ComplementsDevisDb2>();
         services.AddScoped<IDecompositionDevis, DecompositionDevisService>();   // décomposition analytique, prix remis (lot E)
         services.AddScoped<DecompositionDevisDb2>();
+        services.AddSingleton<NetPrint.Web.Commun.ISourceGlossaire, GlossaireDevis>();   // textes des bulles ⓘ du devis
         services.AddScoped<EtatConsultationDevis>();   // critères et liste conservés pendant la session (retour du détail)
 
         // Commandes clients (négoce et produit fini) : entrée de menu et tuile d'accueil propres

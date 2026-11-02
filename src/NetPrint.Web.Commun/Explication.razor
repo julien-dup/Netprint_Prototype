@@ -1,0 +1,39 @@
+@* =====================================================================
+   Petite icône ⓘ à côté d'un libellé : au survol (ou au clic, pour la garder ouverte) une bulle affiche
+   la définition du terme tirée du Glossaire. Contenu facultatif (ChildContent) : « comment c'est calculé »,
+   avec les chiffres de l'écran.
+   Exemple : <Explication Terme="devis.type" />
+   L'icône est un span (role="button") et non un <button> : placée dans un <label>, elle ne lui vole pas le clic.
+   ===================================================================== *@
+@inject Glossaire Glossaire
+
+@if (Glossaire.Trouver(Terme) is { } terme)
+{
+    <span class="explication @(epinglee ? "epinglee" : "")" @onfocusout="() => epinglee = false">
+        <span class="bouton-explication" role="button" tabindex="0" aria-label="@($"Explication : {terme.Titre}")"
+              @onclick="Basculer" @onclick:preventDefault="true" @onclick:stopPropagation="true" @onkeydown="Clavier">ⓘ</span>
+        <span class="bulle-explication" role="tooltip">
+            <span class="bulle-explication-titre">@terme.Titre</span>
+            <span>@terme.Definition</span>
+            @if (ChildContent is not null)
+            {
+                <span class="bulle-explication-calcul">@ChildContent</span>
+            }
+        </span>
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Terme { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool epinglee;
+
+    private void Basculer() => epinglee = !epinglee;
+
+    private void Clavier(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or " ") epinglee = !epinglee;
+        else if (e.Key == "Escape") epinglee = false;
+    }
+}

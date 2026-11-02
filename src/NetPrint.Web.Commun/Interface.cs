@@ -13,6 +13,7 @@ public static class InterfaceNetPrint
         services.AddScoped<Notifications>();
         services.AddScoped<FenetresChoix>();
         services.AddScoped<IPreferencesGrilles, PreferencesGrillesFichier>();
+        services.AddSingleton<Glossaire>();   // textes des bulles ⓘ, fournis par les modules (ISourceGlossaire)
         return services;
     }
 }
