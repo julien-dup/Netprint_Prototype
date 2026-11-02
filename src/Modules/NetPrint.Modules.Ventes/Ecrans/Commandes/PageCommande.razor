@@ -29,20 +29,38 @@
             @onclick='() => Navigation.NavigateTo(Adresse(CleCourante) + "/entete")'>✏️ Modifier l'en-tête</button>
     <button disabled="@(!PeutModifier)" title="@(PeutModifier ? "Ajouter une ligne à la commande" : RaisonNonModifiable)"
             @onclick="() => OuvrirLigneAsync(0)">＋ Ajouter une ligne</button>
-    @if (fiche is { Entete.Soldee: true })
-    {
-        <button disabled="@(!fiche.Droits.Creer || fiche.Entete.NonModifiable)" title="Remettre la commande en cours (ses lignes soldées le restent)"
-                @onclick="ReactiverCommandeAsync">↺ Réactiver</button>
-    }
-    else
-    {
-        <button disabled="@(fiche is null || !fiche.Droits.Creer || fiche.Entete.NonModifiable)" title="Solder toutes les lignes et la commande"
-                @onclick="SolderCommandeAsync">✔ Solder</button>
-    }
-    <button class="bouton-danger" disabled="@(fiche is null || !fiche.Droits.Supprimer || fiche.Entete.NonModifiable)"
-            title="Supprimer la commande (impossible si elle a un BL ou une facture)" @onclick="SupprimerCommandeAsync">🗑 Supprimer</button>
     <button disabled="@(fiche is null)" title="Lancement en fabrication : OF, stock, affectations (NEG515)"
             @onclick='() => Navigation.NavigateTo(Adresse(CleCourante) + "/lancement")'>🏭 Lancement</button>
+    <div class="menu">
+        <button type="button" class="@(menuActions ? "ouvert" : "")" disabled="@(fiche is null)" title="Autres actions sur la commande"
+                @onclick="() => menuActions = !menuActions">⋯ Plus</button>
+        @if (menuActions && fiche is not null)
+        {
+            <div class="fond-menu" @onclick="() => menuActions = false"></div>
+            <ul class="menu-contextuel menu-deroulant">
+                @Action("📄 Ligne d'après un devis", PeutModifier, PeutModifier ? "Nouvelle ligne reprise d'un devis du client (F10 de NEG520)" : RaisonNonModifiable,
+                    () => repriseDevis = true)
+                @Action("📅 Reporter des dates", PeutModifier, PeutModifier ? "Reporter la date de livraison de plusieurs lignes (F19 de NEG520)" : RaisonNonModifiable,
+                    () => reportDates = true)
+                @Action("🧾 Facturation automatique", true, "Paramètres de facturation automatique (F13 de DOS505)", () => facturationAuto = true)
+                @Action("👤 Changer le client", PeutModifier, PeutModifier ? "Changer le client, la date ou l'enseigne de la commande (F17 de DOS505)" : RaisonNonModifiable,
+                    () => changementClient = true)
+                <li class="separateur"></li>
+                @if (fiche.Entete.Soldee)
+                {
+                    @Action("↺ Réactiver la commande", fiche.Droits.Creer && !fiche.Entete.NonModifiable,
+                        "Remettre la commande en cours (ses lignes soldées le restent)", ReactiverCommandeAsync)
+                }
+                else
+                {
+                    @Action("✔ Solder la commande", fiche.Droits.Creer && !fiche.Entete.NonModifiable, "Solder toutes les lignes et la commande",
+                        SolderCommandeAsync)
+                }
+                @Action("🗑 Supprimer la commande", fiche.Droits.Supprimer && !fiche.Entete.NonModifiable,
+                    "Supprimer la commande (impossible si elle a un BL ou une facture)", SupprimerCommandeAsync, danger: true)
+            </ul>
+        }
+    </div>
     <span class="espace"></span>
     <button class="@(apercuArc ? "actif" : "")" disabled="@(fiche is null)" title="Aperçu de l'accusé de réception, mis à jour à chaque modification"
             @onclick="() => apercuArc = !apercuArc">👁 Aperçu ARC</button>
@@ -197,7 +215,25 @@
 
 @if (ligneOuverte is { } numeroLigne && fiche is not null)
 {
-    <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" CodesVente="codesVente" OnFermer="FermerLigneAsync" />
+    <FenetreLigne Commande="CleCourante" NumeroLigne="numeroLigne" LigneOrigine="origineAppel" Initiale="ligneInitiale" CodesVente="codesVente"
+                  ClientArticles="@fiche.Entete.Client"
+                  OnFermer="FermerLigneAsync" />
+}
+@if (changementClient && fiche is not null)
+{
+    <FenetreChangementClient Commande="CleCourante" OnFermer="FermerChangementClientAsync" />
+}
+@if (facturationAuto && fiche is not null)
+{
+    <FenetreFacturationAuto Commande="CleCourante" Modifiable="PeutModifier" OnFermer="() => facturationAuto = false" />
+}
+@if (reportDates && fiche is not null)
+{
+    <FenetreReportDates Commande="CleCourante" OnFermer="FermerReportDatesAsync" />
+}
+@if (repriseDevis && fiche is not null)
+{
+    <FenetreRepriseDevis Commande="CleCourante" OnFermer="FermerRepriseDevisAsync" />
 }
 
 @code {
@@ -365,9 +401,49 @@
     // Nouvel appel de livraison sur une ligne « à la demande »
     private Task OuvrirAppelAsync(int origine) => OuvrirLigneAsync(0, origine);
 
-    private async Task OuvrirLigneAsync(int numero, int origine = 0)
+    private bool facturationAuto;
+    private bool menuActions;
+    private bool changementClient;
+
+    private async Task FermerChangementClientAsync(bool change)
+    {
+        changementClient = false;
+        if (change) await ChargerAsync();
+    }
+
+    // Entrée du menu « Plus » : grisée avec sa raison si l'action n'est pas permise ; le menu se ferme au choix
+    private RenderFragment Action(string libelle, bool permise, string titre, Action action, bool danger = false) =>
+        Action(libelle, permise, titre, () => { action(); return Task.CompletedTask; }, danger);
+
+    private RenderFragment Action(string libelle, bool permise, string titre, Func<Task> action, bool danger = false) => __builder =>
+    {
+        <li class="@(!permise ? "inactif" : danger ? "danger" : "")" title="@titre"
+            @onclick="async () => { if (!permise) return; menuActions = false; await action(); }">@libelle</li>
+    };
+
+    // Report de dates en masse : la fiche est relue après un report
+    private bool reportDates;
+
+    private async Task FermerReportDatesAsync(bool reporte)
+    {
+        reportDates = false;
+        if (reporte) await ChargerAsync();
+    }
+
+    // Ligne d'après un devis : la ligne pré-remplie s'ouvre comme une nouvelle ligne
+    private bool repriseDevis;
+    private LigneSaisie? ligneInitiale;
+
+    private async Task FermerRepriseDevisAsync(LigneSaisie? ligne)
+    {
+        repriseDevis = false;
+        if (ligne is not null) await OuvrirLigneAsync(0, initiale: ligne);
+    }
+
+    private async Task OuvrirLigneAsync(int numero, int origine = 0, LigneSaisie? initiale = null)
     {
         origineAppel = origine;
+        ligneInitiale = initiale;
         if (codesVente.Count == 0)
         {
             try { codesVente = (await Saisie.LireContexteAsync()).CodesVente; }

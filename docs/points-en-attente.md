@@ -76,23 +76,25 @@ Questions ouvertes :
 | 🟠 | Écarts du lancement à confirmer | NEG515, NEG510 F10 | Un lien de fabrication n'est plus transformé en affectation de stock (A2) ; l'affectation reçoit la date de livraison de l'OF (NEG515 écrivait 0, A1) ; en F10, dossier précédent et modèle du premier article stocké (NEG510 : du dernier) et catégorie de secours si aucun article stocké ; enseigne de la commande reprise aussi en CR ; AL refusé si l'OF sert déjà la commande pour l'article (NEG515 remplaçait la quantité) ; contrôle « ≤ disponible » en modification sans double compte de l'à fabriquer. Affectation : commande et OF verrouillés, total affecté ≤ commandé revérifié dans la transaction ; le disponible du lot, lui, n'est contrôlé qu'à la lecture (comme NEG515) |
 | ✅ | ~~Recalcul du stock après retrait d'une affectation~~ | NEG515 SA → STOCK04 | Pas d'appel à STOCK04 : les liens « S » sont soldés et n'entrent pas dans l'attendu (PRQCDE). Validé par David le 31/10 |
 | ✅ | ~~Suppression d'une commande et OF à ouvrir~~ | DOS500S SPS20 | Fait le 31/10 : après la suppression de la commande et de ses liens AB0020, la production supprime les OF à ouvrir (AB001T) qui ne servent plus à aucune commande, avec le suivi de leur BAG (`IInitialisationProduction.SupprimerOfsSansCommandeAsync`) |
-| 🟠 | Reprise des lignes d'un devis | NEG520 F10 (NEG52009) | Les prix de beaucoup de commandes réelles en viennent (DNDEV) |
+| ✅ | ~~Reprise des lignes d'un devis~~ | NEG520 F10 (NEG52009, SPDEV, SPADR) | Fait le 31/10 : bouton « 📄 Ligne d'après un devis » de la fiche commande ; devis chiffrés du client (les plus récents d'abord, recherche par n° ou désignation), choix de l'adresse si le devis en a plusieurs ; ligne « à la demande » pré-remplie (désignation, unité, prix remis, cession d'après le prix de revient, quantité, adresse), puis complétée dans la fenêtre de ligne ; devis enregistré sur la ligne (DNDEV / DNVERS / DNHYPO) |
+| 🟠 | Écarts et questions de la reprise d'un devis | NEG520 F10 | Seuls les devis du client de la commande sont proposés (NEG520 acceptait n'importe quel n°) ; quantité de l'adresse reprise aussi quand c'est un n° d'adresse du client (NEG520 la laissait à 0) ; « LT » = le tout, ramené au mille (la fiche de rétro-doc supposait « le mille ») ; désignation et unité du devis gardées si l'article est saisi ensuite (comme RECUP de CTL520). Devis **non marqué** « passé en commande » (D5000F.DETAG), comme NEG520 : décision de David du 31/10 |
 | 🟠 | Articles avec nomenclature | NEG520 (lignes composants, DNLCOM) | Refusés aujourd'hui |
-| ⚪ | Articles libres « 999… » | CTL520 l. 804-845 | Refusés aujourd'hui |
+| ✅ | ~~Articles libres « 999… »~~ | CTL520 l. 804-845 | Abandonnés : plus utilisés (David, 31/10) ; toujours refusés à la saisie |
 | ⚪ | Lignes de frais E / P, remises R | CTL520 l. 1643-1707, NEG520 SPCAVT | Refusées aujourd'hui |
-| ⚪ | Changement de date de livraison en masse | NEG520 F20 (NEG520CW) | |
-| ⚪ | Import Excel (NEGIMP / NEGIMPS) | NEG520 R3, ImportCommande | |
-| ⚪ | Contrôle de la norme | NOR010 (colonnes inconnues dans la cartographie) | Non contrôlée aujourd'hui |
-| ⚪ | Paramètres de facturation automatique (F13) | DOS505 DOS50505, AB001FA | Valeurs par défaut écrites, pas de saisie |
-| ⚪ | Changement de client d'une commande (F17) | DOS505 R15 | Client figé en modification |
+| ✅ | ~~Changement de date de livraison en masse~~ | NEG520 F19 (NEG520CW) | Fait le 31/10 : bouton « 📅 Reporter des dates » de la fiche commande ; lignes non soldées dont la date de livraison ou confirmée vaut X → Y (livraison ou confirmée), en une transaction, stock recalculé ; refusé si une ligne fait partie d'un OPR non livré (comme NEG520). La rétro-doc indiquait F20 : c'est F19 |
+| 🟠 | Import de commande (Excel) | ImportCommande (WinDev), NEGIMP / NEGIMPS, NEG520 R3 | Décision de David (31/10) : moderniser et fluidifier (aujourd'hui Excel → WinDev → 5250) : import depuis la fiche commande, aperçu des anomalies avant écriture, lignes écrites directement dans la commande en une transaction (sans transit NEGIMP), modèles d'import en base. En attente : fichier ImportCde.Ini de production (David, sous quelques jours) et usage des planches / sous-références (type 2) |
+| ✅ | ~~Contrôle de la norme~~ | CTL520, NOR010F | Fait le 31/10 : norme de la ligne cherchée dans NOR010F pour l'enseigne de la commande (clé RSOC / NOENS / NOCOD), message NOR0001 ; recherche F4 sur la zone Norme |
+| ✅ | ~~Paramètres de facturation automatique (F13)~~ | DOS505 DOS50505, AB001FA | Fait le 31/10 : bouton « 🧾 Facturation auto » de la fiche commande (lecture seule si la commande n'est pas modifiable) ; contrôles ADR0002, FAC0068, GEN0080 ; ÉCART : n° d'adresse vérifié dans A500F (ADR0003), DOS505 ne le contrôlait qu'en F4 |
+| ✅ | ~~Barre d'actions de la fiche commande~~ | — | Fait le 31/10 : menu « ⋯ Plus » (ligne d'après un devis, report de dates, facturation automatique, solder / réactiver, supprimer), actions non permises grisées avec leur raison |
+| ✅ | ~~Changement de client d'une commande (F17)~~ | DOS505 R15 | Fait le 31/10 : « Changer le client » du menu Plus (client, date, enseigne) ; contrôles CPT0001, CLI0004, BL00022, CPT0019, enseignes ; ÉCART : avertissement à accepter si la commande garde des n° d'adresse (lignes, facture, ARC) ou un client facturé de l'ancien client ; écriture refusée si l'en-tête a changé ou si un BL / une facture est apparu entre-temps ; tracé dans EVE200 « MO » |
 | ✅ | ~~Texte complémentaire~~ | DOS560 (option 3 de NEG510), AB0011 | Fait (30/10) : saisi avec l'en-tête (8 lignes de 40, cases ARC / BL / facture), imprimé sur l'ARC si la case est cochée, supprimé avec la commande ; AB0011 journalisée |
 | ✅ | ~~Événements et commentaires~~ | EVE300 (EC de DOS500S, option 5 de NEG510, EC de NEG515) | Fait le 31/10 : composant commun `Evenements` (Web.Commun) et service `IEvenements` (Noyau, EVE100 / EVE105 / DOS030, compteur AB001.CCTCOM) ; onglet « Événements » de la fiche commande (CDEC) et fenêtre 💬 de l'écran de lancement (LAN) |
 | 🟠 | Écarts des événements à confirmer | EVE300 | Liste du plus récent au plus ancien ; profils du type, du fabricant et du représentant ajoutés à chaque choix de type (EVE300 les oubliait quand un seul type était proposé) ; tous les profils prévenus modifiables (EVE300 : les 5 premiers, les suivants perdus) ; indicateurs de rappel d'un autre événement plus recopiés ; compteur de commentaires du dossier lancé aussi en modification (EVE300 prenait la commande) ; fenêtre restée ouverte après enregistrement (EVE300 sortait) ; heure saisie avec la date prévue (EVE0005) conservée |
 | ⚪ | Événements : édition de la liste (F21, EVE301P) et autres objets (article, modèle, commandes fournisseur, ligne de commande) | EVE300 | Codes ART, MOD, CDES, CDEP, CDEM, CDCL, BAG, MAQ à brancher avec leurs écrans ; l'accès à l'objet est vérifié par l'écran appelant |
 | ⛔ | ~~Copie / transfert de reliquat d'une ligne vers une autre commande (NEG510 F14)~~ | — | Abandonné (David, 30/10) |
 | ⚪ | Transformation d'un dossier de fabrication en commande | DOS500S option TR | RAUCLEF absent des sources |
-| ⚪ | Création depuis une proforma | DOS505 R20 | Doit passer par le même service que la saisie |
-| ⚪ | Recherche d'article (F4) dans la saisie de ligne | — | Pas de liste « Article » dans le Noyau (`IListesDeChoix`) |
+| ✅ | ~~Création depuis une proforma~~ | DOS505 R20 | Abandonnée (décision de David du 31/10) |
+| ✅ | ~~Recherche d'article (F4) dans la saisie de ligne~~ | FEN_RecArticle | Fait le 31/10 : bouton « … » et F4 de la zone Article, articles du client de la commande (liste « Article » du Noyau, branche `noyau/liste-articles`) |
 
 ### 1.3 Techniques
 
@@ -114,7 +116,7 @@ Questions ouvertes :
 |---|---|---|
 | 🔴 | Connexion IBM i impossible sur le poste de David | `BaseDb2.VerifierProfilAsync` reconstruit la chaîne ODBC : « Missing system name ». Contourné en mode démo |
 | 🟠 | Fonctions ODBC (`Commande`, `Lire`, `Executer`) recopiées dans chaque classe `Donnees` | À regrouper dans `BaseDb2` |
-| 🟠 | Liste de choix « Article » | Manque dans `IListesDeChoix` |
+| ✅ | ~~Liste de choix « Article »~~ | Ajoutée à `IListesDeChoix` (branche `noyau/liste-articles`, demande de fusion dédiée) : code, désignation, référence imprimée ; parent facultatif = « compte général compte client » |
 | 🟠 | Service Compteurs (n° de dossier, GETDOSSIER) | Cible du cadrage : attribution atomique |
 | 🟠 | Qualité client (CQUACL) | Règle transverse devis / commande / BL : à porter dans le Noyau |
 | ✅ | ~~Éditions PDF~~ | Socle `Documents` (QuestPDF, page standard, aperçu, formats) et Noyau `ISocietes.LireIdentiteAsync` (en-tête, mentions légales, logo) : à réutiliser pour l'édition du devis (`docs/editions-pdf.md`) |

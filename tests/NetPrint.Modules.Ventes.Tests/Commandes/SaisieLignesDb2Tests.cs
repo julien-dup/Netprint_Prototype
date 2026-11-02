@@ -222,6 +222,21 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
         }
     }
 
+    // Lecture seule : norme de la ligne cherchée dans NOR010F pour l'enseigne de la commande (CTL520)
+    [FactDb2]
+    public async Task Norme_controlee_pour_l_enseigne_de_la_commande()
+    {
+        var cle = new CleCommande(68916, "9");
+        var c = (await Lignes.ContexteAsync(BaseDeTest.Societe, cle, null, default))!;
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var norme = Convert.ToString((await ValeursAsync(cnx, "SELECT NOCOD FROM NP11F.NOR010F WHERE RSOC = ? AND NOENS = ? FETCH FIRST 1 ROW ONLY",
+            BaseDeTest.Societe, c.Enseigne))[0])!.Trim();
+        Assert.True((await Lignes.VerifierAsync(BaseDeTest.Societe, cle, c, new LigneSaisie { Norme = norme }, null, default)).NormeExiste);
+        Assert.False((await Lignes.VerifierAsync(BaseDeTest.Societe, cle, c, new LigneSaisie { Norme = "ZZZZ" }, null, default)).NormeExiste);
+        Assert.True((await Lignes.VerifierAsync(BaseDeTest.Societe, cle, c, new LigneSaisie(), null, default)).NormeExiste);
+    }
+
     // Lecture seule : une commande livrée et facturée du client d'essai serait refusée à la suppression
     [FactDb2]
     public async Task Commande_livree_non_supprimable()
@@ -401,6 +416,146 @@ public class SaisieLignesDb2Tests(ITestOutputHelper sortie)
                     cmd.Parameters.AddWithValue("c", of.Cle);
                     await cmd.ExecuteNonQueryAsync();
                 }
+        }
+    }
+
+    // Report de date en masse (NEG520 F19) : deux lignes à des dates différentes, seule celle à la date d'origine bouge
+    [FactDb2Ecriture]
+    public async Task Report_de_dates_en_masse()
+    {
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var article = await ArticleDuClientAsync(cnx);
+        Assert.NotNull(article);
+        var client = await ValeursAsync(cnx, "SELECT CDDTPC, CDDTDC, CDDDOS, CDDCLE FROM NP11F.AA0003 WHERE RSOC = ? AND RGEN = ? AND RCLI = ?",
+            BaseDeTest.Societe, BaseDeTest.CompteGeneral, BaseDeTest.CompteClient);
+        var adtcde = await ValeursAsync(cnx, "SELECT ADTCDE FROM NP11F.SPF010 WHERE RSOC = ? AND AARTIC = ? AND AINDIC = ?",
+            BaseDeTest.Societe, article.Value.Article, article.Value.Indice);
+        CleCommande? cle = null;
+        try
+        {
+            var entete = new SaisieCommandesService(new SaisieCommandesDb2(BaseDeTest.Configuration), Consultation, new Utilisateur());
+            var e = await entete.PreparerAsync(new DebutCommande
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, TypeCommande = "4", Enseigne = "1",
+            });
+            (e.Designation1, e.DateLivraison, e.Interlocuteur, e.Fabricant) =
+                ("TEST NETPRINT SAAS DATES - A SUPPRIMER", DateOnly.FromDateTime(DateTime.Today.AddDays(20)), "TEST SAAS", "LEN");
+            cle = await entete.CreerAsync(e);
+            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur(), Production());
+            var d1 = NextWorkingDay(DateOnly.FromDateTime(DateTime.Today.AddDays(15)));
+            var d2 = NextWorkingDay(d1.AddDays(3));
+            var d3 = NextWorkingDay(d2.AddDays(5));
+            async Task<int> LigneAsync(DateOnly date)
+            {
+                var l = await service.NouvelleAsync(cle);
+                (l.Article, l.Indice, l.Quantite, l.PrixBrut, l.PrixSaisi, l.AdresseSiege, l.DateLivraison) =
+                    (article.Value.Article, article.Value.Indice, 1000, 49, true, true, date);
+                l = await service.CompleterAsync(cle, l);
+                l.AvertissementsAcceptes = [.. typeof(AvertissementsLigne).GetFields().Select(f => (string)f.GetValue(null)!)];
+                return await service.EnregistrerAsync(cle, l);
+            }
+            var l1 = await LigneAsync(d1);
+            var l2 = await LigneAsync(d2);
+            IActionsCommande actions = service;
+
+            // Dates obligatoires
+            var ex = await Assert.ThrowsAsync<SaisieInvalideException>(() => actions.ReporterDatesAsync(cle, new(ZoneDate.Livraison, null, ZoneDate.Livraison, d3)));
+            Assert.Equal(nameof(ReportDates.DateOrigine), Assert.Single(ex.Erreurs).Zone);
+
+            // Livraison d1 → d3 : la ligne 1 seulement
+            Assert.Equal(1, await actions.ReporterDatesAsync(cle, new(ZoneDate.Livraison, d1, ZoneDate.Livraison, d3)));
+            Assert.Equal((d3, d2), ((await service.LireAsync(cle, l1))!.DateLivraison!.Value, (await service.LireAsync(cle, l2))!.DateLivraison!.Value));
+
+            // Date confirmée posée sur la ligne 2, puis plus rien à la date d'origine
+            Assert.Equal(1, await actions.ReporterDatesAsync(cle, new(ZoneDate.Livraison, d2, ZoneDate.Confirmee, d3)));
+            var lue2 = (await service.LireAsync(cle, l2))!;
+            Assert.Equal((d2, (DateOnly?)d3), (lue2.DateLivraison!.Value, lue2.DateConfirmee));
+            Assert.Equal(0, await actions.ReporterDatesAsync(cle, new(ZoneDate.Livraison, d1, ZoneDate.Livraison, d3)));
+        }
+        finally
+        {
+            if (cle is not null) await NettoyerAsync(cnx, cle, client, article!.Value, adtcde);
+        }
+    }
+
+    // Ligne d'après un devis (NEG520 F10) : devis du client, ligne pré-remplie « à la demande », enregistrée avec son devis
+    [FactDb2Ecriture]
+    public async Task Ligne_d_apres_un_devis_de_bout_en_bout()
+    {
+        await using var cnx = new OdbcConnection(BaseDeTest.Configuration.GetConnectionString("Db2"));
+        await cnx.OpenAsync();
+        var article = await ArticleDuClientAsync(cnx);
+        Assert.NotNull(article);
+        var client = await ValeursAsync(cnx, "SELECT CDDTPC, CDDTDC, CDDDOS, CDDCLE FROM NP11F.AA0003 WHERE RSOC = ? AND RGEN = ? AND RCLI = ?",
+            BaseDeTest.Societe, BaseDeTest.CompteGeneral, BaseDeTest.CompteClient);
+        var adtcde = await ValeursAsync(cnx, "SELECT ADTCDE FROM NP11F.SPF010 WHERE RSOC = ? AND AARTIC = ? AND AINDIC = ?",
+            BaseDeTest.Societe, article.Value.Article, article.Value.Indice);
+        CleCommande? cle = null;
+        try
+        {
+            var entete = new SaisieCommandesService(new SaisieCommandesDb2(BaseDeTest.Configuration), Consultation, new Utilisateur());
+            var e = await entete.PreparerAsync(new DebutCommande
+            {
+                CompteGeneral = BaseDeTest.CompteGeneral, CompteClient = BaseDeTest.CompteClient, TypeCommande = "4", Enseigne = "1",
+            });
+            (e.Designation1, e.DateLivraison, e.Interlocuteur, e.Fabricant) =
+                ("TEST NETPRINT SAAS DEVIS - A SUPPRIMER", DateOnly.FromDateTime(DateTime.Today.AddDays(20)), "TEST SAAS", "LEN");
+            cle = await entete.CreerAsync(e);
+            var service = new SaisieLignesService(Lignes, Consultation, new Utilisateur(), Production());
+
+            // Devis du client : les plus récents d'abord, recherche par n°
+            var devis = await service.DevisAReprendreAsync(cle, null);
+            Assert.NotEmpty(devis.Lignes);
+            Assert.True(devis.Lignes.Zip(devis.Lignes.Skip(1)).All(p => p.First.Devis.Numero >= p.Second.Devis.Numero));
+            var choisi = devis.Lignes.FirstOrDefault(d => d.Unite == "LT" && d.Adresses <= 1 && d.Quantite > 0)
+                ?? devis.Lignes.First(d => d.Adresses <= 1 && d.Quantite > 0);
+            Assert.All((await service.DevisAReprendreAsync(cle, choisi.Devis.Numero.ToString())).Lignes, d => Assert.Equal(choisi.Devis.Numero, d.Devis.Numero));
+            sortie.WriteLine($"Commande {cle.Libelle}, devis {choisi.Devis.Libelle} « {choisi.Designation} » {choisi.Quantite} {choisi.Unite} à {choisi.Prix}");
+            await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => service.NouvelleDepuisDevisAsync(cle, new ReferenceDevis(99999, 9, 9)));
+
+            var l = await service.NouvelleDepuisDevisAsync(cle, choisi.Devis);
+            Assert.Equal((StatutsLigne.ALaDemande, choisi.Devis, choisi.Designation), (l.Statut, l.Devis, l.Designation));
+            if (choisi.Unite == "LT") Assert.Equal(Math.Truncate(choisi.Prix * 1000 / choisi.Quantite * 100) / 100, l.PrixBrut);
+            // Devis d'un autre client : refusé par le service (pas seulement absent de la liste)
+            var autreClient = await ValeursAsync(cnx, """
+                SELECT RDEV, RVERS, RHYPO FROM NP11F.D5000F WHERE RSOC = ? AND RCOUT = 'C' AND NOT (RGEN = ? AND RCLI = ?) FETCH FIRST 1 ROW ONLY
+                """, BaseDeTest.Societe, BaseDeTest.CompteGeneral, BaseDeTest.CompteClient);
+            var etranger = new ReferenceDevis(Convert.ToInt32(autreClient[0]), Convert.ToInt32(autreClient[1]), Convert.ToInt32(autreClient[2]));
+            await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => service.NouvelleDepuisDevisAsync(cle, etranger));
+            Assert.Empty(await service.AdressesDevisAsync(cle, etranger));
+            sortie.WriteLine($"Ligne proposée : {l.Quantite} {l.Unite} à {l.PrixBrut}, cession {l.PrixCession}, adresse {l.NumeroAdresse}/{l.AdresseSiege}");
+
+            // Un devis à plusieurs adresses demande le choix de l'une d'elles
+            if (devis.Lignes.FirstOrDefault(d => d.Adresses > 1) is { } multiple)
+            {
+                await Assert.ThrowsAsync<NetPrint.Socle.RegleMetierException>(() => service.NouvelleDepuisDevisAsync(cle, multiple.Devis));
+                var adresses = await service.AdressesDevisAsync(cle, multiple.Devis);
+                var autre = await service.NouvelleDepuisDevisAsync(cle, multiple.Devis, adresses[^1]);
+                Assert.Equal(adresses[^1].Quantite, autre.Quantite);
+            }
+
+            // Article saisi ensuite : désignation, unité et prix du devis gardés ; enregistrement avec le devis
+            l.Article = article.Value.Article;
+            l.Indice = article.Value.Indice;
+            l.DateLivraison = NextWorkingDay(DateOnly.FromDateTime(DateTime.Today.AddDays(15)));
+            var complete = await service.CompleterAsync(cle, l);
+            Assert.Equal((l.Designation, l.Unite, l.PrixBrut), (complete.Designation, complete.Unite, complete.PrixBrut));
+            complete.AvertissementsAcceptes = [.. typeof(AvertissementsLigne).GetFields().Select(f => (string)f.GetValue(null)!)];
+            var numero = await service.EnregistrerAsync(cle, complete);
+            var lue = (await service.LireAsync(cle, numero))!;
+            Assert.Equal((choisi.Devis, StatutsLigne.ALaDemande, complete.PrixBrut, complete.Quantite), (lue.Devis, lue.Statut, lue.PrixBrut, lue.Quantite));
+
+            // Modification par une saisie qui ignore le devis (Devis inconnu) : DNDEV / DNVERS / DNHYPO conservés
+            lue.Commentaire1 = "MODIFIEE";
+            lue.Devis = null;
+            lue.AvertissementsAcceptes = complete.AvertissementsAcceptes;
+            await service.EnregistrerAsync(cle, lue);
+            Assert.Equal(choisi.Devis, (await service.LireAsync(cle, numero))!.Devis);
+        }
+        finally
+        {
+            if (cle is not null) await NettoyerAsync(cnx, cle, client, article!.Value, adtcde);
         }
     }
 

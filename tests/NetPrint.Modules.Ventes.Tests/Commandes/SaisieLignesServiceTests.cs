@@ -12,6 +12,15 @@ public class SaisieLignesServiceTests
 
     // ---------- Nouvelle ligne ----------
     [Fact]
+    public void Norme_inexistante_refusee()
+    {
+        var (erreurs, _) = SaisieLignesService.Controler(Contexte(), Ligne(), Article(), Verifs() with { NormeExiste = false }, null, Aujourdhui);
+        Assert.Contains(erreurs, e => e.Zone == nameof(LigneSaisie.Norme) && e.Message == "Ce code norme n'existe pas.");
+        Assert.DoesNotContain(SaisieLignesService.Controler(Contexte(), Ligne(), Article(), Verifs(), null, Aujourdhui).Erreurs,
+            e => e.Zone == nameof(LigneSaisie.Norme));
+    }
+
+    [Fact]
     public void Nouvelle_ligne_avec_le_code_vente_et_l_adresse_par_defaut()
     {
         var l = SaisieLignesService.Nouvelle(Contexte() with { AdresseParDefaut = 4 });
@@ -342,7 +351,7 @@ public class SaisieLignesServiceTests
         VerificationsLigne? v = null) =>
         SaisieLignesService.Controler(Contexte(), l, a ?? (l.Article == "" ? null : Article()), v ?? Verifs(), null, Aujourdhui);
 
-    private static ContexteLigne Contexte() => new(
+    internal static ContexteLigne Contexte() => new(
         TypeCommande: "4", TypeFacturation: "1", CompteGeneral: 411100, CompteClient: 376, CodeVente: "2", Enlevement: "A",
         Representant: 28, TauxCommission: 5, SousTraitee: false, NonModifiable: false, Soldee: false, Enseigne: "1",
         DateLivraison: null, DateDossier: new(2026, 10, 30), AdresseParDefaut: 0, SansMaxi: false, PrixCessionObligatoire: false,
@@ -350,7 +359,7 @@ public class SaisieLignesServiceTests
         TypesStock: new Dictionary<string, string> { ["P1"] = "P1" }, TypeCommission: "A", SeuilsCommission: "", TauxCommissions: "",
         MaxiClient: [], MaxiSociete: [], CalculMaxi: false, PlafondFranco: 0);
 
-    private static ArticleLigne Article() => new(
+    internal static ArticleLigne Article() => new(
         Remplacement: "N", Type: "2", TypeFacturation: "1", CompteGeneral: 411100, CompteClient: 376, Stocke: false,
         TarifParEmballage: false, SaisieEnUc: false, StockControle: false, Emballage: 0, FractionnableCommande: true,
         FractionnableLivraison: true, Unite: "LM", Designation: "ETIQUETTE TEST", Norme: "NF1", Emplacement: "A1",

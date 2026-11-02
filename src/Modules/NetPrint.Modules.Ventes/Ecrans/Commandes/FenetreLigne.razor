@@ -33,6 +33,10 @@
                         <span class="discret"> · article et prix de la ligne d'origine</span>
                     </p>
                 }
+                @if (l.Devis is { } devis && !Appel)
+                {
+                    <p class="aide">📄 D'après le devis <b>@devis.Libelle</b> : désignation, unité et prix du devis sont gardés si vous saisissez l'article.</p>
+                }
                 <div class="grille-ligne">
                     <section>
                         <h3>Article</h3>
@@ -46,10 +50,14 @@
                                     }
                                 </select>
                             </label>
-                            <label class="champ @Classe(nameof(l.Article))">
+                            <div class="champ @Classe(nameof(l.Article))">
                                 <span>Article</span>
-                                <input class="court" maxlength="15" @bind="l.Article" @bind:after="CompleterAsync" autofocus="@(NumeroLigne == 0 && !Appel)" disabled="@Appel" />
-                            </label>
+                                <div class="ligne-champs">
+                                    <input class="court" maxlength="15" @bind="l.Article" @bind:after="CompleterAsync" autofocus="@(NumeroLigne == 0 && !Appel)" disabled="@Appel" />
+                                    <BoutonRecherche Liste="ListeChoix.Article" Parent="@ClientArticles" Titre="Rechercher un article du client" Disabled="@Appel"
+                                                     OnChoix="ChoisirArticleAsync" />
+                                </div>
+                            </div>
                             <label class="champ">
                                 <span>Indice</span>
                                 <input class="code" maxlength="2" @bind="l.Indice" @bind:after="CompleterAsync" disabled="@Appel" />
@@ -207,7 +215,12 @@
                             <textarea rows="5" @bind="l.Texte"></textarea>
                         </label>
                         <div class="ligne-champs">
-                            <label class="champ"><span>Norme</span><input class="code" maxlength="4" @bind="l.Norme" /></label>
+                            <div class="champ @Classe(nameof(l.Norme))"><span>Norme</span>
+                                <div class="ligne-champs">
+                                    <input class="code" maxlength="4" @bind="l.Norme" />
+                                    <BoutonRecherche Liste="ListeChoix.Norme" Titre="Rechercher une norme" OnChoix="c => l.Norme = c.Code" />
+                                </div>
+                            </div>
                             <label class="champ @Classe(nameof(l.Emplacement))"><span>Emplacement</span><input class="court" maxlength="8" @bind="l.Emplacement" /></label>
                             <div class="champ @Classe(nameof(l.CompteClientFacture))">
                                 <span>Client facturé</span>
@@ -217,6 +230,7 @@
                                 </div>
                             </div>
                         </div>
+                        @Message(nameof(l.Norme))
                         @Message(nameof(l.Emplacement))
                         @Message(nameof(l.CompteClientFacture))
                         @Message(nameof(l.NouvelleApplication))
@@ -237,6 +251,10 @@
     [Parameter] public int NumeroLigne { get; set; }
     // Nouvel appel de livraison sur cette ligne « à la demande » (NumeroLigne = 0)
     [Parameter] public int LigneOrigine { get; set; }
+    // Client de la commande (« 411100 376 ») : la recherche d'article (F4) propose ses articles
+    [Parameter] public string? ClientArticles { get; set; }
+    // Nouvelle ligne déjà pré-remplie (reprise d'un devis)
+    [Parameter] public LigneSaisie? Initiale { get; set; }
     [Parameter] public IReadOnlyList<CodeLibelle> CodesVente { get; set; } = [];
     // Résultat : n° de la ligne enregistrée, ou null si annulé
     [Parameter] public EventCallback<int?> OnFermer { get; set; }
@@ -250,7 +268,8 @@
 
     private string Titre => l is { EstAppel: true }
         ? NumeroLigne == 0 ? $"📦 Nouvel appel de livraison sur la ligne {l.LigneOrigine}" : $"Appel {NumeroLigne} de la commande {Commande.Libelle}"
-        : NumeroLigne == 0 ? "＋ Nouvelle ligne" : $"Ligne {NumeroLigne} de la commande {Commande.Libelle}";
+        : NumeroLigne == 0 ? l?.Devis is { } d ? $"📄 Nouvelle ligne d'après le devis {d.Libelle}" : "＋ Nouvelle ligne"
+        : $"Ligne {NumeroLigne} de la commande {Commande.Libelle}";
 
     // Zones de prix reportées sur les appels d'une ligne « à la demande » (NEG520B)
     private static string Prix(LigneSaisie x) =>
@@ -261,6 +280,7 @@
         try
         {
             l = NumeroLigne > 0 ? await Lignes.LireAsync(Commande, NumeroLigne)
+                : Initiale is not null ? Initiale
                 : LigneOrigine > 0 ? await Appels.NouvelAsync(Commande, LigneOrigine)
                 : await Lignes.NouvelleAsync(Commande);
             if (l is not null) prixInitial = Prix(l);
@@ -275,6 +295,14 @@
             Notifications.Erreur($"Ouverture de la ligne impossible : {ex.Message}");
             await OnFermer.InvokeAsync(null);
         }
+    }
+
+    // Article choisi dans la recherche (F4) : article et indice, puis la ligne est complétée
+    private async Task ChoisirArticleAsync(LigneChoix choix)
+    {
+        if (l is null) return;
+        (l.Article, l.Indice) = (choix.Codes[0], choix.Codes.Count > 1 ? choix.Codes[1] : "");
+        await CompleterAsync();
     }
 
     // Article, quantité, unité, remise : la ligne est complétée (valeurs de l'article, prix proposé, montant)

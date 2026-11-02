@@ -1,3 +1,5 @@
+using NetPrint.Socle;
+
 namespace NetPrint.Modules.Ventes.Contrats;
 
 // =====================================================================
@@ -11,6 +13,13 @@ public interface ISaisieLignesCommande
     Task<LigneSaisie> NouvelleAsync(CleCommande commande, CancellationToken ct = default);
 
     Task<LigneSaisie?> LireAsync(CleCommande commande, int numeroLigne, CancellationToken ct = default);
+
+    // Reprise d'un devis (F10 de NEG520) : devis du client de la commande (les plus récents d'abord, filtrés par n° ou
+    // par mots de la désignation), adresses de livraison d'un devis, puis nouvelle ligne pré-remplie (non enregistrée).
+    // Un devis à plusieurs adresses demande le choix de l'une d'elles. Seuls les devis du client de la commande sont repris.
+    Task<ResultatRecherche<DevisAReprendre>> DevisAReprendreAsync(CleCommande commande, string? recherche, CancellationToken ct = default);
+    Task<IReadOnlyList<AdresseDevis>> AdressesDevisAsync(CleCommande commande, ReferenceDevis devis, CancellationToken ct = default);
+    Task<LigneSaisie> NouvelleDepuisDevisAsync(CleCommande commande, ReferenceDevis devis, AdresseDevis? adresse = null, CancellationToken ct = default);
 
     // « Entrée » du 5250 : reprend les valeurs de l'article (désignation, unité, emballage, norme, emplacement, textes)
     // quand l'article change, propose le prix (cascade de tarifs) tant qu'aucun prix n'a été saisi, recalcule montant,
@@ -41,6 +50,31 @@ public interface IActionsCommande
 
     // Refusée s'il existe un BL ou une facture (droit « Suppression ») ; données annexes supprimées dans la même transaction
     Task SupprimerAsync(CleCommande commande, CancellationToken ct = default);
+
+    // Report de date en masse (F19 de NEG520, fenêtre NEG520CW) : les lignes non soldées dont la date d'origine (de
+    // livraison ou confirmée) vaut la date donnée reçoivent la nouvelle date dans la zone choisie. Refusé si une ligne
+    // fait partie d'un OPR non livré. Renvoie le nombre de lignes reportées.
+    Task<int> ReporterDatesAsync(CleCommande commande, ReportDates report, CancellationToken ct = default);
+}
+
+public enum ZoneDate { Livraison = 1, Confirmee = 2 }
+
+public sealed record ReportDates(ZoneDate ZoneOrigine, DateOnly? DateOrigine, ZoneDate ZoneDestination, DateOnly? DateDestination);
+
+// Devis chiffré (D5000F, RCOUT = 'C') : n°, version, hypothèse de quantité
+public sealed record ReferenceDevis(int Numero, int Version, int Hypothese)
+{
+    public string Libelle => $"{Numero} v{Version} h{Hypothese}";
+}
+
+public sealed record DevisAReprendre(ReferenceDevis Devis, DateOnly? Date, string Designation, string ReferenceImprime, int Quantite,
+    string Unite, decimal Prix, bool PasseEnCommande, int Adresses);
+
+// Adresse de livraison d'un devis (D50001) ; Priorite : n° d'adresse du client (A500F), 0 = adresse saisie dans le devis
+public sealed record AdresseDevis(int Priorite, string RaisonSociale, string Rue1, string Rue2, string CodePostal, string Ville,
+    int Quantite, string Commentaire1, string Commentaire2, string Commentaire3)
+{
+    public bool Vide => RaisonSociale == "" && Rue1 == "" && Rue2 == "" && CodePostal == "" && Ville == "";
 }
 
 public static class StatutsLigne
@@ -108,6 +142,7 @@ public sealed class LigneSaisie
     public string NouvelleApplication { get; set; } = "";
     public int? CompteGeneralFacture { get; set; }
     public int? CompteClientFacture { get; set; }
+    public ReferenceDevis? Devis { get; set; }         // DNDEV / DNVERS / DNHYPO : devis repris (F10 de NEG520)
 
     // Lecture seule (ligne existante)
     public int QuantiteLivree { get; set; }
