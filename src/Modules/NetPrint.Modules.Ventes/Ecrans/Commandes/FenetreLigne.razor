@@ -1,0 +1,392 @@
+@* =====================================================================
+   Saisie d'une ligne de commande — reprise de l'écran NEG52002 (NEG520 / CTL520).
+   L'article, la quantité et l'unité complètent la ligne (désignation, unité, prix proposé par le tarif,
+   montant, commission, maxi livrable) ; un prix tapé n'est plus remplacé par le tarif.
+   Les avertissements de CTL520 (stock, date passée...) sont présentés ensemble et acceptés par l'utilisateur.
+   Appel de livraison (option DE) : article et prix sont ceux de la ligne d'origine, non modifiables ici ; après un
+   changement de prix d'une ligne « à la demande », le report sur ses appels est proposé (NEG520B).
+   ===================================================================== *@
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@inject ISaisieLignesCommande Lignes
+@inject IAppelsLivraison Appels
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<div class="voile" @onclick="Annuler">
+    <form class="fenetre fenetre-ligne" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onsubmit="EnregistrerAsync">
+        <div class="titre-fenetre">@Titre</div>
+        <div class="corps-fenetre">
+            @if (l is null)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else
+            {
+                @if (erreurs.Count > 0)
+                {
+                    <p class="erreur-saisie">@erreurs.Count zone@(erreurs.Count > 1 ? "s" : "") à corriger.</p>
+                }
+                @if (Appel)
+                {
+                    <p class="bandeau-appel">
+                        Appel de livraison de la ligne <b>@l.LigneOrigine</b> · reste à appeler <b>@l.ResteOrigine.ToString("N0")</b>
+                        <span class="discret"> · article et prix de la ligne d'origine</span>
+                    </p>
+                }
+                <div class="grille-ligne">
+                    <section>
+                        <h3>Article</h3>
+                        <div class="ligne-champs">
+                            <label class="champ @Classe(nameof(l.CodeVente))">
+                                <span>Code vente</span>
+                                <select @bind="l.CodeVente" disabled="@Appel">
+                                    @foreach (var c in CodesVente)
+                                    {
+                                        <option value="@c.Code">@c.Code · @c.Libelle</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="champ @Classe(nameof(l.Article))">
+                                <span>Article</span>
+                                <input class="court" maxlength="15" @bind="l.Article" @bind:after="CompleterAsync" autofocus="@(NumeroLigne == 0 && !Appel)" disabled="@Appel" />
+                            </label>
+                            <label class="champ">
+                                <span>Indice</span>
+                                <input class="code" maxlength="2" @bind="l.Indice" @bind:after="CompleterAsync" disabled="@Appel" />
+                            </label>
+                            <label class="champ @Classe(nameof(l.Statut))">
+                                <span>Statut</span>
+                                <select @bind="l.Statut" disabled="@Appel">
+                                    <option value="1">Normal</option>
+                                    <option value="3">À la demande</option>
+                                </select>
+                            </label>
+                        </div>
+                        @Message(nameof(l.CodeVente))
+                        @Message(nameof(l.Article))
+                        @Message(nameof(l.Statut))
+                        <label class="champ large">
+                            <span>Désignation</span>
+                            <input maxlength="40" @bind="l.Designation" disabled="@Appel" />
+                        </label>
+                    </section>
+
+                    <section>
+                        <h3>Quantité et prix</h3>
+                        <div class="ligne-champs">
+                            <label class="champ @Classe(nameof(l.Quantite))">
+                                <span>Quantité</span>
+                                <input type="number" class="num7" @bind="l.Quantite" @bind:after="CompleterAsync" autofocus="@(NumeroLigne == 0 && Appel)" />
+                            </label>
+                            @if (l.SaisieEnUc)
+                            {
+                                <label class="champ @Classe(nameof(l.QuantiteUc))">
+                                    <span>En UC (× @l.Emballage)</span>
+                                    <input type="number" class="num6" @bind="l.QuantiteUc" @bind:after="CompleterAsync" />
+                                </label>
+                            }
+                            <label class="champ @Classe(nameof(l.Unite))">
+                                <span>Unité</span>
+                                <input class="code" maxlength="2" @bind="l.Unite" @bind:after="CompleterAsync" disabled="@Appel" />
+                            </label>
+                            <label class="champ">
+                                <span>Maxi livrable</span>
+                                <input type="number" class="num7" @bind="l.MaxiLivrable" @bind:after="() => l.MaxiSaisi = l.MaxiLivrable is > 0" />
+                            </label>
+                            @if (Appel)
+                            {
+                                <button type="button" class="bouton-discret" title="Maxi livrable de la ligne d'origine moins le livré de ses appels (F22)"
+                                        @onclick="SoldeMaxiAsync">Solde du maxi</button>
+                            }
+                        </div>
+                        @Message(nameof(l.Quantite))
+                        @Message(nameof(l.QuantiteUc))
+                        @Message(nameof(l.Unite))
+                        <div class="ligne-champs">
+                            <label class="champ @Classe(nameof(l.PrixBrut))">
+                                <span>Prix</span>
+                                <input type="number" step="0.01" class="num7" @bind="l.PrixBrut" @bind:after="PrixTapeAsync"
+                                       disabled="@(l.Gratuite || l.PrixADefinir || Appel)" />
+                            </label>
+                            <label class="champ @Classe(nameof(l.Remise))">
+                                <span>Remise %</span>
+                                <input type="number" class="num3" @bind="l.Remise" @bind:after="CompleterAsync" disabled="@Appel" />
+                            </label>
+                            <label class="champ @Classe(nameof(l.PrixCession))">
+                                <span>Prix de cession</span>
+                                <input type="number" step="0.01" class="num7" @bind="l.PrixCession" disabled="@Appel" />
+                            </label>
+                            <label class="champ">
+                                <span>Commission %</span>
+                                <input type="number" step="0.01" class="num6" @bind="l.TauxCommission" @bind:after="() => l.CommissionSaisie = l.TauxCommission is not null" disabled="@Appel" />
+                            </label>
+                        </div>
+                        @Message(nameof(l.PrixBrut))
+                        @Message(nameof(l.Remise))
+                        @Message(nameof(l.PrixCession))
+                        <div class="ligne-cases">
+                            <label class="champ-case"><input type="checkbox" @bind="l.Gratuite" @bind:after="CompleterAsync" disabled="@Appel" /> <span>Gratuite</span></label>
+                            <label class="champ-case"><input type="checkbox" @bind="l.PrixADefinir" @bind:after="CompleterAsync" disabled="@Appel" /> <span>Prix à définir</span></label>
+                            <label class="champ-case"><input type="checkbox" @bind="l.RegroupementOf" /> <span>Regroupement OF</span></label>
+                        </div>
+                        @Message(nameof(l.Gratuite))
+                        @Message(nameof(l.PrixADefinir))
+                        <p class="resume-prix">
+                            Prix net <b>@l.PrixNet.ToString("N2")</b> · montant <b>@l.Montant.ToString("N2")</b>
+                            @if (l.SourcePrix != "")
+                            {
+                                <span class="discret"> · @l.SourcePrix</span>
+                            }
+                            @if (l.PrixSaisi && !Appel)
+                            {
+                                <span class="discret"> · prix saisi</span>
+                            }
+                        </p>
+                    </section>
+
+                    <section>
+                        <h3>Livraison</h3>
+                        <div class="ligne-champs">
+                            <label class="champ @Classe(nameof(l.DateLivraison))">
+                                <span>Date de livraison</span>
+                                <input type="date" @bind="l.DateLivraison" @bind:format="yyyy-MM-dd" />
+                            </label>
+                            <label class="champ @Classe(nameof(l.DateConfirmee))">
+                                <span>Date confirmée</span>
+                                <input type="date" @bind="l.DateConfirmee" @bind:format="yyyy-MM-dd" disabled="@(l.Statut == StatutsLigne.ALaDemande)" />
+                            </label>
+                            <label class="champ @Classe(nameof(l.NumeroAppel))">
+                                <span>N° d'appel</span>
+                                <input class="court" maxlength="15" @bind="l.NumeroAppel" />
+                            </label>
+                            <label class="champ">
+                                <span>Date d'appel</span>
+                                <input type="date" @bind="l.DateAppel" @bind:format="yyyy-MM-dd" />
+                            </label>
+                        </div>
+                        @Message(nameof(l.DateLivraison))
+                        @Message(nameof(l.DateConfirmee))
+                        @Message(nameof(l.NumeroAppel))
+                        <div class="ligne-cases">
+                            <label class="champ-case"><input type="checkbox" @bind="l.AdresseSiege" /> <span>Adresse du siège du client</span></label>
+                        </div>
+                        @if (!l.AdresseSiege)
+                        {
+                            <div class="ligne-champs">
+                                <label class="champ @Classe(nameof(l.NumeroAdresse))">
+                                    <span>N° d'adresse</span>
+                                    <input type="number" class="num6" @bind="l.NumeroAdresse" />
+                                </label>
+                                <span class="ou">ou</span>
+                                <label class="champ large"><span>Raison sociale</span><input maxlength="34" @bind="l.AdresseRaisonSociale" disabled="@(l.NumeroAdresse is > 0)" /></label>
+                            </div>
+                            @if (l.NumeroAdresse is not > 0)
+                            {
+                                <div class="ligne-champs">
+                                    <label class="champ large"><span>Rue</span><input maxlength="38" @bind="l.AdresseRue1" /></label>
+                                    <label class="champ large"><span>Complément</span><input maxlength="38" @bind="l.AdresseRue2" /></label>
+                                </div>
+                                <div class="ligne-champs">
+                                    <label class="champ"><span>Code postal</span><input class="court" maxlength="10" @bind="l.AdresseCodePostal" /></label>
+                                    <label class="champ large"><span>Ville</span><input maxlength="38" @bind="l.AdresseVille" /></label>
+                                    <label class="champ"><span>Pays</span><input class="code" maxlength="3" @bind="l.AdressePays" /></label>
+                                </div>
+                            }
+                            @Message(nameof(l.NumeroAdresse))
+                        }
+                    </section>
+
+                    <section>
+                        <h3>Compléments</h3>
+                        <label class="champ large"><span>Commentaires</span>
+                            <input maxlength="40" @bind="l.Commentaire1" />
+                            <input maxlength="40" @bind="l.Commentaire2" />
+                            <input maxlength="40" @bind="l.Commentaire3" />
+                        </label>
+                        <label class="champ large"><span>Texte libre (19 lignes de 40 caractères)</span>
+                            <textarea rows="5" @bind="l.Texte"></textarea>
+                        </label>
+                        <div class="ligne-champs">
+                            <label class="champ"><span>Norme</span><input class="code" maxlength="4" @bind="l.Norme" /></label>
+                            <label class="champ @Classe(nameof(l.Emplacement))"><span>Emplacement</span><input class="court" maxlength="8" @bind="l.Emplacement" /></label>
+                            <div class="champ @Classe(nameof(l.CompteClientFacture))">
+                                <span>Client facturé</span>
+                                <div class="ligne-champs">
+                                    <input type="number" class="num6" @bind="l.CompteGeneralFacture" />
+                                    <input type="number" class="num7" @bind="l.CompteClientFacture" />
+                                </div>
+                            </div>
+                        </div>
+                        @Message(nameof(l.Emplacement))
+                        @Message(nameof(l.CompteClientFacture))
+                        @Message(nameof(l.NouvelleApplication))
+                    </section>
+                </div>
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="espace"></span>
+            <button type="button" @onclick="Annuler">Annuler</button>
+            <button type="submit" class="bouton-principal" disabled="@(l is null || enCours)">Enregistrer la ligne</button>
+        </div>
+    </form>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleCommande Commande { get; set; } = default!;
+    [Parameter] public int NumeroLigne { get; set; }
+    // Nouvel appel de livraison sur cette ligne « à la demande » (NumeroLigne = 0)
+    [Parameter] public int LigneOrigine { get; set; }
+    [Parameter] public IReadOnlyList<CodeLibelle> CodesVente { get; set; } = [];
+    // Résultat : n° de la ligne enregistrée, ou null si annulé
+    [Parameter] public EventCallback<int?> OnFermer { get; set; }
+
+    private LigneSaisie? l;
+    private List<ErreurSaisie> erreurs = [];
+    private bool enCours;
+    private string prixInitial = "";
+
+    private bool Appel => l?.EstAppel == true;
+
+    private string Titre => l is { EstAppel: true }
+        ? NumeroLigne == 0 ? $"📦 Nouvel appel de livraison sur la ligne {l.LigneOrigine}" : $"Appel {NumeroLigne} de la commande {Commande.Libelle}"
+        : NumeroLigne == 0 ? "＋ Nouvelle ligne" : $"Ligne {NumeroLigne} de la commande {Commande.Libelle}";
+
+    // Zones de prix reportées sur les appels d'une ligne « à la demande » (NEG520B)
+    private static string Prix(LigneSaisie x) =>
+        $"{x.PrixBrut}|{x.Remise}|{x.Unite}|{x.PrixCession}|{x.TauxCommission}|{x.Gratuite}|{x.PrixADefinir}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            l = NumeroLigne > 0 ? await Lignes.LireAsync(Commande, NumeroLigne)
+                : LigneOrigine > 0 ? await Appels.NouvelAsync(Commande, LigneOrigine)
+                : await Lignes.NouvelleAsync(Commande);
+            if (l is not null) prixInitial = Prix(l);
+            if (l is null)
+            {
+                await Dialogues.AlerterAsync("Cette ligne n'existe plus.");
+                await OnFermer.InvokeAsync(null);
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Ouverture de la ligne impossible : {ex.Message}");
+            await OnFermer.InvokeAsync(null);
+        }
+    }
+
+    // Article, quantité, unité, remise : la ligne est complétée (valeurs de l'article, prix proposé, montant)
+    private async Task CompleterAsync()
+    {
+        if (l is null || l.Article == "") return;
+        try
+        {
+            var acceptes = l.AvertissementsAcceptes;
+            l = await Lignes.CompleterAsync(Commande, l);
+            l.AvertissementsAcceptes = acceptes;
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Calcul de la ligne impossible : {ex.Message}");
+        }
+    }
+
+    // Prix tapé : il n'est plus remplacé par le tarif ; prix effacé : le tarif est de nouveau proposé
+    private Task PrixTapeAsync()
+    {
+        if (l is null) return Task.CompletedTask;
+        l.PrixSaisi = l.PrixBrut is > 0;
+        return CompleterAsync();
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        if (l is null) return;
+        enCours = true;
+        erreurs = [];
+        try
+        {
+            var numero = await Lignes.EnregistrerAsync(Commande, l);
+            Notifications.Succes(Appel ? $"Appel {numero} enregistré." : $"Ligne {numero} enregistrée.");
+            if (NumeroLigne > 0 && l.Statut == StatutsLigne.ALaDemande && Prix(l) != prixInitial) await ProposerReportAsync(numero);
+            await OnFermer.InvokeAsync(numero);
+        }
+        catch (SaisieInvalideException ex) when (ex.Forcable)
+        {
+            // Avertissements de CTL520 : présentés ensemble, l'utilisateur les accepte ou corrige
+            var texte = string.Join("\n", ex.Erreurs.Select(a => "• " + a.Message));
+            if (await Dialogues.ConfirmerAsync(texte + "\n\nEnregistrer la ligne malgré tout ?", "Avertissements", "Enregistrer"))
+            {
+                foreach (var a in ex.Erreurs) l.AvertissementsAcceptes.Add(a.Zone);
+                enCours = false;
+                await EnregistrerAsync();
+                return;
+            }
+        }
+        catch (SaisieInvalideException ex)
+        {
+            erreurs = [.. ex.Erreurs];
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Enregistrement impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    // NEG520B : « Vous venez de modifier un prix. Voulez-vous appliquer cette modification aux appels de livraison rattachés ? »
+    private async Task ProposerReportAsync(int origine)
+    {
+        if (!await Dialogues.ConfirmerAsync("Vous venez de modifier le prix de cette ligne à la demande. Appliquer ce prix à ses appels " +
+                "de livraison (ni soldés ni facturés) ?", "Report du prix", "Appliquer")) return;
+        try
+        {
+            var appels = await Appels.ReporterPrixAsync(Commande, origine);
+            Notifications.Succes(appels.Count == 0 ? "Aucun appel à mettre à jour."
+                : $"Prix reporté sur {appels.Count} appel{(appels.Count > 1 ? "s" : "")} ({string.Join(", ", appels)}).");
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Report du prix impossible : {ex.Message}");
+        }
+    }
+
+    private async Task SoldeMaxiAsync()
+    {
+        if (l is null) return;
+        try
+        {
+            l.MaxiLivrable = await Appels.CalculerMaxiAsync(Commande, l.LigneOrigine);
+            l.MaxiSaisi = true;
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Calcul du maxi impossible : {ex.Message}");
+        }
+    }
+
+    private Task Annuler() => OnFermer.InvokeAsync(null);
+
+    private string Classe(string zone) => erreurs.Any(x => x.Zone == zone) ? "en-erreur" : "";
+
+    private RenderFragment Message(string zone) => __builder =>
+    {
+        foreach (var m in erreurs.Where(x => x.Zone == zone))
+        {
+            <span class="message-erreur">@m.Message</span>
+        }
+    };
+}

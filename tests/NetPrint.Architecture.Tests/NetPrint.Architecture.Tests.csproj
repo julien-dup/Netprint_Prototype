@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\src\NetPrint.Socle\NetPrint.Socle.csproj" />
     <ProjectReference Include="..\..\src\NetPrint.Noyau\NetPrint.Noyau.csproj" />
     <ProjectReference Include="..\..\src\Modules\NetPrint.Modules.Ventes\NetPrint.Modules.Ventes.csproj" />
+    <ProjectReference Include="..\..\src\Modules\NetPrint.Modules.Production\NetPrint.Modules.Production.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,5 @@
 using System.Globalization;
+using NetPrint.Modules.Production;
 using NetPrint.Modules.Ventes;
 using NetPrint.Noyau;
 using NetPrint.Socle.Modules;
@@ -23,6 +24,7 @@ builder.Services.AddNoyau();
 
 // ---------- Modules : une ligne par module ----------
 builder.Services.AddModuleVentes();
+builder.Services.AddModuleProduction();
 
 var app = builder.Build();
 

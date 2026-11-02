@@ -1,3 +1,4 @@
+using NetPrint.Socle.Documents;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -6,6 +7,7 @@ using Microsoft.Net.Http.Headers;
 using Microsoft.Extensions.DependencyInjection;
 using NetPrint.Modules.Ventes.Contrats;
 using NetPrint.Modules.Ventes.Donnees;
+using NetPrint.Modules.Ventes.Ecrans.Commandes;
 using NetPrint.Modules.Ventes.Ecrans.Devis;
 using NetPrint.Modules.Ventes.Services;
 using NetPrint.Socle;
@@ -36,6 +38,31 @@ public static class VentesModule
         services.AddScoped<IDecompositionDevis, DecompositionDevisService>();   // décomposition analytique, prix remis (lot E)
         services.AddScoped<DecompositionDevisDb2>();
         services.AddScoped<EtatConsultationDevis>();   // critères et liste conservés pendant la session (retour du détail)
+
+        // Commandes clients (négoce et produit fini) : entrée de menu et tuile d'accueil propres
+        services.AddSingleton(new DescriptionModule(
+            Code: "VENTES-COMMANDES",
+            Nom: "Commandes clients",
+            Url: "/ventes/commandes",
+            Icone: "🧾",
+            Ordre: 2,
+            Assemblage: typeof(VentesModule).Assembly,
+            Description: "Commandes de négoce et de produit fini : recherche, lignes, livraisons. À venir : saisie, ARC."));
+        services.AddScoped<IConsultationCommandes, ConsultationCommandesService>();
+        services.AddScoped<ISourceCommandes, ConsultationCommandesDb2>();
+        services.AddScoped<EtatListeCommandes>();
+        services.AddScoped<ISaisieCommandes, SaisieCommandesService>();   // en-tête de commande (DOS505)
+        services.AddScoped<ISourceSaisieCommandes, SaisieCommandesDb2>();
+        // Lignes (NEG520 / CTL520 / MAJ520), actions sur la commande (DOS500S), appels de livraison (option DE, NEG300NAV)
+        services.AddScoped<SaisieLignesService>();
+        services.AddScoped<ISaisieLignesCommande>(s => s.GetRequiredService<SaisieLignesService>());
+        services.AddScoped<IActionsCommande>(s => s.GetRequiredService<SaisieLignesService>());
+        services.AddScoped<IAppelsLivraison>(s => s.GetRequiredService<SaisieLignesService>());
+        services.AddScoped<ArcCommandeDb2>();
+        services.AddScoped<LancementCommandeDb2>();
+        services.AddScoped<ILancementCommande, LancementCommandeService>();   // lancement en fabrication (NEG515)
+        services.AddScoped<IEditionArc, EditionArcService>();   // ARC des commandes (ARC105P), PDF produit par l'application
+        services.AddScoped<LignesCommandeDb2>();
         return services;
     }
 
@@ -71,6 +98,59 @@ public static class VentesModule
                 {
                     return Results.Text($"Édition du récapitulatif impossible : {ex.Message}", "text/plain; charset=utf-8",
                         statusCode: StatusCodes.Status502BadGateway);
+                }
+            });
+
+        // ARC d'une commande en PDF : GET /api/ventes/commandes/24/1/arc?soldees=O&apercu=1
+        // soldees : O / N (absent = paramètre société) ; apercu = 1 : filigrane, sans le droit « Édition »
+        api.MapGet("/commandes/{numero:int}/{cle}/arc",
+            async (int numero, string cle, string? soldees, int? apercu, HttpContext http, IEditionArc arc, CancellationToken ct) =>
+            {
+                try
+                {
+                    var doc = await arc.EditerAsync(new CleCommande(numero, cle.Trim().ToUpperInvariant()),
+                        soldees switch { "O" or "o" => true, "N" or "n" => false, _ => null }, apercu == 1, ct);
+                    return DocumentsPdf.Reponse(http, doc);
+                }
+                catch (RegleMetierException ex)
+                {
+                    // Commande inexistante ou hors du périmètre du représentant : 404 ; droit « Édition » manquant : 403
+                    var statut = ex.Message.Contains("autorisé") ? StatusCodes.Status403Forbidden : StatusCodes.Status404NotFound;
+                    return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: statut);
+                }
+                catch (System.Data.Odbc.OdbcException ex)
+                {
+                    return Results.Text($"Édition de l'ARC impossible : {ex.Message}", "text/plain; charset=utf-8",
+                        statusCode: StatusCodes.Status502BadGateway);
+                }
+            });
+
+        // PDF d'un ARC tel qu'il a été envoyé (journal des envois) : GET /api/ventes/commandes/24/1/envois/12/pdf
+        api.MapGet("/commandes/{numero:int}/{cle}/envois/{id:long}/pdf",
+            async (int numero, string cle, long id, HttpContext http, IEditionArc arc, CancellationToken ct) =>
+                await arc.LirePdfEnvoyeAsync(new CleCommande(numero, cle.Trim().ToUpperInvariant()), id, ct) is { } pdf
+                    ? DocumentsPdf.Reponse(http, pdf) : Results.NotFound());
+
+        // Brouillon de message Outlook (.eml) avec les ARC en pièces jointes, sans serveur SMTP :
+        // GET /api/ventes/commandes/arc/message?c=24-1&c=25-1&a=client@exemple.fr&cc=autre@exemple.fr&soldees=O
+        api.MapGet("/commandes/arc/message",
+            async (string[]? c, string[]? a, string[]? cc, string? soldees, HttpContext http, IEditionArc arc, CancellationToken ct) =>
+            {
+                var cles = new List<CleCommande>();
+                foreach (var v in c ?? [])
+                    if (v.Split('-') is [var n, var k] && int.TryParse(n, out var numero)) cles.Add(new CleCommande(numero, k.Trim().ToUpperInvariant()));
+                    else return Results.BadRequest($"Commande invalide : {v}");
+                try
+                {
+                    var eml = await arc.PreparerMessageAsync(cles, a ?? [], cc ?? [],
+                        soldees switch { "O" or "o" => true, "N" or "n" => false, _ => null }, ct);
+                    http.Response.Headers.ContentDisposition =
+                        new ContentDispositionHeaderValue("attachment") { FileNameStar = eml.Nom }.ToString();
+                    return Results.File(eml.Contenu, MessageBrouillon.TypeEml);
+                }
+                catch (RegleMetierException ex)
+                {
+                    return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
                 }
             });
 

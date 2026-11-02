@@ -19,6 +19,7 @@ public class ReglesArchitecture
     private static readonly Assembly[] Modules =
     [
         typeof(VentesModule).Assembly,
+        typeof(NetPrint.Modules.Production.ProductionModule).Assembly,
     ];
 
     public static TheoryData<string> NomsModules()

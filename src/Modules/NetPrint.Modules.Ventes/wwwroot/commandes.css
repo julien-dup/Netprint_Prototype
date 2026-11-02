@@ -1,0 +1,179 @@
+/* Commandes clients (module Ventes) : compléments à app.css, chargés par les écrans /ventes/commandes */
+
+input.code-cle { width: 34px; text-align: center; text-transform: uppercase; }
+.champ-case { flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; min-height: 32px; }
+.champ-case span { margin: 0; }
+
+.separateur-compteur { margin: 0 6px; color: var(--texte-3, #8a94a6); }
+.compteur .avertissement { color: var(--orange); }
+
+/* Pastilles d'état : filtre rapide */
+.pastilles-etat { display: flex; gap: 6px; flex-wrap: wrap; }
+.pastille-etat {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px;
+    border: 1px solid var(--bord); border-radius: 999px; background: var(--surface); font-size: 12px; color: var(--texte);
+}
+.pastille-etat:hover { border-color: var(--bord-fort); }
+.pastille-etat.active { border-color: var(--accent); background: var(--accent-clair); color: var(--accent-fonce); font-weight: 600; }
+.pastille-etat .nombre-etat { min-width: 18px; padding: 0 5px; border-radius: 999px; background: #eef2f8; font-size: 11px; text-align: center; }
+.pastille-etat.active .nombre-etat { background: var(--surface); }
+
+/* États d'une commande */
+.badge-etat.etat-encours { background: #e0edff; color: var(--accent-fonce); }
+.badge-etat.etat-partielle { background: var(--orange-clair); color: var(--orange); }
+.badge-etat.etat-livree { background: #dcfce7; color: var(--vert); }
+.badge-etat.etat-soldee { background: #eef0f3; color: #5b6475; }
+.pastille-etat[class*="etat-"]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; }
+.pastille-etat.etat-encours::before { background: var(--accent); }
+.pastille-etat.etat-partielle::before { background: var(--orange); }
+.pastille-etat.etat-livree::before { background: var(--vert); }
+.pastille-etat.etat-soldee::before { background: #9aa3b2; }
+.grille tbody tr.commande-soldee td { color: #6b7385; }
+
+.code-commande { font-weight: 600; font-variant-numeric: tabular-nums; }
+.type-commande { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: #f1f4f9; }
+.type-commande.type-4 { background: #f3e8ff; color: #6b21a8; }
+.grille td.col-norme { color: #166534; font-weight: 600; }
+
+/* Dépliage des lignes d'une commande */
+.grille .col-chevron { text-align: center; padding: 0; }
+.chevron {
+    width: 24px; min-height: 24px; padding: 0; border: none; background: transparent; color: var(--texte-3, #8a94a6);
+    transition: transform .15s ease;
+}
+.chevron:hover { color: var(--accent); background: var(--accent-clair); }
+.chevron.ouvert { transform: rotate(90deg); color: var(--accent); }
+.grille tbody tr.sous-ligne { background: #f8fafd; }
+.grille tbody tr.sous-ligne td { border-top-color: transparent; font-size: 12.5px; }
+.grille tbody tr.sous-ligne.ligne-soldee td, .grille tbody tr.ligne-soldee td { color: #8a94a6; }
+.grille-principale tbody tr.sous-ligne td { max-width: none; overflow: visible; }
+/* Résumé de ligne : reste dans la partie visible de la grille, même si elle défile horizontalement */
+.resume-ligne { position: sticky; left: 40px; width: min(1300px, calc(100vw - 120px)); box-sizing: border-box; display: flex; align-items: center; gap: 12px; white-space: nowrap; overflow: hidden; padding-left: 4px; border-left: 2px solid var(--accent-clair); }
+.resume-ligne .num-ligne { color: var(--texte-3, #8a94a6); font-variant-numeric: tabular-nums; }
+.resume-ligne .article-ligne { font-weight: 600; min-width: 120px; }
+.resume-ligne .designation-ligne { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.resume-ligne .quantites, .resume-ligne .prix-ligne, .resume-ligne .valeur-ligne, .resume-ligne .date-ligne { font-variant-numeric: tabular-nums; }
+.resume-ligne .quantites { min-width: 150px; text-align: right; }
+.resume-ligne .quantites .livre { color: var(--vert); }
+.resume-ligne .prix-ligne { min-width: 90px; text-align: right; color: var(--texte-2, #5b6475); }
+.resume-ligne .valeur-ligne { min-width: 90px; text-align: right; font-weight: 600; }
+.resume-ligne .date-ligne { min-width: 80px; }
+.badge-demande { background: #fef9c3; color: #854d0e; }
+.badge-appel { background: #e0f2fe; color: #075985; }
+
+/* Avancement des livraisons */
+.avancement { display: inline-block; width: 60px; height: 6px; margin-right: 6px; border-radius: 3px; background: #e6eaf0; vertical-align: middle; overflow: hidden; }
+.avancement .barre { display: block; height: 100%; background: var(--vert); border-radius: 3px; }
+.taux { font-size: 12px; color: var(--texte-2, #5b6475); font-variant-numeric: tabular-nums; }
+
+/* ---------- Fiche d'une commande ---------- */
+.fiche-commande .discret { color: var(--texte-3, #8a94a6); font-weight: normal; }
+.entete-commande { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--bord); border-radius: var(--rayon); }
+.entete-commande .titre-designation { flex: 1 1 100%; color: var(--texte-2, #5b6475); font-size: 14px; }
+.badge-alerte { background: var(--danger-clair); color: var(--danger); }
+
+.indicateurs { display: flex; gap: 10px; flex-wrap: wrap; }
+.indicateur {
+    display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 110px; padding: 8px 12px;
+    border-radius: var(--rayon); background: #f6f8fc; font-size: 12px; color: var(--texte-2, #5b6475);
+}
+.indicateur .valeur-indicateur { font-size: 18px; font-weight: 700; color: var(--texte); font-variant-numeric: tabular-nums; }
+.avancement.large { width: 100%; margin: 2px 0 0; }
+
+.cartes-entete { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.cartes-entete .carte { gap: 4px; }
+.info { display: flex; gap: 6px; align-items: baseline; font-size: 13px; }
+.info .libelle-info { margin: 0; min-width: 92px; }
+.info .valeur-info { white-space: pre-line; }
+
+.nombre-onglet { margin-left: 4px; padding: 0 6px; border-radius: 999px; background: #eef2f8; font-size: 11px; color: var(--texte-2, #5b6475); }
+.onglets button.actif .nombre-onglet { background: var(--accent-clair); color: var(--accent-fonce); }
+
+.grille-fiche { table-layout: auto; }
+.grille-fiche td { white-space: nowrap; }
+.grille-etroite { width: auto; min-width: 480px; }
+.grille tbody tr.detail-ligne { background: #f8fafd; cursor: default; }
+.grille tbody tr.detail-ligne td { white-space: normal; }
+.champs-detail { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; padding: 6px 0; }
+.grille tfoot tr.ligne-total td { font-weight: 700; border-top: 2px solid var(--bord-fort); background: #f6f8fc; }
+
+.liste-bl { display: flex; flex-direction: column; gap: 10px; }
+.carte-bl .titre-bl { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.badge-journal.journal-c { background: #dcfce7; color: var(--vert); }
+.badge-journal.journal-m { background: #e0edff; color: var(--accent-fonce); }
+.badge-journal.journal-s { background: var(--danger-clair); color: var(--danger); }
+.ancien { text-decoration: line-through; }
+
+/* ---------- Saisie de l'en-tête ---------- */
+.saisie-entete .etape-client { max-width: 860px; gap: 14px; }
+.grille-champs { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-start; }
+.pied-etape { display: flex; justify-content: flex-end; }
+.formulaire-entete { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; align-items: start; }
+.formulaire-entete .carte { gap: 10px; background: var(--surface); }
+.formulaire-entete .champ.large, .formulaire-entete .champ.large input { width: 100%; }
+.formulaire-entete .champ.large input + input { margin-top: 4px; }
+.formulaire-entete details > summary { cursor: pointer; list-style: none; }
+.formulaire-entete details > summary h3 { display: inline; }
+.formulaire-entete .ou { align-self: flex-end; padding-bottom: 8px; color: var(--texte-3, #8a94a6); }
+.ligne-cases { display: flex; gap: 18px; flex-wrap: wrap; }
+.champ.en-erreur input, .champ.en-erreur select, .en-erreur > .ligne-champs input { border-color: var(--danger); background: var(--danger-clair); }
+.message-erreur { display: block; color: var(--danger); font-size: 12px; margin-top: 2px; }
+.erreur-saisie { margin: 0; color: var(--danger); font-weight: 600; }
+.bandeau-appel { margin: 0 0 8px; padding: 6px 10px; border-radius: 6px; background: #e0f2fe; color: #075985; }
+.fenetre-ligne .bouton-discret { align-self: flex-end; background: none; border: 1px dashed currentColor; color: #075985; }
+.avertissement-saisie { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--orange-clair); color: var(--orange); }
+
+/* ---------- Saisie d'une ligne ---------- */
+.fenetre.fenetre-ligne { width: min(1100px, 96vw); max-height: 92vh; display: flex; flex-direction: column; }
+.fenetre-ligne .corps-fenetre { overflow: auto; }
+.grille-ligne { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 14px 22px; }
+.grille-ligne section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.grille-ligne .ligne-champs { flex-wrap: wrap; align-items: flex-end; }
+.grille-ligne h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-3, #8a94a6); }
+.grille-ligne .champ.large { flex: 1; }
+.grille-ligne .champ.large input, .grille-ligne .champ.large textarea { width: 100%; }
+.grille-ligne .champ.large input + input { margin-top: 4px; }
+.grille-ligne .ou { align-self: flex-end; padding-bottom: 8px; color: var(--texte-3, #8a94a6); }
+.resume-prix { margin: 0; padding: 6px 10px; border-radius: 6px; background: #f6f8fc; font-variant-numeric: tabular-nums; }
+.actions-ligne { display: flex; gap: 8px; padding: 4px 0 2px; }
+
+/* ---------- ARC : aperçu à côté de la fiche, fenêtre d'édition ---------- */
+.fiche-avec-apercu { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 42%); gap: 12px; align-items: start; }
+.panneau-apercu { position: sticky; top: 8px; display: flex; flex-direction: column; height: calc(100vh - 140px);
+    border: 1px solid #d5dbe3; border-radius: 8px; background: #fff; overflow: hidden; }
+.panneau-apercu .titre-apercu { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-bottom: 1px solid #e6eaf0; background: #f6f8fb; }
+.panneau-apercu .titre-apercu b { flex: 1; }
+.panneau-apercu iframe { flex: 1; width: 100%; border: 0; }
+.barre-outils button.actif { background: #e0f2fe; border-color: #7dd3fc; }
+.fenetre.fenetre-arc { width: min(560px, 94vw); }
+.fenetre-arc .corps-fenetre { display: flex; flex-direction: column; gap: 10px; }
+.fenetre-arc h3 { margin: 6px 0 0; font-size: 0.95em; }
+.fenetre-arc .liste-cases { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+
+.fenetre.fenetre-envois { width: min(900px, 96vw); }
+.fenetre-envois table { width: 100%; }
+.fenetre-envois .corps-fenetre { max-height: 70vh; overflow: auto; }
+
+/* Texte complémentaire : chasse fixe, largeur de 40 caractères */
+.texte-fixe { font-family: 'Courier New', monospace; width: 42ch; resize: vertical; }
+
+/* ---------- Lancement en fabrication ---------- */
+.grille-lancement .ligne-article td { background: #f6f8fb; border-top: 2px solid #d5dbe3; }
+.grille-lancement td.decale { padding-left: 28px; }
+.grille-lancement .source-possible td { color: #6b7280; }
+.grille-lancement .col-case { width: 26px; text-align: center; }
+.grille-lancement .actions-source { white-space: nowrap; text-align: right; }
+.bouton-ligne { padding: 2px 8px; font-size: 12.5px; margin-left: 4px; }
+
+/* Fenêtres de lancement et d'affectation */
+.fenetre.fenetre-lancement { width: min(1000px, 96vw); max-height: 92vh; display: flex; flex-direction: column; }
+.fenetre-lancement .corps-fenetre { overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.fenetre-lancement .titre-section { margin: 4px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-3, #8a94a6); }
+.fenetre-lancement td.en-erreur input { border-color: var(--danger); background: var(--danger-clair); }
+.fenetre-lancement td input.num9, .fenetre-affectation input.num9 { width: 110px; text-align: right; }
+.fenetre.fenetre-affectation { width: min(480px, 94vw); }
+.fenetre-affectation .corps-fenetre { display: flex; flex-direction: column; gap: 10px; }
+.resume-origine { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+.resume-origine dt { color: var(--texte-2); }
+.resume-origine dd { margin: 0; font-variant-numeric: tabular-nums; }
+input.num9 { width: 110px; }

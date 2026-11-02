@@ -23,6 +23,25 @@ Toute connexion est alors acceptée (développement uniquement) ; les écrans qu
 
 Connexion : profil et mot de passe IBM i, code société (AA0007), compte général (411000 par défaut).
 
+**Logos des éditions PDF** (ARC, devis…) : copier les fichiers BMP / JPEG des éditions WinDev (répertoire NetPrint
+d'un poste) dans `src/NetPrint.Web/Logos`, sans les renommer. Mode d'emploi : `src/NetPrint.Web/Logos/LISEZMOI.md` ;
+production des PDF : `docs/editions-pdf.md`.
+
+**Envoi direct des e-mails** (ARC…) : par le serveur SMTP de la société, paramètres FAC010 (comme EnvoideFactures).
+**La base de test contient les vrais serveurs et les vrais contacts des clients** : l'envoi est désactivé par défaut.
+Pour essayer, rediriger tous les messages vers votre adresse (user-secrets de NetPrint.Web) :
+
+```
+dotnet user-secrets set "Messagerie:Mode" "Redirection"
+dotnet user-secrets set "Messagerie:Redirection" "prenom.nom@axilog.net"
+```
+
+`Messagerie:Mode` = `Desactive` (défaut), `Redirection` (test) ou `Reel` (production seulement). Sans envoi direct, le
+bouton « Préparer (Outlook) » reste disponible. L'expéditeur est l'utilisateur (e-mail externe de son profil, AI00F).
+
+**Scripts DB2** : `db/db2/`, nom préfixé par la date et l'heure, appliqués une fois par leur auteur après la fusion
+(ex. `20261030-2230_ENV100_journal_envois.sql` : journal des envois de documents).
+
 ## Organisation
 
 ```

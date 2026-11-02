@@ -2,6 +2,20 @@
 // Chargé une fois par App.razor ; les écouteurs sont posés sur le document, ils valent donc pour tous les
 // champs, y compris ceux affichés plus tard (bulles de filtre, fenêtres).
 (() => {
+    // Téléchargement d'un fichier produit par le serveur (TelechargementJs) : le navigateur l'enregistre ou l'ouvre
+    // (un brouillon .eml s'ouvre dans Outlook)
+    window.netprintTelecharger = async (nom, type, flux) => {
+        const blob = new Blob([await flux.arrayBuffer()], { type });
+        const url = URL.createObjectURL(blob);
+        const lien = document.createElement('a');
+        lien.href = url;
+        lien.download = nom;
+        document.body.appendChild(lien);
+        lien.click();
+        lien.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+    };
+
     // Double-clic dans une zone date : date du jour.
     // On prévient Blazor par les événements « input » et « change » (@bind et saisie au fil de l'eau).
     document.addEventListener('dblclick', (e) => {
