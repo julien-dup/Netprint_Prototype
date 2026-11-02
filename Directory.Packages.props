@@ -1,0 +1,31 @@
+<Project>
+
+  <!-- Gestion centralisée des versions NuGet : une version par paquet pour toute la solution.
+       Les .csproj déclarent <PackageReference Include="..." /> SANS Version.
+       Ajouter ou monter un paquet = modifier ce fichier (et le signaler dans la demande de fusion). -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="Accès aux données">
+    <PackageVersion Include="System.Data.Odbc" Version="10.0.13" />
+    <PackageVersion Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup Label="Configuration (NetPrint.Reprise)">
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.CommandLine" Version="10.0.13" />
+  </ItemGroup>
+
+  <ItemGroup Label="Tests">
+    <!-- Versions figées (avant : 17.*, 2.*, 3.*) pour que les deux postes et la vérification automatique
+         compilent exactement la même chose. -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.0.2" />
+    <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+  </ItemGroup>
+
+</Project>

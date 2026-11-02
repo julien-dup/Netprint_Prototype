@@ -6,6 +6,8 @@
     <OutputType>Exe</OutputType>
     <IsAspireHost>true</IsAspireHost>
     <UserSecretsId>14eb3815-24c0-43d6-84b1-626326d8a4b7</UserSecretsId>
+    <!-- Le SDK Aspire ajoute lui-même ses paquets : ce projet reste hors de la gestion centralisée des versions -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
   <ItemGroup>
