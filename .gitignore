@@ -26,3 +26,7 @@ TestResults/
 
 # --- Préférences d'affichage des grilles (prototype : fichiers par utilisateur, côté serveur)
 App_Data/
+
+# --- Logos des éditions (src/NetPrint.Web/Logos) : propres à chaque client, seul le mode d'emploi est versionné
+src/NetPrint.Web/Logos/*
+!src/NetPrint.Web/Logos/LISEZMOI.md

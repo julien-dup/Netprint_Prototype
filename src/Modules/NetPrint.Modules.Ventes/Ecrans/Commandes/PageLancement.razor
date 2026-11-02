@@ -1,0 +1,311 @@
+@page "/ventes/commandes/{Numero:int}/{Cle}/lancement"
+@* =====================================================================
+   Lancement en fabrication d'une commande (reprise de NEG515) : pour chaque article, ce qui sert déjà la commande
+   (OF en cours ou à ouvrir, affectations de stock) et ce qui pourrait la servir (stock des lots), avec le reste à
+   affecter. Le suivi du BAG est affiché (il est validé dans le portail de BAG).
+   Actions : lancer un OF pour un article ou pour les articles cochés (CR, groupage), modifier ou supprimer un OF à
+   ouvrir (2, 4), y rattacher le reste à affecter (AL), affecter le stock d'un OF ouvert et retirer l'affectation (AF, SA),
+   OF automatique pour toute la commande (NEG510 F10). Les OF lancés s'ouvrent dans le 5250.
+   ===================================================================== *@
+@using NetPrint.Modules.Production.Contrats
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@using NetPrint.Noyau.Evenements
+@inject ILancementCommande Lancement
+@inject NavigationManager Navigation
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+
+
+<PageTitle>Lancement @CleCourante.Libelle · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Ventes/commandes.css" /></HeadContent>
+
+<fieldset class="barre-outils" disabled="@enCours">
+    <button @onclick='() => Navigation.NavigateTo(Adresse(CleCourante))' title="Retour à la commande">← Commande @CleCourante.Libelle</button>
+    @if (lancement is { PeutModifier: true })
+    {
+        <button @onclick="LancerCoches" disabled="@(coches.Count == 0)" title="Un seul OF pour les articles cochés (groupage)">
+            🏭 Lancer les articles cochés@(coches.Count > 0 ? $" ({coches.Count})" : "")
+        </button>
+        <button @onclick="OfAutomatiqueAsync" title="Un OF pour tous les articles de la commande, tout le commandé fabriqué et affecté (NEG510 F10)">
+            ⚡ OF automatique
+        </button>
+    }
+    <span class="espace"></span>
+    <button @onclick="ChargerAsync" title="Relire les OF, le stock et les affectations">↻ Actualiser</button>
+</fieldset>
+
+<div class="contenu contenu-detail">
+    @if (lancement is null)
+    {
+        <p class="compteur"><span class="chargement">@(chargement ? "Calcul du lancement…" : erreur ?? "Cette commande n'existe pas ou ne vous est pas accessible.")</span></p>
+    }
+    else
+    {
+        <div class="titre-panneau">
+            <span class="sur-titre">Lancement en fabrication</span>
+            <span class="code-titre">@lancement.Commande.Libelle</span>
+            <span class="titre-designation">@lancement.NomClient</span>
+            @if (!lancement.PeutModifier)
+            {
+                <span class="badge badge-alerte" title="@lancement.RaisonNonModifiable">Consultation</span>
+            }
+        </div>
+
+        <table class="grille grille-fiche grille-lancement">
+            <thead>
+                <tr>
+                    <th class="col-case"></th>
+                    <th>Article / OF</th><th>Nature</th><th class="nombre">Commandé</th><th class="nombre">Affecté</th>
+                    <th class="nombre">À fabriquer</th><th class="nombre">Stock</th><th class="nombre">Surplus</th>
+                    <th class="nombre">Disponible</th><th class="nombre">Livré</th><th>BAG</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var a in lancement.Articles)
+                {
+                    var reference = new ReferenceArticle(a.Article, a.Indice);
+                    <tr class="ligne-article">
+                        <td class="col-case">
+                            @if (lancement.PeutModifier)
+                            {
+                                <input type="checkbox" checked="@coches.Contains(reference)" @onchange="e => Cocher(reference, e)"
+                                       title="Lancer avec les autres articles cochés (un seul OF)" />
+                            }
+                        </td>
+                        <td colspan="2"><b>@a.Article@(a.Indice != "" ? $" {a.Indice}" : "")</b> @a.Designation
+                            @if (a.ReferenceImprime != "") {<span class="discret"> · @a.ReferenceImprime</span>}
+                            @if (!a.Stocke) {<span class="badge badge-appel" title="Article non géré en stock">non stocké</span>}
+                        </td>
+                        <td class="nombre"><b>@Entier(a.Commande)</b></td>
+                        <td class="nombre"><b>@Entier(a.Affecte)</b></td>
+                        <td colspan="6">
+                            @if (a.ResteAAffecter > 0)
+                            {
+                                <span class="badge badge-etat etat-partielle">Reste à affecter : @Entier(a.ResteAAffecter)</span>
+                            }
+                            else if (a.ResteAAffecter < 0)
+                            {
+                                <span class="badge badge-alerte">Affecté au-delà du commandé : @Entier(-a.ResteAAffecter)</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-etat etat-livree">Tout est affecté</span>
+                            }
+                        </td>
+                        <td class="actions-source">
+                            @if (lancement.PeutModifier)
+                            {
+                                <button class="bouton-ligne" @onclick="() => OuvrirLancement([reference], null)" disabled="@enCours"
+                                        title="Lancer un OF pour cet article (reste à affecter proposé)">🏭 Lancer</button>
+                            }
+                        </td>
+                    </tr>
+                    @foreach (var s in a.Sources)
+                    {
+                        <tr class="@(s.AffecteCommande > 0 ? "source-commande" : "source-possible")">
+                            <td></td>
+                            <td class="decale">@s.Of.Libelle @if (s.LotBloque) {<span title="Lot bloqué (qualité)">🔒</span>}</td>
+                            <td>@Nature(s)</td>
+                            <td></td>
+                            <td class="nombre">@Entier(s.AffecteCommande)</td>
+                            <td class="nombre">@Entier(s.AFabriquer)</td>
+                            <td class="nombre">@Entier(s.Stock)</td>
+                            <td class="nombre">@Entier(s.Surplus)</td>
+                            <td class="nombre" title="Affecté toutes commandes : @s.AffecteTotal.ToString("N0")">@Entier(s.Disponible)</td>
+                            <td class="nombre" title="Pour cette commande : @s.LivreCommande.ToString("N0")">@Entier(s.Livre)</td>
+                            <td>
+                                @if (s.Bag is { } bag)
+                                {
+                                    <span class="badge @(bag.Action == "O" ? "badge-etat etat-livree" : bag.Action == "M" ? "badge-alerte" : "badge-appel")"
+                                          title="Cycle @bag.Cycle · envoyé @Date(bag.Envoye) · retour @Date(bag.Retour)">@bag.Libelle</span>
+                                }
+                            </td>
+                            <td class="actions-source">
+                                <button class="bouton-ligne" @onclick="() => evenements = (a, s)" title="Événements et commentaires de l'article dans ce dossier (option EC)">💬</button>
+                                @if (lancement.PeutModifier)
+                                {
+                                    @if (s.Nature == NatureSource.OfAOuvrir && s.LieALaCommande)
+                                    {
+                                        <button class="bouton-ligne" @onclick="() => OuvrirLancement([], s.Of)" disabled="@enCours" title="Modifier l'OF à ouvrir">✎ Modifier</button>
+                                        <button class="bouton-ligne" @onclick="() => SupprimerLancementAsync(s)" disabled="@enCours" title="Supprimer l'OF à ouvrir pour cette commande">🗑</button>
+                                    }
+                                    else if (s.Nature == NatureSource.OfAOuvrir && a.ResteAAffecter > 0)
+                                    {
+                                        <button class="bouton-ligne" @onclick="() => RattacherAsync(a, s)" disabled="@enCours"
+                                                title="Ajouter le reste à affecter (@a.ResteAAffecter.ToString("N0")) à cet OF à ouvrir">＋ Rattacher</button>
+                                    }
+                                    else if (s.Nature != NatureSource.OfAOuvrir)
+                                    {
+                                        @if (s.Disponible > 0 || s.AffectationStock)
+                                        {
+                                            <button class="bouton-ligne" @onclick="() => affectation = (a, s)" disabled="@enCours" title="Affecter ce stock à la commande">⇢ Affecter</button>
+                                        }
+                                        @if (s.AffectationStock && s.AffecteCommande > 0)
+                                        {
+                                            <button class="bouton-ligne" @onclick="() => SupprimerAffectationAsync(a, s)" disabled="@enCours" title="Retirer l'affectation de stock">✕</button>
+                                        }
+                                    }
+                                }
+                            </td>
+                        </tr>
+                    }
+                    @if (a.Sources.Count == 0)
+                    {
+                        <tr class="ligne-vide"><td></td><td class="decale" colspan="11">Aucun OF ni stock pour cet article.</td></tr>
+                    }
+                }
+                @if (lancement.Articles.Count == 0)
+                {
+                    <tr class="ligne-vide"><td colspan="12">Cette commande n'a pas de ligne article.</td></tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (fenetre is { } fl && lancement is not null)
+{
+    <FenetreLancement Commande="CleCourante" Situation="lancement" Articles="fl.Articles" Of="fl.Of" OnFermer="FermerAsync" />
+}
+@if (evenements is { } ev)
+{
+    <div class="voile" @onclick="() => evenements = null">
+        <div class="fenetre fenetre-evenements" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="titre-fenetre">💬 Événements · @ev.Source.Of.Libelle · @ev.Article.Article@(ev.Article.Indice != "" ? $" {ev.Article.Indice}" : "")</div>
+            <div class="corps-fenetre">
+                <Evenements Objet="ObjetEvenements.DeLancement(ev.Source.Of.Numero, ev.Source.Of.Cle, ev.Article.Article, ev.Article.Indice, CleCourante.Numero, CleCourante.Cle)"
+                             Modifiable="lancement?.PeutModifier == true" />
+            </div>
+            <div class="pied-fenetre">
+                <span class="espace"></span>
+                <button type="button" @onclick="() => evenements = null">Fermer</button>
+            </div>
+        </div>
+    </div>
+}
+@if (affectation is { } af)
+{
+    <FenetreAffectation Commande="CleCourante" Article="af.Article" Source="af.Source" OnFermer="FermerAsync" />
+}
+
+@code {
+    [Parameter] public int Numero { get; set; }
+    [Parameter] public string Cle { get; set; } = "";
+
+    private CleCommande CleCourante => new(Numero, Cle.Trim().ToUpperInvariant());
+    private LancementCommande? lancement;
+    private bool chargement = true;
+    private string? erreur;
+    private int lecture;   // seule la dernière lecture demandée est affichée (passage d'une commande à l'autre)
+    private bool enCours;
+    private readonly HashSet<ReferenceArticle> coches = [];
+    private (IReadOnlyList<ReferenceArticle> Articles, NumeroOf? Of)? fenetre;
+    private (ArticleALancer Article, SourceArticle Source)? affectation;
+    private (ArticleALancer Article, SourceArticle Source)? evenements;
+
+    protected override Task OnParametersSetAsync() => ChargerAsync();
+
+    private async Task ChargerAsync()
+    {
+        var numero = ++lecture;
+        chargement = true;
+        erreur = null;
+        lancement = null;   // jamais les données d'une autre commande sous ce titre
+        LancementCommande? lu = null;
+        try
+        {
+            lu = await Lancement.LireAsync(CleCourante);
+        }
+        catch (Exception ex)
+        {
+            if (numero == lecture) erreur = $"Lecture du lancement impossible : {ex.Message}";
+        }
+        if (numero != lecture) return;
+        lancement = lu;
+        chargement = false;
+        coches.IntersectWith(lu?.Articles.Select(a => new ReferenceArticle(a.Article, a.Indice)) ?? []);
+    }
+
+    private void Cocher(ReferenceArticle r, ChangeEventArgs e)
+    {
+        if (e.Value is true) coches.Add(r);
+        else coches.Remove(r);
+    }
+
+    private void OuvrirLancement(IReadOnlyList<ReferenceArticle> articles, NumeroOf? of) => fenetre = (articles, of);
+
+    private void LancerCoches() =>
+        OuvrirLancement([.. lancement!.Articles.Select(a => new ReferenceArticle(a.Article, a.Indice)).Where(coches.Contains)], null);
+
+    private async Task FermerAsync(bool modifie)
+    {
+        fenetre = null;
+        affectation = null;
+        if (!modifie) return;
+        coches.Clear();
+        await ChargerAsync();
+    }
+
+    private Task OfAutomatiqueAsync() => ActionAsync(
+        "Créer un OF pour tous les articles de la commande, tout le commandé fabriqué et affecté ?", "OF automatique",
+        async () => Notifications.Succes($"OF {(await Lancement.CreerOfAutomatiqueAsync(CleCourante)).Libelle} créé : il est à ouvrir dans le 5250."));
+
+    private Task SupprimerLancementAsync(SourceArticle s) => ActionAsync(
+        $"Supprimer l'OF à ouvrir {s.Of.Libelle} pour cette commande ? (L'OF disparaît s'il ne sert à aucune autre commande.)", "Supprimer l'OF",
+        async () =>
+        {
+            await Lancement.SupprimerLancementAsync(CleCourante, s.Of);
+            Notifications.Succes($"OF {s.Of.Libelle} supprimé pour cette commande.");
+        });
+
+    private Task RattacherAsync(ArticleALancer a, SourceArticle s) => ActionAsync(
+        $"Ajouter {a.ResteAAffecter:N0} {a.Article} (reste à affecter) à l'OF à ouvrir {s.Of.Libelle} ?", "Rattacher à l'OF",
+        async () =>
+        {
+            await Lancement.RattacherAsync(CleCourante, s.Of, new(a.Article, a.Indice));
+            Notifications.Succes($"Reste à affecter rattaché à l'OF {s.Of.Libelle}.");
+        });
+
+    private Task SupprimerAffectationAsync(ArticleALancer a, SourceArticle s) => ActionAsync(
+        $"Retirer l'affectation de {s.AffecteCommande:N0} {a.Article} sur {s.Of.Libelle} ?", "Retirer l'affectation",
+        async () =>
+        {
+            await Lancement.SupprimerAffectationAsync(CleCourante, s.Of, new(a.Article, a.Indice));
+            Notifications.Succes($"Affectation sur {s.Of.Libelle} retirée.");
+        });
+
+    // Confirmation, action, rechargement ; une règle refusée s'affiche dans une boîte de dialogue
+    private async Task ActionAsync(string question, string titre, Func<Task> action)
+    {
+        if (enCours || !await Dialogues.ConfirmerAsync(question, titre, "Confirmer")) return;
+        enCours = true;
+        try
+        {
+            await action();
+            await ChargerAsync();
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message, titre);
+        }
+        catch (DemandeOfInvalideException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message, titre);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"{titre} impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private static string Nature(SourceArticle s) => s.Nature switch
+    {
+        NatureSource.OfAOuvrir => "OF à ouvrir",
+        NatureSource.OfOuvert => s.AffectationStock ? "Stock affecté" : "OF",
+        _ => "Stock libre",
+    };
+}

@@ -1,0 +1,377 @@
+@page "/facturation/envoi"
+@* =====================================================================
+   Envoi des factures par e-mail (EnvoideFactures, onglet manuel) : client facturé et période → factures éditées, pas encore
+   envoyées ; cochées → un message, un PDF par facture. Destinataires : paramétrage d'envoi du client (PRT057F.PFDEST1-5), sinon
+   ses contacts « facture » (PRT051F), plus des adresses saisies ; le premier en destinataire, les autres en copie. Brouillon
+   Outlook (.eml) puis « Marquer envoyées », ou envoi par le serveur de la société (factures marquées envoyées après l'envoi).
+   Ouvert avec ?general=&client=&facture=&jour= depuis la fiche d'une facture : client cherché, facture cochée.
+   Rien n'est lu à l'ouverture sans ces paramètres. Onglet « Automatique » (droit PCFACAUTO) : clients « envoi automatique » et
+   leurs factures à envoyer, puis envoi de tout le lot (un message par client, ou par facture), résultat client par client.
+   ===================================================================== *@
+@using System.Globalization
+@using NetPrint.Modules.Facturation.Services
+@inject IEnvoiFactures Envoi
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+@inject NavigationManager Navigation
+@inject Microsoft.JSInterop.IJSRuntime JS
+
+<PageTitle>Envoi des factures · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
+
+<nav class="onglets-envoi">
+    <button type="button" class="@(auto ? "" : "actif")" @onclick="() => auto = false">✉ Manuel</button>
+    <button type="button" class="@(auto ? "actif" : "")" @onclick="() => auto = true" title="Clients en envoi automatique (paramétrage d'envoi)">⚙ Automatique</button>
+</nav>
+
+@if (auto)
+{
+    <form class="panneau-criteres" @onsubmit="PreparerAutoAsync">
+        <label class="champ"><span>Factures du</span><input type="date" class="@ErrAuto(nameof(A.Du))" @bind="A.Du" /></label>
+        <label class="champ"><span>au</span><input type="date" @bind="A.Au" /></label>
+        <label class="champ"><span>N° du</span><input type="number" class="num6 @ErrAuto(nameof(A.NumeroDu))" @bind="A.NumeroDu" /></label>
+        <label class="champ"><span>au</span><input type="number" class="num6" @bind="A.NumeroAu" /></label>
+        <div class="champ">
+            <span>Client facturé (facultatif)</span>
+            <div class="ligne-champs">
+                <input type="number" class="num6 @ErrAuto(nameof(A.CompteGeneral))" @bind="A.CompteGeneral" />
+                <input type="number" class="num7" @bind="A.CompteClient" />
+            </div>
+        </div>
+        <div class="boutons-criteres"><button type="submit" class="bouton-principal" disabled="@occupe">🔍 Préparer la liste</button></div>
+    </form>
+    <div class="contenu facturation-auto">
+        @if (lot is null)
+        {
+            <p class="discret">@(occupe ? "Recherche en cours…" : "Les factures éditées et pas encore envoyées des clients en envoi automatique seront listées par client.")</p>
+        }
+        else if (lot.Erreurs.Count > 0)
+        {
+            <ul class="erreurs-saisie">@foreach (var e in lot.Erreurs) {<li>@e.Message</li>}</ul>
+        }
+        else
+        {
+            var clients = resultatsAuto ?? lot.Clients;
+            <p class="compteur">
+                <strong>@lot.Clients.Count</strong> client@(lot.Clients.Count > 1 ? "s" : "") · <strong>@lot.Clients.Sum(c => c.Factures.Count)</strong> facture(s) à envoyer
+                @if (lot.Tronque) {<span class="avertissement"> · liste coupée : affinez les critères</span>}
+            </p>
+            @if (!lot.MessagerieDisponible) {<p class="avertissement-saisie">Envoi impossible : @lot.RaisonIndisponible</p>}
+            @if (lot.Redirection is { } test) {<p class="avertissement-saisie">Envoi de test : tout part vers @test ; les factures ne sont pas marquées envoyées.</p>}
+            @if (clients.Count > 0)
+            {
+                <div class="zone-defilement-liste">
+                    <table class="grille grille-factures">
+                        <thead><tr><th>Client facturé</th><th class="nombre">Factures</th><th>Canal</th><th>Destinataires</th><th>Résultat</th></tr></thead>
+                        <tbody>
+                            @foreach (var c in clients)
+                            {
+                                <tr class="@(c.Resultat is null ? "" : c.Envoye ? "ligne-ok" : "ligne-ko")">
+                                    <td><b>@c.CompteGeneral @c.CompteClient</b> @c.Nom</td>
+                                    <td class="nombre" title="@string.Join(", ", c.Factures.Select(f => f.Numero))">@c.Factures.Count@(c.UnParFacture ? " (1 message chacune)" : "")</td>
+                                    <td>@if (c.PrisEnCharge) {<span>e-mail @(c.Format == "" ? "PDF" : c.Format)</span>} else {<span class="avertissement">@EnvoiFacturesService.CanalLisible(c.Canal, c.Format) : pas encore</span>}</td>
+                                    <td>@if (c.Destinataires.Count == 0) {<span class="avertissement">aucun</span>} else {<span>@string.Join(", ", c.Destinataires)</span>}</td>
+                                    <td>@c.Resultat</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="boutons-criteres">
+                    <button type="button" class="bouton-principal" disabled="@(occupe || !lot.MessagerieDisponible || resultatsAuto is not null || lot.Tronque || Envoyables == 0)" @onclick="EnvoyerAutoAsync"
+                            title="@(lot.MessagerieDisponible ? $"Envoyer par le serveur de la société (expéditeur {lot.Expediteur})" : lot.RaisonIndisponible)">📤 Envoyer tout</button>
+                </div>
+            }
+        }
+    </div>
+}
+else
+{
+<form class="panneau-criteres" @onsubmit="ChercherAsync">
+    <div class="champ">
+        <span>Client facturé</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6 @Err(nameof(C.CompteGeneral))" title="Compte général" @bind="C.CompteGeneral" />
+            <input type="number" class="num7 @Err(nameof(C.CompteGeneral))" title="Compte client" @bind="C.CompteClient" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher le client facturé" OnChoix="ChoisirClient" />
+        </div>
+    </div>
+    <label class="champ"><span>Factures du</span><input type="date" class="@Err(nameof(C.Du))" @bind="C.Du" /></label>
+    <label class="champ"><span>au</span><input type="date" @bind="C.Au" /></label>
+    <label class="champ-case" title="Renvoyer une facture déjà envoyée"><input type="checkbox" @bind="C.AvecDejaEnvoyees" /><span>Déjà envoyées aussi</span></label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@occupe">🔍 Chercher les factures</button>
+    </div>
+</form>
+
+<div class="contenu facturation-auto">
+    @if (resultat is null)
+    {
+        <p class="discret">@(occupe ? "Recherche en cours…" : "Indiquez le client facturé (et une période) : ses factures éditées et pas encore envoyées seront proposées.")</p>
+    }
+    else if (resultat.Erreurs.Count > 0)
+    {
+        <ul class="erreurs-saisie">@foreach (var e in resultat.Erreurs) {<li>@e.Message</li>}</ul>
+    }
+    else
+    {
+        var r = resultat;
+        <p class="compteur">
+            <b>@r.CompteGeneral @r.CompteClient</b> @r.NomClient · <strong>@r.Factures.Count</strong> facture@(r.Factures.Count > 1 ? "s" : "") à envoyer
+            @if (r.Tronque) {<span class="avertissement"> · plus de @EnvoiFacturesService.Maxi factures : réduisez la période</span>}
+        </p>
+        @if (!r.PrisEnCharge)
+        {
+            <p class="avertissement-saisie">Ce client reçoit ses factures par @EnvoiFacturesService.CanalLisible(r.Canal, r.Format) : cet envoi n'est pas encore pris en charge ici.</p>
+        }
+        @if (r.Factures.Count > 0)
+        {
+            <div class="zone-defilement-liste">
+                <table class="grille grille-factures">
+                    <thead><tr><th><input type="checkbox" title="Tout cocher" checked="@(r.Factures.All(Coche))" @onchange="ToutCocher" /></th>
+                        <th>N°</th><th>Date</th><th>Type</th><th>Donneur d'ordre</th><th class="nombre">HT</th><th>Envoi</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var f in r.Factures)
+                        {
+                            <tr @onclick="() => Basculer(f)">
+                                <td><input type="checkbox" checked="@Coche(f)" @onclick:stopPropagation @onchange="() => Basculer(f)" /></td>
+                                <td><a href="@($"facturation/factures/{f.Numero}/{f.Date:yyyyMMdd}")" @onclick:stopPropagation>@f.Numero</a></td>
+                                <td>@f.Date.ToString("dd/MM/yyyy")</td>
+                                <td>@(f.Avoir ? "Avoir" : "Facture")</td>
+                                <td>@f.DonneurOrdre</td>
+                                <td class="nombre">@E(f.Avoir ? -f.Ht : f.Ht)</td>
+                                <td>@if (f.Envoi != "") {<span class="badge">@f.Envoi</span>}</td>
+                                <td><a href="@($"api/facturation/factures/{f.Numero}/{f.Date:yyyyMMdd}/pdf")" target="_blank" rel="noopener" title="PDF de la facture" @onclick:stopPropagation>📄</a></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <section class="carte destinataires-envoi">
+                <h3>Destinataires</h3>
+                @if (r.Destinataires.Count > 0)
+                {
+                    <p class="aide">Paramétrage d'envoi du client :</p>
+                    <div class="liste-cases">
+                        @foreach (var d in r.Destinataires)
+                        {
+                            <label class="champ-case"><input type="checkbox" checked="@coches.Contains(d)" @onchange="e => BasculerAdresse(d, e)" /><span>@d</span></label>
+                        }
+                    </div>
+                }
+                @if (r.Contacts.Count > 0)
+                {
+                    <p class="aide">Contacts « facture » du client :</p>
+                    <div class="liste-cases">
+                        @foreach (var c in r.Contacts)
+                        {
+                            <label class="champ-case">
+                                <input type="checkbox" checked="@coches.Contains(c.Email)" @onchange="e => BasculerAdresse(c.Email, e)" />
+                                <span>@c.Nom <span class="discret">&lt;@c.Email&gt;</span>@if (c.ParDefaut) {<span class="badge">par défaut</span>}</span>
+                            </label>
+                        }
+                    </div>
+                }
+                @if (r.Destinataires.Count == 0 && r.Contacts.Count == 0)
+                {
+                    <p class="aide">Ni paramétrage d'envoi ni contact « facture » pour ce client : saisissez les adresses.</p>
+                }
+                <label class="champ large"><span>Autres adresses (séparées par « ; »)</span><input @bind="autres" @bind:event="oninput" /></label>
+                <p class="aide">
+                    @if (Destinataires.Count > 0)
+                    {
+                        <span>À : <b>@Destinataires[0]</b>@if (Destinataires.Count > 1) {<span> · copie : @string.Join(", ", Destinataires.Skip(1))</span>} · </span>
+                    }
+                    « Préparer » ouvre le message dans Outlook (puis « Marquer envoyées » une fois parti) ; « Envoyer » le fait partir tout de suite
+                    par le serveur de la société@(r.Expediteur != "" ? $" (expéditeur {r.Expediteur})" : "") et marque les factures envoyées.
+                </p>
+                @if (r.Redirection is { } test)
+                {
+                    <p class="avertissement-saisie">Envoi de test : les messages partent vers @test ; les factures ne sont pas marquées envoyées.</p>
+                }
+                <div class="boutons-criteres">
+                    <button type="button" disabled="@(occupe || cochees.Count == 0 || !r.PrisEnCharge)" @onclick="PreparerAsync"
+                            title="Brouillon de message (.eml) avec les PDF, à ouvrir dans Outlook">✉ Préparer (Outlook)</button>
+                    <button type="button" disabled="@(occupe || cochees.Count == 0 || !r.PrisEnCharge)" @onclick="MarquerAsync"
+                            title="Le brouillon est parti depuis Outlook : marquer les factures cochées envoyées">✔ Marquer envoyées</button>
+                    <button type="button" class="bouton-principal" disabled="@(occupe || cochees.Count == 0 || Destinataires.Count == 0 || !r.MessagerieDisponible || !r.PrisEnCharge)"
+                            title="@(r.MessagerieDisponible ? "Envoyer tout de suite par le serveur de messagerie de la société" : r.RaisonIndisponible)"
+                            @onclick="EnvoyerAsync">📤 Envoyer (@cochees.Count)</button>
+                </div>
+            </section>
+        }
+    }
+</div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "general")] public int? General { get; set; }
+    [SupplyParameterFromQuery(Name = "client")] public int? Client { get; set; }
+    [SupplyParameterFromQuery(Name = "facture")] public int? Facture { get; set; }
+    [SupplyParameterFromQuery(Name = "jour")] public string? Jour { get; set; }
+
+    private CriteresEnvoiFactures C { get; set; } = new();
+    private FacturesAEnvoyer? resultat;
+    private readonly HashSet<(int, DateOnly)> cochees = [];
+    private readonly HashSet<string> coches = new(StringComparer.OrdinalIgnoreCase);
+    private string autres = "";
+    private bool occupe;
+
+    // ---------- Automatique ----------
+    private bool auto;
+    private CriteresEnvoiAuto A { get; set; } = new();
+    private LotEnvoiAuto? lot;
+    private IReadOnlyList<ClientEnvoiAuto>? resultatsAuto;
+    private CriteresEnvoiAuto? criteresLot;   // critères de la liste affichée
+    private int Envoyables => lot?.Clients.Count(c => c.PrisEnCharge && c.Destinataires.Count > 0) ?? 0;
+
+    private string ErrAuto(string champ) => lot?.Erreurs.Any(e => e.Champ == champ) == true ? "en-erreur" : "";
+
+    private async Task PreparerAutoAsync()
+    {
+        if (occupe) return;
+        occupe = true;
+        try
+        {
+            // Critères figés avec la liste : « Envoyer tout » envoie ce qui a été préparé, même si les zones changent ensuite
+            criteresLot = new CriteresEnvoiAuto { Du = A.Du, Au = A.Au, NumeroDu = A.NumeroDu, NumeroAu = A.NumeroAu, CompteGeneral = A.CompteGeneral, CompteClient = A.CompteClient };
+            (lot, resultatsAuto) = (await Envoi.PreparerAutoAsync(criteresLot), null);
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Préparation de l'envoi automatique impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task EnvoyerAutoAsync()
+    {
+        if (occupe || lot is null) return;
+        var a = Envoyables;
+        occupe = true;
+        try
+        {
+            if (!await Dialogues.ConfirmerAsync($"Envoyer les factures de {a} client{(a > 1 ? "s" : "")} par le serveur de la société ({lot.Expediteur}) ?"
+                    + "\nLes clients sans destinataire ou hors e-mail PDF sont signalés et sautés.", "Envoi automatique", "Envoyer")) return;
+            resultatsAuto = await Envoi.EnvoyerAutoAsync(criteresLot!);
+            var ok = resultatsAuto.Count(r => r.Envoye);
+            Notifications.Succes($"{ok} client{(ok > 1 ? "s" : "")} sur {resultatsAuto.Count} envoyé{(ok > 1 ? "s" : "")}.");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Envoi automatique impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (General is not > 0 || Client is not > 0) return;
+        (C.CompteGeneral, C.CompteClient) = (General, Client);
+        if (DateOnly.TryParseExact(Jour, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) (C.Du, C.Au) = (d, d);
+        C.AvecDejaEnvoyees = true;   // depuis la fiche : la facture est proposée même déjà envoyée
+        await ChercherAsync();
+        if (Facture is { } n && resultat?.Factures.FirstOrDefault(f => f.Numero == n) is { } f0) { cochees.Clear(); cochees.Add((f0.Numero, f0.Date)); }
+    }
+
+    private string Err(string champ) => resultat?.Erreurs.Any(e => e.Champ == champ) == true ? "en-erreur" : "";
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        if (l.Codes.Count < 2) return;
+        (C.CompteGeneral, C.CompteClient) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+    }
+
+    private async Task ChercherAsync()
+    {
+        if (occupe) return;
+        occupe = true;
+        try
+        {
+            resultat = await Envoi.ChercherAsync(C);
+            cochees.Clear();
+            foreach (var f in resultat.Factures.Where(f => f.Envoi == "")) cochees.Add((f.Numero, f.Date));
+            coches.Clear();
+            coches.UnionWith(resultat.Destinataires);
+            coches.UnionWith(resultat.Contacts.Where(c => c.Propose).Select(c => c.Email));
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Recherche des factures impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private bool Coche(FactureAEnvoyer f) => cochees.Contains((f.Numero, f.Date));
+    private void Basculer(FactureAEnvoyer f) { if (!cochees.Remove((f.Numero, f.Date))) cochees.Add((f.Numero, f.Date)); }
+    private void ToutCocher(ChangeEventArgs a)
+    {
+        cochees.Clear();
+        if (a.Value is true) foreach (var f in resultat!.Factures) cochees.Add((f.Numero, f.Date));
+    }
+    private void BasculerAdresse(string adresse, ChangeEventArgs e) { if (e.Value is true) coches.Add(adresse); else coches.Remove(adresse); }
+
+    // Paramétrage puis contacts (dans l'ordre de la fiche), puis adresses saisies ; mêmes règles que le service
+    private List<string> Destinataires => EnvoiFacturesService.Adresses(
+        (resultat?.Destinataires.Where(coches.Contains) ?? []).Concat(resultat?.Contacts.Where(c => coches.Contains(c.Email)).Select(c => c.Email) ?? [])
+            .Append(autres));
+
+    private List<FactureAEnvoyer> Cochees => resultat?.Factures.Where(Coche).ToList() ?? [];
+
+    private EnvoiFactures Demande()
+    {
+        var d = Destinataires;
+        return new EnvoiFactures(resultat!.CompteGeneral, resultat.CompteClient, Cochees, d.Take(1).ToList(), d.Skip(1).ToList());
+    }
+
+    private async Task PreparerAsync()
+    {
+        if (occupe || resultat is null) return;
+        occupe = true;
+        try
+        {
+            var eml = await Envoi.PreparerMessageAsync(Demande());
+            await JS.TelechargerAsync(eml.Nom, NetPrint.Socle.Documents.MessageBrouillon.TypeEml, eml.Contenu);
+            Notifications.Info("Message préparé : ouvrez-le dans Outlook, puis « Marquer envoyées » une fois parti.");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Préparation du message impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task EnvoyerAsync()
+    {
+        if (occupe || resultat is null) return;
+        var d = Destinataires;
+        var n = cochees.Count;
+        var question = $"Envoyer {(n == 1 ? "la facture cochée" : $"les {n} factures cochées")} à {d[0]}" + (d.Count > 1 ? $" (copie : {string.Join(", ", d.Skip(1))})" : "") + " ?";
+        occupe = true;   // dès la question : un double clic n'ouvre pas deux confirmations
+        try
+        {
+            if (!await Dialogues.ConfirmerAsync(question, "Envoi des factures", "Envoyer")) return;
+            await Envoi.EnvoyerAsync(Demande());
+            Notifications.Succes(resultat.Redirection is { } test ? $"Message de test envoyé à {test}." : $"{n} facture{(n > 1 ? "s" : "")} envoyée{(n > 1 ? "s" : "")} à {d[0]}.");
+            occupe = false;
+            await ChercherAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Envoi impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task MarquerAsync()
+    {
+        if (occupe || resultat is null) return;
+        var n = cochees.Count;
+        occupe = true;
+        try
+        {
+            if (!await Dialogues.ConfirmerAsync($"Le message est-il parti ? {(n == 1 ? "La facture cochée sera marquée envoyée" : $"Les {n} factures cochées seront marquées envoyées")} (manuel, e-mail).",
+                    "Marquer envoyées", "Marquer")) return;
+            await Envoi.MarquerEnvoyeesAsync(Demande());
+            Notifications.Succes($"{n} facture{(n > 1 ? "s" : "")} marquée{(n > 1 ? "s" : "")} envoyée{(n > 1 ? "s" : "")}.");
+            occupe = false;
+            await ChercherAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Marquage impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private static string E(decimal v) => v.ToString("#,##0.00 €", CultureInfo.GetCultureInfo("fr-FR"));
+}

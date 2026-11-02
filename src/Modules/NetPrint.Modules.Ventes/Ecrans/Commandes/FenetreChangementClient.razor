@@ -1,0 +1,163 @@
+@* =====================================================================
+   Changement du client, de la date ou de l'enseigne d'une commande (F17 de DOS505).
+   Refusé si la commande a un BL ou une facture ; les n° d'adresse de l'ancien client font l'objet d'un avertissement.
+   ===================================================================== *@
+@inject ISaisieCommandes Saisie
+@inject IChangementClientCommande Changement
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+
+<div class="voile" @onclick="Annuler">
+    <form class="fenetre fenetre-changement-client" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onsubmit="EnregistrerAsync">
+        <div class="titre-fenetre">👤 Changer le client · commande @Commande.Libelle</div>
+        <div class="corps-fenetre">
+            @if (c is null || actuel is null)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else
+            {
+                <p class="aide">Client actuel : <b>@actuel.NomClient</b> (@actuel.CompteGeneral @actuel.CompteClient), enseigne @actuel.Enseigne,
+                    commande du @actuel.DateDossier.ToString("dd/MM/yyyy").</p>
+                <div class="champ @Classe(nameof(ChangementClient.CompteClient)) @Classe(nameof(ChangementClient.CompteGeneral))">
+                    <span>Client</span>
+                    <div class="ligne-champs">
+                        <input type="number" class="num6" title="Compte général" @bind="c.CompteGeneral" @bind:after="Modifie" />
+                        <input type="number" class="num7" title="Compte client (auxiliaire)" @bind="c.CompteClient" @bind:after="Modifie" autofocus />
+                        <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+                    </div>
+                </div>
+                @Message(nameof(ChangementClient.CompteGeneral))
+                @Message(nameof(ChangementClient.CompteClient))
+                <div class="ligne-champs">
+                    @if (gereEnseignes)
+                    {
+                        <label class="champ @Classe(nameof(ChangementClient.Enseigne))"><span>Enseigne</span>
+                            <select @bind="c.Enseigne" @bind:after="Modifie">
+                                @foreach (var en in enseignes)
+                                {
+                                    <option value="@en.Code">@en.Code · @en.Libelle</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    <label class="champ @Classe(nameof(ChangementClient.DateDossier))"><span>Date de la commande</span>
+                        <input type="date" @bind="c.DateDossier" @bind:after="Modifie" /></label>
+                </div>
+                @Message(nameof(ChangementClient.Enseigne))
+                @Message(nameof(ChangementClient.DateDossier))
+                @if (avertissement is not null)
+                {
+                    <p class="avertissement-saisie">@avertissement</p>
+                }
+                <p class="aide">Impossible si la commande a déjà un BL ou une facture. Les autres zones de l'en-tête (représentant, conditions…) ne changent pas.</p>
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="espace"></span>
+            <button type="button" @onclick="Annuler">Annuler</button>
+            <button type="submit" class="bouton-principal" disabled="@(c is null || enCours)">@(avertissement is null ? "Changer" : "Changer quand même")</button>
+        </div>
+    </form>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleCommande Commande { get; set; } = default!;
+    // Vrai si la commande a changé
+    [Parameter] public EventCallback<bool> OnFermer { get; set; }
+
+    private ChangementClient? c;
+    private EnteteSaisie? actuel;
+    private bool gereEnseignes;
+    private IReadOnlyList<CodeLibelle> enseignes = [];
+    private List<ErreurSaisie> erreurs = [];
+    private string? avertissement;
+    private bool enCours;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var contexte = await Saisie.LireContexteAsync();
+            (gereEnseignes, enseignes) = (contexte.GereEnseignes, contexte.Enseignes);
+            actuel = await Saisie.LireAsync(Commande);
+            if (actuel is null)
+            {
+                await Dialogues.AlerterAsync("Cette commande n'existe pas ou ne vous est pas accessible.");
+                await OnFermer.InvokeAsync(false);
+                return;
+            }
+            c = new ChangementClient
+            {
+                CompteGeneral = actuel.CompteGeneral, CompteClient = actuel.CompteClient, Enseigne = actuel.Enseigne, DateDossier = actuel.DateDossier,
+            };
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture de la commande impossible : {ex.Message}");
+            await OnFermer.InvokeAsync(false);
+        }
+    }
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        if (c is null || l.Codes.Count < 2) return;
+        (c.CompteGeneral, c.CompteClient) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+        Modifie();
+    }
+
+    // Une zone changée : l'avertissement accepté ne vaut plus
+    private void Modifie() => avertissement = null;
+
+    private async Task EnregistrerAsync()
+    {
+        if (c is null || enCours) return;
+        enCours = true;
+        erreurs = [];
+        try
+        {
+            c.AvertissementAccepte = avertissement is not null;
+            if (!await Changement.ChangerAsync(Commande, c))
+            {
+                Notifications.Info("Rien n'a changé.");
+                await OnFermer.InvokeAsync(false);
+                return;
+            }
+            Notifications.Succes("Commande modifiée.");
+            await OnFermer.InvokeAsync(true);
+        }
+        catch (SaisieInvalideException ex) when (ex.Forcable)
+        {
+            avertissement = string.Join(" ", ex.Erreurs.Select(e => e.Message));
+        }
+        catch (SaisieInvalideException ex)
+        {
+            erreurs = [.. ex.Erreurs];
+            avertissement = null;
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Changement impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private Task Annuler() => OnFermer.InvokeAsync(false);
+
+    private string Classe(string zone) => erreurs.Any(e => e.Zone == zone) ? "en-erreur" : "";
+
+    private RenderFragment Message(string zone) => __builder =>
+    {
+        foreach (var e in erreurs.Where(e => e.Zone == zone))
+        {
+            <span class="message-erreur">@e.Message</span>
+        }
+    };
+}

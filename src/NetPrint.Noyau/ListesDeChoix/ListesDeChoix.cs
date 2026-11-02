@@ -19,12 +19,13 @@ public enum ListeChoix
 {
     Client, Prospect, Profil, Categorie, SousCategorie, Fabricant, Representant, Norme, Dossier,
     Papier, Sorte, SousSorte, Coloris, MachineTirage, Section, Operation, Matiere, Fournisseur,
-    OperationSousTraitance, MotifEchec,
+    OperationSousTraitance, MotifEchec, Article,
 }
 
 public interface IListesDeChoix
 {
-    // Parent : catégorie (sous-catégorie), sorte (sous-sorte), section (opération), fournisseur (opération STR)
+    // Parent : catégorie (sous-catégorie), sorte (sous-sorte), section (opération), fournisseur (opération STR),
+    // compte général et compte client séparés par un blanc (article : articles de ce client seulement, facultatif)
     Task<ResultatChoix> RechercherAsync(ListeChoix liste, string? recherche, string? parent = null, CancellationToken ct = default);
 }
 
@@ -149,6 +150,15 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
             [new("Opération", true), new("Libellé"), new("Prix fixe", true), new("Prix prop.", true), new("Qté prop.", true)],
             false, b => new($"SELECT ROPE, HLIB, HPRFIX, HPRPRO, HQTEPR FROM {b}.AZ00F WHERE RSOC = ? AND HTAG <> '*'"),
             ["HLIB"], "ROPE", "ROPE", ZoneParent: "RFOURN", ParentNumerique: true),
+        // Articles (FEN_RecArticle) : code, désignation ou référence imprimée ; remplacés ou clôturés (AREMPL C / O) en rouge
+        [ListeChoix.Article] = new("Choix d'un article",
+            [new("Article"), new("Indice"), new("Désignation"), new("Réf. imprimée"), new("Client")],
+            true, b => new($"""
+                SELECT a.AARTIC, a.AINDIC, a.ADES, a.ARFIMP, c.CMODIR, CASE WHEN a.AREMPL IN ('C', 'O') THEN 1 ELSE 0 END
+                FROM {b}.SPF010 a LEFT OUTER JOIN {b}.AA0003 c ON c.RSOC = a.RSOC AND c.RGEN = a.AGEN AND c.RCLI = a.ACLI
+                WHERE a.RSOC = ?
+                """),
+            ["a.AARTIC", "a.ADES", "a.ARFIMP"], null, "a.AARTIC, a.AINDIC", NbCodes: 2, ColonneInactif: 5),
     };
 
     public async Task<ResultatChoix> RechercherAsync(ListeChoix liste, string? recherche, string? parent = null, CancellationToken ct = default)
@@ -180,6 +190,14 @@ internal sealed class ListesDeChoixDb2(IConfiguration config, IUtilisateurCouran
         {
             sql.Append($" AND {d.ZoneParent} = ?");
             cmd.Parameters.Valeur(d.ParentNumerique ? int.Parse(parent) : parent.Trim().ToUpperInvariant());
+        }
+        // Articles d'un client : compte général et compte client (« 411100 376 ») ; sans client, tous les articles
+        if (liste == ListeChoix.Article && (parent ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries) is [var gen, var cli]
+            && int.TryParse(gen, out var compteGeneral) && int.TryParse(cli, out var compteClient))
+        {
+            sql.Append(" AND a.AGEN = ? AND a.ACLI = ?");
+            cmd.Parameters.Valeur(compteGeneral);
+            cmd.Parameters.Valeur(compteClient);
         }
         // Opérations d'une section : D100F (comme FEN_RechercheOperations)
         if (liste == ListeChoix.Operation && !string.IsNullOrWhiteSpace(parent))

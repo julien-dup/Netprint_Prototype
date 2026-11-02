@@ -10,14 +10,29 @@
   <Folder Name="/src/Modules/">
     <Project Path="src/Modules/NetPrint.Modules.Ventes/NetPrint.Modules.Ventes.csproj" />
     <Project Path="src/Modules/NetPrint.Modules.Ventes.Contrats/NetPrint.Modules.Ventes.Contrats.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Production/NetPrint.Modules.Production.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Production.Contrats/NetPrint.Modules.Production.Contrats.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Logistique/NetPrint.Modules.Logistique.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Logistique.Contrats/NetPrint.Modules.Logistique.Contrats.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Facturation/NetPrint.Modules.Facturation.csproj" />
+    <Project Path="src/Modules/NetPrint.Modules.Facturation.Contrats/NetPrint.Modules.Facturation.Contrats.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetPrint.Architecture.Tests/NetPrint.Architecture.Tests.csproj" />
     <Project Path="tests/NetPrint.Socle.Tests/NetPrint.Socle.Tests.csproj" />
+    <Project Path="tests/NetPrint.Modules.Ventes.Tests/NetPrint.Modules.Ventes.Tests.csproj" />
+    <Project Path="tests/NetPrint.Modules.Logistique.Tests/NetPrint.Modules.Logistique.Tests.csproj" />
+    <Project Path="tests/NetPrint.Modules.Facturation.Tests/NetPrint.Modules.Facturation.Tests.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
     <File Path="README.md" />
+    <File Path="CLAUDE.md" />
     <File Path=".gitignore" />
+    <File Path=".githooks/pre-push" />
+    <File Path=".github/workflows/build.yml" />
   </Folder>
 </Solution>

@@ -1,0 +1,248 @@
+@* =====================================================================
+   Fenêtre de lancement d'un OF (NEG515C2) : création pour un ou plusieurs articles de la commande (option CR,
+   groupage), ou modification d'un OF pas encore ouvert (option 2). Valeurs proposées par le service (reste à affecter,
+   date de livraison, catégorie et désignation de l'article, modèle, dossier précédent, devis). L'OF est ensuite ouvert
+   dans le 5250 (liste des dossiers à ouvrir).
+   ===================================================================== *@
+@using NetPrint.Modules.Production.Contrats
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@inject ILancementCommande Lancement
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+
+<div class="voile" @onclick="Annuler">
+    <form class="fenetre fenetre-lancement" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onsubmit="EnregistrerAsync">
+        <div class="titre-fenetre">@(Of is null ? "🏭 Lancer un OF" : $"Modifier l'OF à ouvrir {Of.Libelle}") · commande @Commande.Libelle</div>
+        <div class="corps-fenetre">
+            @if (f is null)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else
+            {
+                @if (erreurs.Count > 0)
+                {
+                    <p class="erreur-saisie">@erreurs.Count zone@(erreurs.Count > 1 ? "s" : "") à corriger.</p>
+                    @Message("")
+                    @Message(nameof(DemandeOf.Articles))
+                }
+                @if (Of is null && f.Articles.All(a => Article(a)?.ResteAAffecter <= 0))
+                {
+                    <p class="avertissement-saisie">Vous allez créer un lancement alors qu'il n'y a plus rien à affecter.</p>
+                }
+                <div class="grille-ligne">
+                    <section>
+                        <h3>Dossier de fabrication</h3>
+                        <label class="champ large @Classe(nameof(DemandeOf.Designation1))"><span>Désignation</span>
+                            <input maxlength="40" @bind="f.Designation1" />
+                            <input maxlength="40" @bind="f.Designation2" />
+                        </label>
+                        @Message(nameof(DemandeOf.Designation1))
+                        <div class="ligne-champs">
+                            <label class="champ @Classe(nameof(DemandeOf.Categorie))"><span>Catégorie</span>
+                                <input class="code" maxlength="2" @bind="f.Categorie" disabled="@(Of is not null)" /></label>
+                            <label class="champ @Classe(nameof(DemandeOf.SousCategorie))"><span>Sous-catégorie</span>
+                                <input class="code" maxlength="2" @bind="f.SousCategorie" disabled="@(Of is not null)" /></label>
+                            <label class="champ @Classe(nameof(DemandeOf.DateMiseADisposition))"><span>Mise à disposition</span>
+                                <input type="date" @bind="f.DateMiseADisposition" /></label>
+                        </div>
+                        @Message(nameof(DemandeOf.Categorie))
+                        @Message(nameof(DemandeOf.SousCategorie))
+                        @Message(nameof(DemandeOf.DateMiseADisposition))
+                        <div class="ligne-champs">
+                            <label class="champ"><span>Quantité lancée</span><input type="number" class="num9" @bind="f.QuantiteLancee" /></label>
+                            <label class="champ @Classe(nameof(DemandeOf.Prix))"><span>Prix de vente</span><input type="number" step="0.0001" class="num9" @bind="f.Prix" /></label>
+                            <label class="champ @Classe(nameof(DemandeOf.Unite))"><span>Unité</span><input class="code" maxlength="2" @bind="f.Unite" /></label>
+                        </div>
+                        @Message(nameof(DemandeOf.Unite))
+                        <p class="aide">@(Of is null ? "Quantité lancée vide : total à fabriquer." : "Quantité lancée vide : inchangée.")</p>
+                    </section>
+                    <section>
+                        <h3>D'après</h3>
+                        <dl class="resume-origine">
+                            <dt>Modèle</dt><dd>@(f.Modele > 0 ? $"{f.Modele} {f.IndiceComposition}" : Of is null ? "nouveau (attribué à l'enregistrement)" : "—")</dd>
+                            <dt>Dossier précédent</dt><dd>@(f.DossierPrecedent?.Libelle ?? "—")</dd>
+                            <dt>Devis</dt><dd>@(f.Devis is { } d ? $"{d.Numero} v{d.Version} h{d.Hypothese}" : "—")</dd>
+                            <dt>Norme</dt><dd>@(f.Norme == "" ? "—" : f.Norme)</dd>
+                            <dt>Chemin façonnage</dt><dd>@(f.CheminFaconnage == "" ? "—" : f.CheminFaconnage)</dd>
+                            <dt>Sous-traitance</dt><dd>@(f.SousTraitee ? "oui (autre site)" : "non")</dd>
+                        </dl>
+                        <p class="aide">Le dossier précédent, le devis ou le modèle servent à l'ouverture de l'OF (composition, éléments, gamme).</p>
+                    </section>
+                </div>
+
+                <h3 class="titre-section">Articles</h3>
+                <table class="grille grille-fiche">
+                    <thead>
+                        <tr><th>Article</th><th>Désignation</th><th class="nombre">Commandé</th><th class="nombre">Reste à affecter</th>
+                            <th class="nombre">À fabriquer</th><th class="nombre">À affecter</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (a, i) in f.Articles.Select((a, i) => (a, i)))
+                        {
+                            var article = Article(a);
+                            <tr>
+                                <td><b>@a.Article@(a.Indice != "" ? $" {a.Indice}" : "")</b></td>
+                                <td>@article?.Designation</td>
+                                <td class="nombre">@Entier(article?.Commande ?? 0)</td>
+                                <td class="nombre">@Entier(article?.ResteAAffecter ?? 0)</td>
+                                <td class="nombre @Classe(Zone(i, nameof(BesoinArticle.AFabriquer)))">
+                                    <input type="number" class="num9" @bind="a.AFabriquer" />@Message(Zone(i, nameof(BesoinArticle.AFabriquer)))
+                                </td>
+                                <td class="nombre @Classe(Zone(i, nameof(BesoinArticle.AAffecter)))">
+                                    <input type="number" class="num9" @bind="a.AAffecter" />@Message(Zone(i, nameof(BesoinArticle.AAffecter)))
+                                    @Message(Zone(i, nameof(BesoinArticle.Article)))
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot>
+                        <tr><td colspan="4">Total</td><td class="nombre"><b>@Entier(f.Articles.Sum(a => a.AFabriquer))</b></td>
+                            <td class="nombre"><b>@Entier(f.Articles.Sum(a => a.AAffecter))</b></td></tr>
+                    </tfoot>
+                </table>
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="aide">L'OF s'ouvre ensuite dans le 5250 (dossiers à ouvrir).</span>
+            <span class="espace"></span>
+            <button type="button" @onclick="Annuler">Annuler</button>
+            <button type="submit" class="bouton-principal" disabled="@(f is null || enCours)">@(Of is null ? "Lancer l'OF" : "Enregistrer")</button>
+        </div>
+    </form>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleCommande Commande { get; set; } = default!;
+    [Parameter, EditorRequired] public LancementCommande Situation { get; set; } = default!;
+    // Création : articles à lancer ensemble ; modification : l'OF à ouvrir
+    [Parameter] public IReadOnlyList<ReferenceArticle> Articles { get; set; } = [];
+    [Parameter] public NumeroOf? Of { get; set; }
+    // Fermeture : vrai si quelque chose a été enregistré
+    [Parameter] public EventCallback<bool> OnFermer { get; set; }
+
+    // Formulaire modifiable (DemandeOf est immuable)
+    private sealed class Formulaire
+    {
+        public required DemandeOf Origine { get; init; }
+        public string Designation1 { get; set; } = "";
+        public string Designation2 { get; set; } = "";
+        public string Categorie { get; set; } = "";
+        public string SousCategorie { get; set; } = "";
+        public DateOnly? DateMiseADisposition { get; set; }
+        public int? QuantiteLancee { get; set; }
+        public decimal Prix { get; set; }
+        public string Unite { get; set; } = "";
+        public int Modele => Origine.Modele;
+        public string IndiceComposition => Origine.IndiceComposition;
+        public NumeroOf? DossierPrecedent => Origine.DossierPrecedent;
+        public DevisOrigine? Devis => Origine.Devis;
+        public string Norme => Origine.Norme;
+        public string CheminFaconnage => Origine.CheminFaconnage;
+        public bool SousTraitee => Origine.SousTraitee;
+        public List<LigneArticle> Articles { get; init; } = [];
+
+        public DemandeOf VersDemande()
+        {
+            var mad = DateMiseADisposition ?? DateOnly.MinValue;
+            return Origine with
+            {
+                Designation1 = Designation1, Designation2 = Designation2, Categorie = Categorie, SousCategorie = SousCategorie,
+                DateMiseADisposition = mad, QuantiteLancee = QuantiteLancee ?? 0, Prix = Prix, Unite = Unite,
+                Articles = [.. Articles.Select(a => new BesoinArticle(a.Article, a.Indice, a.AFabriquer, a.AAffecter, mad))],
+            };
+        }
+    }
+
+    private sealed class LigneArticle
+    {
+        public string Article { get; init; } = "";
+        public string Indice { get; init; } = "";
+        public int AFabriquer { get; set; }
+        public int AAffecter { get; set; }
+    }
+
+    private Formulaire? f;
+    private List<ErreurDemandeOf> erreurs = [];
+    private bool enCours;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var d = Of is null ? await Lancement.PreparerAsync(Commande, Articles)
+                : await Lancement.LireLancementAsync(Commande, Of) ?? throw new RegleMetierException($"L'OF {Of.Libelle} n'est plus à ouvrir.");
+            f = new Formulaire
+            {
+                Origine = d, Designation1 = d.Designation1, Designation2 = d.Designation2, Categorie = d.Categorie, SousCategorie = d.SousCategorie,
+                DateMiseADisposition = d.DateMiseADisposition == DateOnly.MinValue ? null : d.DateMiseADisposition,
+                QuantiteLancee = d.QuantiteLancee == 0 ? null : d.QuantiteLancee, Prix = d.Prix, Unite = d.Unite,
+                Articles = [.. d.Articles.Select(a => new LigneArticle { Article = a.Article, Indice = a.Indice, AFabriquer = a.AFabriquer, AAffecter = a.AAffecter })],
+            };
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+            await OnFermer.InvokeAsync(false);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Préparation du lancement impossible : {ex.Message}");
+            await OnFermer.InvokeAsync(false);
+        }
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        if (f is null || enCours) return;
+        enCours = true;
+        erreurs = [];
+        try
+        {
+            if (Of is null)
+            {
+                var of = await Lancement.LancerAsync(Commande, f.VersDemande());
+                Notifications.Succes($"OF {of.Libelle} lancé : il est à ouvrir dans le 5250.");
+            }
+            else
+            {
+                await Lancement.ModifierLancementAsync(Commande, Of, f.VersDemande());
+                Notifications.Succes($"OF {Of.Libelle} modifié.");
+            }
+            await OnFermer.InvokeAsync(true);
+        }
+        catch (DemandeOfInvalideException ex)
+        {
+            erreurs = [.. ex.Erreurs];
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lancement impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private Task Annuler() => OnFermer.InvokeAsync(false);
+
+    private ArticleALancer? Article(LigneArticle l) =>
+        Situation.Articles.FirstOrDefault(a => a.Article == l.Article && a.Indice == l.Indice);
+
+    private static string Zone(int i, string champ) => $"{nameof(DemandeOf.Articles)}[{i}].{champ}";
+
+    private string Classe(string zone) => erreurs.Any(x => x.Zone == zone) ? "en-erreur" : "";
+
+    private RenderFragment Message(string zone) => __builder =>
+    {
+        foreach (var m in erreurs.Where(x => x.Zone == zone))
+        {
+            <span class="message-erreur">@m.Message</span>
+        }
+    };
+}

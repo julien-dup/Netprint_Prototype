@@ -1,0 +1,150 @@
+@* =====================================================================
+   Paramètres de facturation automatique de la commande (F13 de DOS505, fenêtre DOS50505, AB001FA).
+   En lecture seule si la commande n'est pas modifiable.
+   ===================================================================== *@
+@inject IFacturationAutomatique Facturation
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+
+<div class="voile" @onclick="Annuler">
+    <form class="fenetre fenetre-facturation-auto" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onsubmit="EnregistrerAsync">
+        <div class="titre-fenetre">🧾 Facturation automatique · commande @Commande.Libelle</div>
+        <div class="corps-fenetre">
+            @if (f is null)
+            {
+                <p class="chargement">Chargement…</p>
+            }
+            else
+            {
+                <fieldset class="sans-cadre" disabled="@(!Modifiable)">
+                    <label class="champ-ligne"><input type="checkbox" @bind="f.Automatique" /> À prendre en facturation automatique</label>
+
+                    <h3>Adresse d'envoi de la facture</h3>
+                    @if (f.AdresseSpecialeClient)
+                    {
+                        <p class="aide">Le client a une adresse spéciale de facturation : indiquez un n° d'adresse ou une adresse.</p>
+                    }
+                    <div class="ligne-champs">
+                        <label class="champ @Classe(nameof(f.NumeroAdresse))"><span>N° d'adresse du client</span>
+                            <input type="number" class="num6" @bind="f.NumeroAdresse" /></label>
+                        <span class="discret">ou</span>
+                        <label class="champ"><span>Forme jur.</span><input class="code" maxlength="4" @bind="f.FormeJuridique" /></label>
+                        <label class="champ large"><span>Nom</span><input maxlength="34" @bind="f.Nom" /></label>
+                    </div>
+                    @Message(nameof(f.NumeroAdresse))
+                    <div class="ligne-champs">
+                        <label class="champ large"><span>Adresse</span><input maxlength="38" @bind="f.Rue1" /></label>
+                        <label class="champ large"><span>Complément</span><input maxlength="38" @bind="f.Rue2" /></label>
+                    </div>
+                    <div class="ligne-champs">
+                        <label class="champ"><span>Code postal</span><input class="court" maxlength="10" @bind="f.CodePostal" /></label>
+                        <label class="champ large"><span>Ville</span><input maxlength="38" @bind="f.Ville" /></label>
+                    </div>
+                    <label class="champ large"><span>À l'attention de</span><input maxlength="39" @bind="f.Attention" /></label>
+
+                    <h3>Facture</h3>
+                    <div class="ligne-champs">
+                        <label class="champ-ligne"><input type="checkbox" @bind="f.EditionDetailBl" /> Édition du détail des BL</label>
+                        <label class="champ @Classe(nameof(f.OrigineTechnique))"><span>Origine technique</span>
+                            <input class="code" maxlength="3" @bind="f.OrigineTechnique" /></label>
+                        <label class="champ @Classe(nameof(f.Acompte))"><span>Acompte déjà versé</span>
+                            <input type="number" step="0.01" class="num9" @bind="f.Acompte" /></label>
+                    </div>
+                    @Message(nameof(f.OrigineTechnique))
+                    @Message(nameof(f.Acompte))
+                    <div class="ligne-champs">
+                        <label class="champ"><span>Conditions de règlement</span>
+                            <select @bind="f.ConditionsReglement">
+                                <option value="@ConditionsFacturation.DonneurOrdre">du donneur d'ordre</option>
+                                <option value="@ConditionsFacturation.Facture">du client facturé</option>
+                            </select>
+                        </label>
+                        <label class="champ"><span>Texte de pied de facture</span>
+                            <select @bind="f.TextePied">
+                                <option value="@ConditionsFacturation.DonneurOrdre">du donneur d'ordre</option>
+                                <option value="@ConditionsFacturation.Facture">du client facturé</option>
+                            </select>
+                        </label>
+                    </div>
+                </fieldset>
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="espace"></span>
+            <button type="button" @onclick="Annuler">@(Modifiable ? "Annuler" : "Fermer")</button>
+            @if (Modifiable)
+            {
+                <button type="submit" class="bouton-principal" disabled="@(f is null || enCours)">Enregistrer</button>
+            }
+        </div>
+    </form>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleCommande Commande { get; set; } = default!;
+    [Parameter] public bool Modifiable { get; set; }
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private FacturationAutomatique? f;
+    private List<ErreurSaisie> erreurs = [];
+    private bool enCours;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            f = await Facturation.LireAsync(Commande);
+            if (f is null)
+            {
+                await Dialogues.AlerterAsync("Cette commande n'existe pas ou ne vous est pas accessible.");
+                await OnFermer.InvokeAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Lecture de la facturation automatique impossible : {ex.Message}");
+            await OnFermer.InvokeAsync();
+        }
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        if (f is null || enCours || !Modifiable) return;
+        enCours = true;
+        erreurs = [];
+        try
+        {
+            await Facturation.EnregistrerAsync(Commande, f);
+            Notifications.Succes("Paramètres de facturation automatique enregistrés.");
+            await OnFermer.InvokeAsync();
+        }
+        catch (SaisieInvalideException ex)
+        {
+            erreurs = [.. ex.Erreurs];
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Enregistrement impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private Task Annuler() => OnFermer.InvokeAsync();
+
+    private string Classe(string zone) => erreurs.Any(e => e.Zone == zone) ? "en-erreur" : "";
+
+    private RenderFragment Message(string zone) => __builder =>
+    {
+        foreach (var e in erreurs.Where(e => e.Zone == zone))
+        {
+            <span class="message-erreur">@e.Message</span>
+        }
+    };
+}

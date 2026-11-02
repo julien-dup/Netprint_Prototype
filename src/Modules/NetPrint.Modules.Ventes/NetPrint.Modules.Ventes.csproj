@@ -9,8 +9,14 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- Les tests du module voient les services et requêtes internes -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="NetPrint.Modules.Ventes.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\NetPrint.Modules.Ventes.Contrats\NetPrint.Modules.Ventes.Contrats.csproj" />
+    <ProjectReference Include="..\NetPrint.Modules.Production.Contrats\NetPrint.Modules.Production.Contrats.csproj" />
     <ProjectReference Include="..\..\NetPrint.Noyau\NetPrint.Noyau.csproj" />
     <ProjectReference Include="..\..\NetPrint.Web.Commun\NetPrint.Web.Commun.csproj" />
   </ItemGroup>

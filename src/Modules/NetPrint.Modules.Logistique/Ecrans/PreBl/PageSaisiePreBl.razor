@@ -1,0 +1,390 @@
+@page "/logistique/prebl/nouveau"
+@page "/logistique/prebl/{Numero:int}/modifier"
+@* =====================================================================
+   Saisie d'un pré-BL (WinDev FEN_CreationPREBL, FEN_SaisiePREBL, FEN_AjoutLigneCde, FEN_AjoutLigne, FI_AjoutPalettes,
+   FI_AjoutPalettesEXP517) sur un seul écran : client et adresse, en-tête, lignes de commande ajoutées par n° de commande,
+   pour chaque article stocké ses lots et ses palettes (ou une quantité par lot si la société est « sans palette »).
+   Rien n'est écrit avant « Enregistrer » ; l'enregistrement revérifie tout sous verrou.
+   ===================================================================== *@
+@using NetPrint.Modules.Logistique.Ecrans
+@inject ISaisiePreBl Saisie
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>@(Numero > 0 ? $"Pré-BL {Numero}" : "Nouveau pré-BL") · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo(Numero > 0 ? $"logistique/prebl/{Numero}" : "logistique/prebl")'>← @(Numero > 0 ? $"Pré-BL {Numero}" : "Liste des pré-BL")</button>
+    <span class="espace"></span>
+    @if (s is not null)
+    {
+        @if (Numero > 0)
+        {
+            <button class="bouton-danger" disabled="@occupe" @onclick="SupprimerAsync">🗑 Supprimer le pré-BL</button>
+        }
+        <button class="bouton-principal" disabled="@occupe" @onclick="EnregistrerAsync">💾 Enregistrer</button>
+    }
+</fieldset>
+
+<div class="contenu contenu-detail saisie-bl">
+    @if (s is null && Numero > 0)
+    {
+        <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreur)</p>
+    }
+    else if (s is null)
+    {
+        <section class="carte">
+            <h2>Nouveau pré-BL</h2>
+            <div class="cartes-saisie">
+                <div class="info">
+                    <div class="champ">
+                        <span>Client</span>
+                        <div class="ligne-champs">
+                            <input type="number" class="num6" title="Compte général" @bind="compteGeneral" />
+                            <input type="number" class="num7" title="Compte client" @bind="compteClient" />
+                            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+                        </div>
+                    </div>
+                    <label class="champ"><span>N° d'adresse de livraison</span><input type="number" class="num4" min="1" @bind="numeroAdresse" /></label>
+                    <div><button class="bouton-principal" disabled="@occupe" @onclick="CommencerAsync">Continuer</button></div>
+                    @if (erreur is not null) {<p class="avertissement-saisie">@erreur</p>}
+                </div>
+            </div>
+        </section>
+    }
+    else
+    {
+        <section class="carte">
+            <div class="titre-fiche">
+                <span class="type-fiche">PRÉ-BL</span> <b class="numero-fiche">@(s.Numero > 0 ? s.Numero.ToString() : "nouveau")</b>
+                <span class="badge">@s.Etat</span>
+                @if (s.SansPalette) {<span class="badge" title="Paramètre société EXP005.FEPREB : une quantité par lot, les palettes viennent des scans">sans choix des palettes</span>}
+            </div>
+            <div class="cartes-saisie">
+                <div class="info">
+                    <h3>Client et adresse</h3>
+                    <p><b>@s.NomClient</b> <span class="discret">@s.CompteGeneral @s.CompteClient</span></p>
+                    <p>@s.Adresse.RaisonSociale <span class="discret">(adresse n° @s.Adresse.Numero)</span></p>
+                    <p class="discret">@s.Adresse.Rue1 · @s.Adresse.CodePostal @s.Adresse.Ville</p>
+                    <label class="champ champ-case"><input type="checkbox" disabled="@(s.Lignes.Count > 0)" @bind="s.StockPaye" />
+                        <span title="Le stock est déjà payé par le client : dépôts facturés seulement, BL non facturable">Stock payé</span></label>
+                </div>
+                <div class="info">
+                    <h3>Expédition</h3>
+                    <label class="champ"><span>Départ</span><input type="date" @bind="s.DateDepart" /></label>
+                    <label class="champ"><span>Transporteur</span><input type="number" class="num3" min="1" @bind="s.Transporteur" /></label>
+                    <label class="champ"><span>Mode de transport</span>
+                        <select @bind="s.TypeLivraison"><option value=""></option><option value="E">E · Express</option><option value="M">M · Messagerie</option>
+                            <option value="A">A · Affrètement</option><option value="I">I · International</option><option value="P">P · Multi-palettes</option></select></label>
+                    <label class="champ"><span>Port</span>
+                        <select @bind="s.TypePort"><option value=""></option><option value="F">F · Franco</option><option value="D">D · Dû</option>
+                            <option value="A">A · Avancé</option><option value="E">E · Enlèvement</option></select></label>
+                    <label class="champ"><span>Poids total (kg)</span><input type="number" class="num6" min="0" @bind="s.Poids" /></label>
+                </div>
+                <div class="info">
+                    <h3>Observations</h3>
+                    @for (var i = 0; i < 3; i++)
+                    {
+                        var n = i;
+                        <input class="large" maxlength="40" value="@s.Observations[n]" @onchange="e => s.Observations[n] = e.Value?.ToString() ?? string.Empty" />
+                    }
+                    <label class="champ large"><span>Mention BL / facture</span><input maxlength="40" @bind="s.Mention" /></label>
+                </div>
+                <div class="info">
+                    <h3>Texte de pied</h3>
+                    <textarea rows="4" @bind="s.Pied"></textarea>
+                </div>
+            </div>
+        </section>
+
+        <section class="carte">
+            <h3>Ajouter des lignes de commande</h3>
+            <div class="ligne-champs">
+                <input type="number" class="num6" placeholder="Commande" @bind="commande" />
+                <input class="code" maxlength="1" title="Clé" @bind="cle" />
+                <button disabled="@occupe" @onclick="ChercherLignesAsync">🔍 Lignes à livrer</button>
+                @if (candidates.Count > 0)
+                {
+                    <button class="bouton-principal" disabled="@(!candidates.Any(c => c.Choisie))" @onclick="AjouterLignes">➕ Ajouter les lignes cochées</button>
+                }
+            </div>
+            @if (candidates.Count > 0)
+            {
+                <table class="grille grille-fiche">
+                    <thead><tr><th></th><th>L.</th><th>Article</th><th>Réf. cde</th><th>Appel</th><th class="nombre">Reste</th><th>Livraison</th><th>Conditionnement</th></tr></thead>
+                    <tbody>
+                        @foreach (var c in candidates)
+                        {
+                            var deja = s.Lignes.Any(l => (l.Dossier, l.Cle, l.LigneCommande) == (c.Ligne.Dossier, c.Ligne.Cle, c.Ligne.LigneCommande));
+                            <tr class="@(deja ? "ligne-retiree" : "")">
+                                <td><input type="checkbox" disabled="@deja" @bind="c.Choisie" /></td>
+                                <td>@c.Ligne.LigneCommande</td>
+                                <td><b>@c.Ligne.Article</b> <span class="discret">@c.Ligne.RefImprime</span>@if (!c.Ligne.Stocke) {<span class="badge">frais</span>}
+                                    <div class="discret">@c.Ligne.Designation</div></td>
+                                <td>@c.Ligne.ReferenceCommande</td>
+                                <td>@c.Ligne.Appel</td>
+                                <td class="nombre">@c.Ligne.Reste.ToString("#,##0")</td>
+                                <td>@c.Ligne.DateLivraison?.ToString("dd/MM/yyyy")</td>
+                                <td>@(c.Ligne.Stocke ? $"{c.Ligne.EmballagePar} / colis · {c.Ligne.UcParPalette} colis / palette" : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        @foreach (var l in s.Lignes)
+        {
+            <section class="carte element-bl">
+                <div class="titre-element">
+                    <b>@l.Article</b>@if (l.Indice != "") {<span class="discret">@l.Indice</span>}
+                    <span class="discret">@l.RefImprime</span>
+                    <span>commande @l.Dossier/@l.Cle ligne @l.LigneCommande</span>
+                    @if (l.Appel != "") {<span class="discret">appel @l.Appel</span>}
+                    <span class="discret">reste @l.Reste.ToString("#,##0")</span>
+                    <span class="espace"></span>
+                    @if (l.Stocke)
+                    {
+                        <b>@l.Quantite.ToString("#,##0")</b>
+                        <button disabled="@occupe" @onclick="() => ChargerLotsAsync(l)">@(lots.ContainsKey(l) ? "↻ Lots" : "📦 Choisir lots et palettes")</button>
+                    }
+                    else
+                    {
+                        <label title="Quantité (article non stocké)">Qté <input type="number" class="num7" min="1" @bind="l.Quantite" /></label>
+                    }
+                    <button class="bouton-danger" disabled="@(l.Lots.Any(x => x.Verrouille))" title="Retirer la ligne du pré-BL" @onclick="() => s.Lignes.Remove(l)">✕</button>
+                </div>
+                <div class="ligne-champs">
+                    <label>État <select @bind="l.EtatLivraison"><option value="T">Totalité</option><option value="A">Acompte</option><option value="S">Solde</option></select></label>
+                    <label><input type="checkbox" @bind="l.AppelASolder" /> Appel à solder</label>
+                    @for (var i = 0; i < 3; i++)
+                    {
+                        var n = i;
+                        <input maxlength="40" placeholder="Observation @(n + 1)" value="@l.Observations[n]" @onchange="e => l.Observations[n] = e.Value?.ToString() ?? string.Empty" />
+                    }
+                </div>
+                @if (l.Stocke)
+                {
+                    <div class="ligne-champs">
+                        <span class="discret">Conditionnement : @l.EmballagePar / colis, @l.UcParPalette colis / palette</span>
+                        <label title="Emballage par exceptionnel (avec l'UC par palette exceptionnel)">Exceptionnel : emb. par
+                            <input type="number" class="num6" min="0" disabled="@(l.Lots.Count > 0)" @bind="l.EmballageParExceptionnel" /></label>
+                        <label>colis / palette <input type="number" class="num3" min="0" disabled="@(l.Lots.Count > 0)" @bind="l.UcParPaletteExceptionnel" /></label>
+                    </div>
+                    @if (l.Lots.Count > 0 && !lots.ContainsKey(l))
+                    {
+                        <p class="discret">@string.Join(" · ", l.Lots.Select(x => $"lot {x.Lot} dépôt {x.Depot} : {x.Quantite:#,##0}" + (x.Palettes.Count > 0 ? $" ({x.Palettes.Count} palette(s))" : "") + (x.Verrouille ? " — en préparation" : "")))</p>
+                    }
+                    @if (lots.TryGetValue(l, out var disponibles))
+                    {
+                        @if (disponibles.Count == 0) {<p class="avertissement-saisie">Aucun lot en stock pour cet article dans les dépôts @(s.StockPaye ? "facturés" : "non facturés").</p>}
+                        <table class="grille grille-fiche">
+                            <thead><tr><th>Lot</th><th>Dépôt</th><th class="nombre">Stock</th><th>@(s.SansPalette ? "Quantité" : "Palettes (cochées : prises ; quantité inférieure : picking)")</th></tr></thead>
+                            <tbody>
+                                @foreach (var d in disponibles)
+                                {
+                                    var lot = l.Lots.FirstOrDefault(x => x.Lot == d.Lot && x.Depot == d.Depot);
+                                    <tr>
+                                        <td>@d.Lot</td>
+                                        <td>@d.Depot <span class="discret">@d.NomDepot</span></td>
+                                        <td class="nombre">@d.Stock.ToString("#,##0")</td>
+                                        <td>
+                                            @if (s.SansPalette)
+                                            {
+                                                <input type="number" class="num7" min="0" disabled="@(lot?.Verrouille == true)" value="@(lot?.Quantite ?? 0)"
+                                                       @onchange="e => QuantiteLot(l, d, e.Value)" />
+                                            }
+                                            else if (d.Palettes.Count == 0)
+                                            {
+                                                <span class="discret">aucune palette disponible</span>
+                                            }
+                                            else
+                                            {
+                                                <table class="tableau-envois">
+                                                    <tbody>
+                                                        @foreach (var p in d.Palettes)
+                                                        {
+                                                            var prise = lot?.Palettes.FirstOrDefault(x => x.Sscc == p.Sscc);
+                                                            <tr>
+                                                                <td><input type="checkbox" checked="@(prise is not null)" disabled="@(!p.Selectionnable || lot?.Verrouille == true)"
+                                                                           @onchange="e => CocherPalette(l, d, p, e.Value is true)" /></td>
+                                                                <td title="@p.Sscc">…@(p.Sscc.Length > 9 ? p.Sscc[^9..] : p.Sscc)</td>
+                                                                <td><input type="number" class="num7" min="1" max="@p.Disponible" disabled="@(prise is null || lot?.Verrouille == true)"
+                                                                           value="@(prise?.Quantite ?? p.Disponible)" @onchange="e => QuantitePalette(l, d, p, e.Value)" />
+                                                                    <span class="discret">/ @p.Disponible.ToString("#,##0")</span></td>
+                                                                <td>@LibellesPalette.Statut(p.Statut)</td>
+                                                                <td class="discret">@p.Emplacement</td>
+                                                                <td class="discret">@p.Fabrication?.ToString("dd/MM/yyyy")</td>
+                                                            </tr>
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                }
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+
+    private sealed class Candidate(LigneCommandePreBl ligne)
+    {
+        public LigneCommandePreBl Ligne { get; } = ligne;
+        public bool Choisie { get; set; }
+    }
+
+    private SaisiePreBl? s;
+    private string? erreur;
+    private bool occupe;
+    private int? compteGeneral, compteClient, numeroAdresse = 1;
+    private int? commande;
+    private string cle = "9";
+    private List<Candidate> candidates = [];
+    private readonly Dictionary<LigneSaisiePreBl, IReadOnlyList<LotDisponiblePreBl>> lots = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        (s, erreur) = (null, null);
+        lots.Clear();
+        candidates = [];
+        if (Numero == 0) return;
+        occupe = true;
+        try { s = await Saisie.OuvrirAsync(Numero); }
+        catch (RegleMetierException ex) { erreur = ex.Message; }
+        catch (Exception ex) { erreur = $"Lecture du pré-BL impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        if (l.Codes.Count < 2) return;
+        (compteGeneral, compteClient) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+    }
+
+    private async Task CommencerAsync()
+    {
+        erreur = null;
+        occupe = true;
+        try { s = await Saisie.NouveauAsync(compteGeneral ?? 0, compteClient ?? 0, numeroAdresse ?? 0); }
+        catch (RegleMetierException ex) { erreur = ex.Message; }
+        catch (Exception ex) { Notifications.Erreur($"Création impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task ChercherLignesAsync()
+    {
+        if (s is null) return;
+        occupe = true;
+        try { candidates = [.. (await Saisie.LignesCommandeAsync(s, commande ?? 0, cle)).Select(c => new Candidate(c))]; }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Lecture des lignes impossible : {ex.Message}"); }
+        finally { occupe = false; }
+        if (candidates.Count == 0 && commande > 0) Notifications.Info("Aucune ligne de cette commande n'est à livrer à cette adresse.");
+    }
+
+    private void AjouterLignes()
+    {
+        if (s is null) return;
+        foreach (var c in candidates.Where(c => c.Choisie))
+        {
+            var l = c.Ligne;
+            if (s.Lignes.Any(x => (x.Dossier, x.Cle, x.LigneCommande) == (l.Dossier, l.Cle, l.LigneCommande))) continue;
+            s.Lignes.Add(new LigneSaisiePreBl
+            {
+                Dossier = l.Dossier, Cle = l.Cle, LigneCommande = l.LigneCommande, ReferenceCommande = l.ReferenceCommande, Appel = l.Appel,
+                Article = l.Article, Indice = l.Indice, RefImprime = l.RefImprime, Designation = l.Designation, Stocke = l.Stocke, Reste = l.Reste,
+                Quantite = l.Stocke ? 0 : l.Reste, EmballagePar = l.EmballagePar, UcParPalette = l.UcParPalette, TypeEmballage = l.TypeEmballage,
+                CompteGeneralFacture = l.CompteGeneralFacture, CompteClientFacture = l.CompteClientFacture,
+            });
+        }
+        candidates = [];
+    }
+
+    private async Task ChargerLotsAsync(LigneSaisiePreBl l)
+    {
+        if (s is null) return;
+        occupe = true;
+        try { lots[l] = await Saisie.LotsAsync(s, l.Article, l.Indice); }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Lecture des lots impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private static LotSaisiePreBl Lot(LigneSaisiePreBl l, LotDisponiblePreBl d)
+    {
+        var lot = l.Lots.FirstOrDefault(x => x.Lot == d.Lot && x.Depot == d.Depot);
+        if (lot is null) l.Lots.Add(lot = new LotSaisiePreBl { Lot = d.Lot, Depot = d.Depot });
+        return lot;
+    }
+
+    // Quantité de la ligne = somme des lots (avec palettes choisies : somme des palettes) ; lot sans quantité ni palette retiré
+    private void Recalculer(LigneSaisiePreBl l)
+    {
+        if (s?.SansPalette == false)
+            foreach (var lot in l.Lots.Where(x => x.Palettes.Count > 0)) lot.Quantite = lot.Palettes.Sum(p => p.Quantite);
+        l.Lots.RemoveAll(x => !x.Verrouille && x.Quantite <= 0 && x.Palettes.Count == 0);
+        l.Quantite = l.Lots.Sum(x => x.Quantite);
+    }
+
+    private void CocherPalette(LigneSaisiePreBl l, LotDisponiblePreBl d, PaletteDisponiblePreBl p, bool coche)
+    {
+        var lot = Lot(l, d);
+        lot.Palettes.RemoveAll(x => x.Sscc == p.Sscc);
+        if (coche) lot.Palettes.Add(new PaletteSaisiePreBl { Sscc = p.Sscc, Quantite = p.Disponible, Statut = p.Statut });
+        Recalculer(l);
+    }
+
+    private void QuantitePalette(LigneSaisiePreBl l, LotDisponiblePreBl d, PaletteDisponiblePreBl p, object? valeur)
+    {
+        if (Lot(l, d).Palettes.FirstOrDefault(x => x.Sscc == p.Sscc) is not { } prise) return;
+        prise.Quantite = int.TryParse(valeur?.ToString(), out var q) ? Math.Clamp(q, 0, p.Disponible) : 0;
+        prise.Picking = prise.Quantite < p.Disponible;
+        Recalculer(l);
+    }
+
+    private void QuantiteLot(LigneSaisiePreBl l, LotDisponiblePreBl d, object? valeur)
+    {
+        Lot(l, d).Quantite = int.TryParse(valeur?.ToString(), out var q) ? Math.Max(0, q) : 0;
+        Recalculer(l);
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        if (s is null) return;
+        occupe = true;
+        try
+        {
+            var numero = await Saisie.EnregistrerAsync(s);
+            Notifications.Succes(s.Numero == 0 ? $"Pré-BL {numero} créé." : $"Pré-BL {numero} enregistré.");
+            Navigation.NavigateTo($"logistique/prebl/{numero}");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Enregistrement impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task SupprimerAsync()
+    {
+        if (!await Dialogues.ConfirmerAsync($"Supprimer le pré-BL {Numero} ?\nSon n° de BL n'est pas réutilisé.", "Suppression", "Supprimer")) return;
+        occupe = true;
+        try
+        {
+            await Saisie.SupprimerAsync(Numero);
+            Notifications.Succes($"Pré-BL {Numero} supprimé.");
+            Navigation.NavigateTo("logistique/prebl");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+}

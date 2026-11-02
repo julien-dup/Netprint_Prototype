@@ -1,0 +1,27 @@
+# Vérification automatique : compilation et tests à chaque demande de fusion et à chaque fusion dans main.
+# Une coche rouge sur une demande de fusion = on ne fusionne pas.
+name: Compilation et tests
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restauration
+        run: dotnet restore NetPrint_Prototype.slnx
+
+      - name: Compilation
+        run: dotnet build NetPrint_Prototype.slnx --configuration Release --no-restore
+
+      - name: Tests
+        run: dotnet test NetPrint_Prototype.slnx --configuration Release --no-build --verbosity normal

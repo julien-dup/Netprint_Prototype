@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- Module Facturation : factures et avoirs (FAC080 / FAC090 / FAC100), puis calcul et édition, saisie, facturation
+       automatique, envoi (docs/facturation/facturation-analyse.md).
+       Dépendances autorisées : ses Contrats, le Noyau, le Socle, Web.Commun, et les Contrats des autres modules.
+       JAMAIS un autre module directement (vérifié par NetPrint.Architecture.Tests). -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NetPrint.Modules.Facturation.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetPrint.Modules.Facturation.Contrats\NetPrint.Modules.Facturation.Contrats.csproj" />
+    <ProjectReference Include="..\..\NetPrint.Noyau\NetPrint.Noyau.csproj" />
+    <ProjectReference Include="..\..\NetPrint.Web.Commun\NetPrint.Web.Commun.csproj" />
+  </ItemGroup>
+
+</Project>

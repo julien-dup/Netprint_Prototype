@@ -1,0 +1,271 @@
+@page "/logistique/opr/nouveau"
+@page "/logistique/opr/{NumeroOpr:int}/ajout"
+@* =====================================================================
+   Mise en préparation de lignes de commande (WinDev OPR : FEN_CreationOPR, FEN_SelectionLignesCde, FEN_SaisieOPR réunis).
+   Critères, puis lignes livrables : on coche, on ajuste quantité, date, transporteur et options, et on valide ; les lignes sont
+   regroupées en OPR par client, adresse, date, transporteur (et commande si la société le demande).
+   Ajout (/logistique/opr/{n}/ajout) : lignes du même client, de la même adresse, datées comme l'OPR.
+   ===================================================================== *@
+@using NetPrint.Modules.Logistique.Ecrans.Opr
+@inject IOpr Oprs
+@inject EtatListeOpr Etat
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>@(NumeroOpr > 0 ? $"Ajout à l'OPR {NumeroOpr}" : "Nouvel OPR") · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo(NumeroOpr > 0 ? $"logistique/opr/{NumeroOpr}" : "logistique/opr")'>← @(NumeroOpr > 0 ? $"OPR {NumeroOpr}" : "Liste des OPR")</button>
+    <span class="espace"></span>
+    @if (lignes.Count > 0)
+    {
+        <span class="discret">@Cochees.Count() ligne@(Cochees.Count() > 1 ? "s" : "") cochée@(Cochees.Count() > 1 ? "s" : "")</span>
+        <button class="bouton-principal" disabled="@(occupe || !Cochees.Any())" @onclick="ValiderAsync">💾 @(NumeroOpr > 0 ? "Ajouter à l'OPR" : "Créer les OPR")</button>
+    }
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="ChercherAsync">
+    @if (NumeroOpr > 0)
+    {
+        <span class="titre-groupe">AJOUT À L'OPR @NumeroOpr</span>
+    }
+    <label class="champ"><span>Livraison du</span><input type="date" @bind="C.Du" /></label>
+    <label class="champ"><span>au</span><input type="date" @bind="C.Au" /></label>
+    @if (NumeroOpr == 0)
+    {
+        <div class="champ">
+            <span>Client</span>
+            <div class="ligne-champs">
+                <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
+                <input type="number" class="num7" title="Compte client" @bind="C.CompteClient" />
+                <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+            </div>
+        </div>
+        <label class="champ"><span>N° adresse</span><input type="number" class="num3" title="Adresse de livraison du client" @bind="C.NumeroAdresse" /></label>
+    }
+    <div class="champ">
+        <span>Commande</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" @bind="C.Commande" />
+            <input class="code" maxlength="1" title="Clé" @bind="C.Cle" />
+            <BoutonRecherche Liste="ListeChoix.Dossier" Titre="Rechercher une commande" OnChoix="ChoisirDossier" />
+        </div>
+    </div>
+    <label class="champ"><span>N° d'appel</span><input class="court" @bind="C.Appel" /></label>
+    <label class="champ"><span>Fabricants</span><input class="court" placeholder="AB CD…" title="Initiales des agents techniques, séparées par des espaces" @bind="fabricants" /></label>
+    <label class="champ"><span>Catégorie</span><input class="code" maxlength="3" @bind="C.Categorie" /></label>
+    <label class="champ"><span>Enseigne</span><input class="code" maxlength="2" @bind="C.Enseigne" /></label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@occupe">🔍 Lignes à préparer</button>
+    </div>
+</form>
+
+<div class="contenu">
+    <section class="zone-liste">
+        <div class="ligne-infos">
+            <p class="compteur">
+                @if (resultat is null)
+                {
+                    <span>Indiquez la période (ou une commande) puis affichez les lignes à préparer.</span>
+                }
+                else
+                {
+                    <strong>@lignes.Count.ToString("N0")</strong><span> ligne@(lignes.Count > 1 ? "s" : "") à préparer</span>
+                    @if (resultat.Tronque) {<span class="avertissement"> (liste coupée : affinez les critères)</span>}
+                }
+                @if (occupe) {<span class="chargement"> Un instant…</span>}
+            </p>
+        </div>
+        @if (lignes.Count > 0)
+        {
+            <div class="ligne-champs appliquer-opr">
+                <span class="titre-groupe">Lignes cochées :</span>
+                @if (NumeroOpr == 0) {<label class="champ"><span>Date prévue</span><input type="date" @bind="tous.Date" /></label>}
+                <label class="champ"><span>Transporteur</span><input type="number" class="num3" min="0" @bind="tous.Transporteur" /></label>
+                <label class="champ-case"><input type="checkbox" @bind="tous.Imperatif" /> <span>Impératif</span></label>
+                <label class="champ-case"><input type="checkbox" @bind="tous.Mecompte" /> <span>Mécompte</span></label>
+                <label class="champ-case"><input type="checkbox" @bind="tous.ASolder" /> <span>À solder</span></label>
+                <label class="champ-case"><input type="checkbox" @bind="tous.Prelevement" /> <span>Prélèvement</span></label>
+                <button type="button" @onclick="Appliquer">Appliquer</button>
+            </div>
+            <div class="zone-defilement-liste">
+                <table class="grille grille-fiche lignes-opr">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" title="Tout cocher" checked="@lignes.All(l => l.Cochee)" @onchange="ToutCocher" /></th>
+                            <th>Commande</th><th>Article</th><th>Livraison</th><th class="nombre">Reste</th><th>Livrer à</th>
+                            <th class="nombre">À préparer</th><th>Date prévue</th><th>Transp.</th><th title="Impératif · Mécompte · À solder · Prélèvement · Acompte">Options</th><th>Observation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var l in lignes)
+                        {
+                            var c = l.Candidate;
+                            <tr class="@Classe(l)">
+                                <td><input type="checkbox" @bind="l.Cochee" /></td>
+                                <td>
+                                    <b>@c.Dossier/@c.Cle</b> <span class="discret">l. @c.LigneCommande</span>
+                                    <div class="discret">@c.NomClient@(c.ReferenceCommande != "" ? $" · {c.ReferenceCommande}" : "")@(c.Appel != "" ? $" · appel {c.Appel}" : "")</div>
+                                </td>
+                                <td>
+                                    <b>@c.Article</b>@if (c.Indice != "") {<span class="discret"> @c.Indice</span>}
+                                    <div class="discret">@c.Designation</div>
+                                    @if (!c.Stocke) {<span class="badge" title="Article non géré en stock">non stocké</span>}
+                                    @if (c.PrixADefinir) {<span class="badge badge-appel">prix à définir</span>}
+                                </td>
+                                <td>
+                                    @c.DateLivraison?.ToString("dd/MM/yyyy")
+                                    @if (c.DateConfirmee is { } dc && dc != c.DateLivraison) {<div class="discret" title="Date confirmée">conf. @dc.ToString("dd/MM/yyyy")</div>}
+                                </td>
+                                <td class="nombre">@c.Reste.ToString("#,##0")@if (c.MaxiLivrable > 0) {<div class="discret" title="Maxi livrable">max @c.MaxiLivrable.ToString("#,##0")</div>}</td>
+                                <td>@c.Adresse.RaisonSociale <div class="discret">@c.Adresse.CodePostal @c.Adresse.Ville</div></td>
+                                <td class="nombre"><input type="number" class="num7" min="1" @bind="l.Quantite" /></td>
+                                <td><input type="date" disabled="@(NumeroOpr > 0)" @bind="l.Date" /></td>
+                                <td><input type="number" class="num3" min="0" title="@(c.TransporteurClient > 0 ? $"Transporteur du client : {c.TransporteurClient} {c.NomTransporteur}" : "")" @bind="l.Transporteur" /></td>
+                                <td class="options-opr">
+                                    <label title="Impératif"><input type="checkbox" @bind="l.Imperatif" />I</label>
+                                    <label title="Mécompte"><input type="checkbox" @bind="l.Mecompte" />M</label>
+                                    <label title="À solder"><input type="checkbox" @bind="l.ASolder" />S</label>
+                                    <label title="@(c.AlertePrelevement ? "Prélèvement : du stock en retour usine n'est pas encore sorti" : "Prélèvement (retour usine)")"
+                                           class="@(c.AlertePrelevement ? "alerte" : "")"><input type="checkbox" @bind="l.Prelevement" />P</label>
+                                    <label title="Acompte"><input type="checkbox" @bind="l.Acompte" />A</label>
+                                </td>
+                                <td><input class="observation-opr" maxlength="400" @bind="l.Observation" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter] public int NumeroOpr { get; set; }
+
+    private sealed class Ligne(LigneCandidateOpr candidate)
+    {
+        public LigneCandidateOpr Candidate { get; } = candidate;
+        public bool Cochee { get; set; }
+        public int Quantite { get; set; } = candidate.Reste;
+        public DateOnly? Date { get; set; } = candidate.DateLivraison;
+        public int Transporteur { get; set; }   // 0 par défaut, comme le WinDev (décision de David, 31/10)
+        public bool Imperatif { get; set; }
+        public bool Mecompte { get; set; }
+        public bool ASolder { get; set; }
+        public bool Prelevement { get; set; }
+        public bool Acompte { get; set; }
+        public string Observation { get; set; } = candidate.Observation;
+    }
+
+    private sealed class Tous
+    {
+        public DateOnly? Date { get; set; }
+        public int Transporteur { get; set; }
+        public bool Imperatif { get; set; }
+        public bool Mecompte { get; set; }
+        public bool ASolder { get; set; }
+        public bool Prelevement { get; set; }
+    }
+
+    private CriteresCandidatesOpr C = new();
+    private string fabricants = "";
+    private ResultatRecherche<LigneCandidateOpr>? resultat;
+    private List<Ligne> lignes = [];
+    private Tous tous = new();
+    private bool occupe;
+
+    private IEnumerable<Ligne> Cochees => lignes.Where(l => l.Cochee);
+
+    protected override void OnParametersSet()
+    {
+        C = NumeroOpr > 0 ? new CriteresCandidatesOpr { NumeroOpr = NumeroOpr } : Etat.CriteresCreation;
+        fabricants = string.Join(" ", C.Fabricants);
+        (resultat, lignes) = (null, []);
+    }
+
+    private static string Classe(Ligne l) =>
+        (l.Cochee ? "selection " : "") + (l.Candidate.ClientBloque ? "client-bloque " : "") + (l.Candidate.PrixADefinir ? "prix-a-definir" : "");
+
+    private async Task ChercherAsync()
+    {
+        if (occupe) return;
+        C.Fabricants = [.. fabricants.Split([' ', ',', ';'], StringSplitOptions.RemoveEmptyEntries)];
+        occupe = true;
+        try
+        {
+            resultat = await Oprs.CandidatesAsync(C);
+            lignes = [.. resultat.Lignes.Select(c => new Ligne(c))];
+            if (lignes.Count == 0) Notifications.Info("Aucune ligne de commande à préparer pour ces critères.");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Recherche impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private void ToutCocher(ChangeEventArgs e)
+    {
+        foreach (var l in lignes) l.Cochee = e.Value is true;
+    }
+
+    // Comme « Appliquer à tout » du WinDev, mais sur les lignes cochées : date, transporteur, et les options cochées ici
+    private void Appliquer()
+    {
+        foreach (var l in Cochees)
+        {
+            if (tous.Date is { } d) l.Date = d;
+            if (tous.Transporteur > 0) l.Transporteur = tous.Transporteur;
+            l.Imperatif |= tous.Imperatif;
+            l.Mecompte |= tous.Mecompte;
+            l.ASolder |= tous.ASolder;
+            l.Prelevement |= tous.Prelevement;
+        }
+        tous = new();
+    }
+
+    private async Task ValiderAsync()
+    {
+        var choisies = Cochees.ToList();
+        if (choisies.Any(l => l.Date is null && NumeroOpr == 0))
+        {
+            await Dialogues.AlerterAsync("Indiquez la date prévue de chaque ligne cochée.");
+            return;
+        }
+        var saisies = choisies.Select(l => new LigneSaisieOpr(l.Candidate.Dossier, l.Candidate.Cle, l.Candidate.LigneCommande,
+            l.Date ?? DateOnly.FromDateTime(DateTime.Today), l.Quantite, l.Transporteur, l.Imperatif, l.Mecompte, l.ASolder, l.Prelevement, l.Acompte,
+            l.Observation)).ToList();
+        occupe = true;
+        try
+        {
+            if (NumeroOpr > 0)
+            {
+                await Oprs.AjouterAsync(NumeroOpr, saisies);
+                Notifications.Succes($"{saisies.Count} ligne{(saisies.Count > 1 ? "s" : "")} ajoutée{(saisies.Count > 1 ? "s" : "")} à l'OPR {NumeroOpr}.");
+                Navigation.NavigateTo($"logistique/opr/{NumeroOpr}");
+                return;
+            }
+            var numeros = await Oprs.CreerAsync(saisies);
+            Notifications.Succes(numeros.Count == 1 ? $"OPR {numeros[0]} créé." : $"{numeros.Count} OPR créés : n° {numeros.Min()} à {numeros.Max()}.");
+            Etat.Criteres = new CriteresOpr { CompteGeneral = C.CompteGeneral, CompteClient = C.CompteClient };
+            Etat.Resultat = null;
+            Navigation.NavigateTo(numeros.Count == 1 ? $"logistique/opr/{numeros[0]}" : "logistique/opr");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Création impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        if (l.Codes.Count < 2) return;
+        (C.CompteGeneral, C.CompteClient) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+    }
+
+    private void ChoisirDossier(LigneChoix l)
+    {
+        C.Commande = int.TryParse(l.Code, out var n) ? n : null;
+        C.Cle = l.Valeurs.Count > 1 ? l.Valeurs[1] : "";
+    }
+}

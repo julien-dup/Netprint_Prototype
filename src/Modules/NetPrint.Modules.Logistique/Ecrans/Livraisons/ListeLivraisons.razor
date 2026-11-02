@@ -1,0 +1,206 @@
+@page "/logistique/livraisons"
+@using NetPrint.Modules.Logistique.Ecrans.Livraisons
+@* =====================================================================
+   Livraisons à effectuer — reprise de l'application WinDev LivraisonsAEffectuer : lignes de commande à livrer sur la période
+   (semaine en cours par défaut), avec stock, en-cours de fabrication, conditionnement, OPR et pré-BL. Rien n'est chargé à
+   l'ouverture. « Créer le BL » ouvre la saisie du BL sur les lignes cochées d'un même dossier.
+   ===================================================================== *@
+@inject ILivraisons Livraisons
+@inject EtatLivraisons Etat
+@inject NavigationManager Navigation
+@inject Notifications Notifications
+
+<PageTitle>Livraisons à effectuer · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <span class="espace"></span>
+    @if (AdressePreparation is { } fiche)
+    {
+        <a class="bouton-ancre" href="@fiche" target="_blank" rel="noopener" title="Fiche de préparation des commandes (EXP078) pour la période et les critères">🖨 Fiche de préparation</a>
+    }
+    else
+    {
+        <button disabled title="Indiquez les deux dates de la période">🖨 Fiche de préparation</button>
+    }
+    <button class="bouton-principal" disabled="@(Etat.Cochees.Count == 0)" @onclick="CreerBl" title="Créer le BL des lignes cochées (un seul dossier)">🚚 Créer le BL</button>
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="RechercherAsync">
+    <label class="champ">
+        <span>Période</span>
+        <select @bind="C.Periode">
+            <option value="@PeriodeLivraison.SemaineEnCours">Semaine en cours</option>
+            <option value="@PeriodeLivraison.SemaineSuivante">Semaine suivante</option>
+            <option value="@PeriodeLivraison.Dates">Dates</option>
+        </select>
+    </label>
+    @if (C.Periode == PeriodeLivraison.Dates)
+    {
+        <label class="champ"><span>Du</span><input type="date" @bind="C.Du" /></label>
+        <label class="champ"><span>Au</span><input type="date" @bind="C.Au" /></label>
+    }
+    <div class="champ">
+        <span>Client</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
+            <input type="number" class="num7" title="Compte client" @bind="C.CompteClient" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+        </div>
+    </div>
+    <label class="champ"><span>N° commande</span><input type="number" class="num6" @bind="C.NumeroCommande" /></label>
+    <label class="champ"><span>Article</span><input class="court" maxlength="15" @bind="C.Article" /></label>
+    <label class="champ">
+        <span>OPR</span>
+        <select @bind="C.Opr">
+            <option value="@FiltreOpr.Tous">Toutes les lignes</option>
+            <option value="@FiltreOpr.SansOpr">Sans OPR</option>
+            <option value="@FiltreOpr.AvecOpr">Dans un OPR non livré</option>
+        </select>
+    </label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@chargement">🔍 Rechercher</button>
+        <button type="button" class="bouton-gomme" @onclick="Effacer"><img src="gomme.png" alt="" /> Effacer</button>
+        <button type="button" class="bouton-lien" @onclick="() => Etat.PlusDeCriteres = !Etat.PlusDeCriteres">@(Etat.PlusDeCriteres ? "▴ Moins de critères" : "▾ Plus de critères")</button>
+    </div>
+    @if (Etat.PlusDeCriteres)
+    {
+        <div class="groupe-criteres">
+            <label class="champ"><span>N° adresse</span><input type="number" class="num4" @bind="C.NumeroAdresse" /></label>
+            <label class="champ"><span>Réf. imprimé</span><input class="court" maxlength="15" @bind="C.ReferenceImprime" /></label>
+            <label class="champ"><span>N° d'appel</span><input class="court" maxlength="15" @bind="C.Appel" /></label>
+            <label class="champ"><span>N° OPR</span><input type="number" class="num6" @bind="C.NumeroOpr" /></label>
+            <label class="champ"><span>Fabricant</span><input class="code" maxlength="3" @bind="C.Fabricant" /></label>
+            <label class="champ"><span>Représentant</span><input type="number" class="num3" @bind="C.Representant" /></label>
+            <label class="champ"><span>Enseigne</span><input class="code" maxlength="1" @bind="C.Enseigne" /></label>
+            <label class="champ champ-case"><input type="checkbox" @bind="C.ArticlesNonStockes" /> Articles non gérés en stock</label>
+            <label class="champ champ-case"><input type="checkbox" @bind="C.LignesSoldees" /> Lignes soldées</label>
+        </div>
+    }
+</form>
+
+<div class="contenu">
+    <section class="zone-liste">
+    @if (Etat.Resultat is { } r)
+    {
+        <div class="ligne-infos">
+            <span class="compteur">@r.Lignes.Count ligne@(r.Lignes.Count > 1 ? "s" : "") @(r.Tronque ? " (limite atteinte : précisez les critères)" : "")
+                @if (Etat.Cochees.Count > 0) {<span> · @Etat.Cochees.Count cochée@(Etat.Cochees.Count > 1 ? "s" : "")</span>}</span>
+            <span class="legende"><span class="ligne-a-la-demande">En rouge</span> : client bloqué · <span class="stock-court">stock</span> insuffisant</span>
+        </div>
+        <div class="zone-defilement-liste">
+            <table class="grille grille-bl grille-livraisons">
+                <thead>
+                    <tr><th></th><th>Livraison</th><th>Commande</th><th>Client</th><th>Article</th><th>Désignation</th>
+                        <th class="nombre">Reste</th><th class="nombre">Stock</th><th class="nombre">En fab.</th><th>OPR</th><th>Pré-BL</th>
+                        <th>Adresse</th><th class="nombre">UC</th><th class="nombre">Palettes</th><th class="nombre">Poids</th><th class="nombre">À facturer</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var l in r.Lignes)
+                    {
+                        var cle = (l.Dossier, l.Cle, l.Ligne);
+                        <tr class="@(l.ClientBloque ? "bl-retour" : "") @(Etat.Cochees.Contains(cle) ? "selection" : "")" @onclick="() => Basculer(cle)">
+                            <td><input type="checkbox" checked="@Etat.Cochees.Contains(cle)" @onclick:stopPropagation="true" @onchange="() => Basculer(cle)" /></td>
+                            <td>@l.DateLivraison?.ToString("dd/MM/yy")@(l.DateConfirmee is { } dc && dc != l.DateLivraison ? $" ({dc:dd/MM})" : "")</td>
+                            <td><a href="@($"ventes/commandes/{l.Dossier}/{l.Cle}")" @onclick:stopPropagation="true">@l.LibelleCommande</a>@(l.Ligne > 0 ? $"·{l.Ligne}" : "")
+                                @if (l.ReferenceCommande != "") {<span class="discret"> @l.ReferenceCommande</span>}</td>
+                            <td>@l.NomClient</td>
+                            <td>@l.Article @l.Indice</td>
+                            <td>@l.Designation@(l.Appel != "" ? $" · appel {l.Appel}" : "")</td>
+                            <td class="nombre"><b>@l.Reste.ToString("N0")</b></td>
+                            <td class="nombre @(l.StockSuffisant ? "" : "stock-court")">@l.Stock.ToString("N0")</td>
+                            <td class="nombre">@(l.EnFabrication > 0 ? l.EnFabrication.ToString("N0") : "")</td>
+                            <td>@l.Opr</td>
+                            <td>@l.PreBl</td>
+                            <td>@(l.Adresse.Numero > 0 ? $"n° {l.Adresse.Numero} · " : "")@l.Adresse.Ville</td>
+                            <td class="nombre">@(l.Uc > 0 ? l.Uc.ToString("N0") : "")</td>
+                            <td class="nombre">@(l.Palettes > 0 ? l.Palettes : "")</td>
+                            <td class="nombre">@(l.Poids > 0 ? l.Poids.ToString("N0") : "")</td>
+                            <td class="nombre">@(l.MontantAFacturer > 0 ? l.MontantAFacturer.ToString("N2") : "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (chargement) {<p class="chargement">Chargement…</p>}
+    else {<p class="discret">Choisissez la période et les critères, puis « Rechercher ».</p>}
+    </section>
+</div>
+
+@code {
+    private CriteresLivraisons C => Etat.Criteres;
+    private bool chargement;
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        C.CompteGeneral = l.Codes.Count > 0 && int.TryParse(l.Codes[0], out var g) ? g : null;
+        C.CompteClient = l.Codes.Count > 1 && int.TryParse(l.Codes[1], out var c) ? c : null;
+    }
+
+    private async Task RechercherAsync()
+    {
+        chargement = true;
+        try
+        {
+            Etat.Resultat = await Livraisons.RechercherAsync(C);
+            Etat.Cochees.Clear();
+        }
+        catch (RegleMetierException ex) { Notifications.Erreur(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Recherche impossible : {ex.Message}"); }
+        finally { chargement = false; }
+    }
+
+    private void Effacer()
+    {
+        Etat.Criteres = new CriteresLivraisons();
+        Etat.Resultat = null;
+        Etat.Cochees.Clear();
+    }
+
+    private void Basculer((int, string, int) cle)
+    {
+        if (!Etat.Cochees.Remove(cle)) Etat.Cochees.Add(cle);
+    }
+
+    // Lignes cochées d'un seul dossier → saisie du BL, lignes pré-choisies
+    private void CreerBl()
+    {
+        var lignes = Etat.Resultat?.Lignes.Where(l => Etat.Cochees.Contains((l.Dossier, l.Cle, l.Ligne))).ToList() ?? [];
+        if (NetPrint.Modules.Logistique.Services.LivraisonsService.ControlerPourBl(lignes) is { } refus) { Notifications.Erreur(refus); return; }
+        var d = lignes[0];
+        var opr = lignes.All(l => l.Opr is not null) ? "&opr=1" : "";
+        Navigation.NavigateTo($"logistique/bl/nouveau?dossier={d.Dossier}&cle={Uri.EscapeDataString(d.Cle)}&lignes={string.Join(",", lignes.Select(l => l.Ligne))}{opr}");
+    }
+
+    // Fiche de préparation (EXP078) : mêmes critères que la recherche (lignes non soldées, comme EXP078) ; null si la période
+    // est incomplète
+    private string? AdressePreparation
+    {
+        get
+        {
+            if (C.Periode == PeriodeLivraison.Dates && (C.Du is null || C.Au is null)) return null;
+            var (du, au) = C.Bornes(DateOnly.FromDateTime(DateTime.Today));
+            var q = new List<string> { $"du={du:yyyy-MM-dd}", $"au={au:yyyy-MM-dd}" };
+            void Ajouter(string nom, object? valeur)
+            {
+                if (valeur is null or "" || valeur is int and <= 0) return;
+                q.Add($"{nom}={Uri.EscapeDataString(valeur.ToString()!.Trim())}");
+            }
+            Ajouter("gen", C.CompteGeneral);
+            Ajouter("cli", C.CompteClient);
+            Ajouter("cde", C.NumeroCommande);
+            Ajouter("adr", C.NumeroAdresse);
+            Ajouter("art", C.Article);
+            Ajouter("rfi", C.ReferenceImprime);
+            Ajouter("appel", C.Appel);
+            Ajouter("numopr", C.NumeroOpr);
+            Ajouter("fab", C.Fabricant);
+            Ajouter("ens", C.Enseigne);
+            Ajouter("rep", C.Representant);
+            if (C.ArticlesNonStockes) q.Add("nonstockes=1");
+            if (C.Opr != FiltreOpr.Tous) q.Add($"opr={C.Opr}");
+            return "api/logistique/preparation?" + string.Join("&", q);
+        }
+    }
+}

@@ -12,4 +12,9 @@
     <ProjectReference Include="..\NetPrint.Socle\NetPrint.Socle.csproj" />
   </ItemGroup>
 
+  <!-- Tests d'intégration DB2 des services du Noyau (journal des envois), faute de projet de tests propre au Noyau -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="NetPrint.Modules.Ventes.Tests" />
+  </ItemGroup>
+
 </Project>

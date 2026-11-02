@@ -742,3 +742,25 @@ a.bouton-ancre:hover { background: var(--surface-2); border-color: var(--texte-3
 .carte-saisie-coche { margin-left: auto; color: var(--accent); font-size: 14px; }
 .carte-saisie-texte { margin: 0; color: var(--texte-2); font-size: 13px; line-height: 1.45; }
 @media (max-width: 900px) { .cartes-saisie { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- Événements et commentaires (composant Evenements, EVE300) ---------- */
+.evenements { display: flex; flex-direction: column; gap: 8px; }
+.barre-evenements { display: flex; align-items: center; gap: 8px; }
+.barre-evenements .espace, .carte-evenement .espace { flex: 1; }
+.carte-evenement { border: 1px solid var(--bord); border-radius: var(--rayon); padding: 8px 12px; background: var(--surface); }
+.carte-evenement.automatique { background: var(--surface-2); }
+.carte-evenement header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.texte-evenement { white-space: pre-line; margin-top: 4px; line-height: 1.45; }
+.evenements .discret, .fenetre-evenement .discret { color: var(--texte-3); }
+.evenements .badge-discret { background: var(--surface-2); color: var(--texte-2); }
+.evenements .bouton-ligne { padding: 2px 8px; font-size: 12.5px; }
+.fenetre.fenetre-evenement { width: 560px; }
+.fenetre-evenement .champ > input + input { margin-top: 4px; }
+.fenetre-evenement .code-profil { width: 120px; text-transform: uppercase; }
+.ligne-profil { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.fenetre-evenement .champ > .bouton-lien { align-self: flex-start; }
+.fenetre-evenement .en-erreur input, .fenetre-evenement .en-erreur select { border-color: var(--danger); background: var(--danger-clair); }
+.fenetre-evenement .message-erreur { display: block; color: var(--danger); font-size: 12px; margin-top: 2px; }
+.fenetre-evenement .erreur-saisie, .evenements .erreur-saisie { margin: 0; color: var(--danger); font-weight: 600; }
+.fenetre-evenement .avertissement-saisie { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--orange-clair); color: var(--orange); }
+.fenetre.fenetre-evenements { width: 820px; }

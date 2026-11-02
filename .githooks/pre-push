@@ -1,0 +1,10 @@
+#!/bin/sh
+# Garde-fou local (plan GitHub gratuit : main n'est pas protégée côté serveur).
+# Activation, une fois par poste :  git config core.hooksPath .githooks
+while read local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    echo "Envoi direct sur main refusé : créez une branche et passez par une demande de fusion."
+    exit 1
+  fi
+done
+exit 0

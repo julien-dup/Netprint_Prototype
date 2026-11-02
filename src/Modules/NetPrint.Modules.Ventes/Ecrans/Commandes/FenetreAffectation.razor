@@ -1,0 +1,86 @@
+@* =====================================================================
+   Affectation à la commande du stock (ou de la production) d'un OF ouvert (NEG515 option AF, fenêtre NEG51503).
+   La quantité remplace l'affectation existante de l'OF à la commande.
+   ===================================================================== *@
+@using NetPrint.Modules.Production.Contrats
+@using static NetPrint.Modules.Ventes.Ecrans.Commandes.AffichageCommandes
+@inject ILancementCommande Lancement
+@inject Notifications Notifications
+@inject Dialogues Dialogues
+
+<div class="voile" @onclick="Annuler">
+    <form class="fenetre fenetre-affectation" role="dialog" aria-modal="true" @onclick:stopPropagation="true" @onsubmit="EnregistrerAsync">
+        <div class="titre-fenetre">Affecter le stock de @Source.Of.Libelle · @Article.Article@(Article.Indice != "" ? $" {Article.Indice}" : "")</div>
+        <div class="corps-fenetre">
+            <dl class="resume-origine">
+                <dt>Commandé</dt><dd>@Entier(Article.Commande)</dd>
+                <dt>Affecté à la commande (tous OF)</dt><dd>@Entier(Article.Affecte)</dd>
+                <dt>Déjà affecté par cet OF</dt><dd>@Entier(Source.AffecteCommande)</dd>
+                <dt>Stock · surplus · à fabriquer</dt><dd>@Entier(Source.Stock) · @Entier(Source.Surplus) · @Entier(Source.AFabriquer)</dd>
+                <dt>Disponible</dt><dd><b>@Entier(Source.Disponible)</b></dd>
+            </dl>
+            @if (Source.LotBloque)
+            {
+                <p class="avertissement-saisie">🔒 Ce lot est bloqué par la qualité.</p>
+            }
+            <label class="champ @(erreurs.Count > 0 ? "en-erreur" : "")"><span>Quantité affectée à la commande</span>
+                <input type="number" class="num9" @bind="quantite" autofocus />
+            </label>
+            @foreach (var e in erreurs)
+            {
+                <span class="message-erreur">@e.Message</span>
+            }
+        </div>
+        <div class="pied-fenetre">
+            <span class="espace"></span>
+            <button type="button" @onclick="Annuler">Annuler</button>
+            <button type="submit" class="bouton-principal" disabled="@enCours">Affecter</button>
+        </div>
+    </form>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CleCommande Commande { get; set; } = default!;
+    [Parameter, EditorRequired] public ArticleALancer Article { get; set; } = default!;
+    [Parameter, EditorRequired] public SourceArticle Source { get; set; } = default!;
+    [Parameter] public EventCallback<bool> OnFermer { get; set; }
+
+    private int quantite;
+    private List<ErreurDemandeOf> erreurs = [];
+    private bool enCours;
+
+    // Proposé : l'affectation existante, sinon le reste à affecter dans la limite du disponible
+    protected override void OnInitialized() =>
+        quantite = Source.AffecteCommande > 0 ? Source.AffecteCommande : Math.Max(0, Math.Min(Article.ResteAAffecter, Source.Disponible));
+
+    private async Task EnregistrerAsync()
+    {
+        if (enCours) return;
+        enCours = true;
+        erreurs = [];
+        try
+        {
+            await Lancement.AffecterStockAsync(Commande, Source.Of, new(Article.Article, Article.Indice), quantite);
+            Notifications.Succes($"{quantite:N0} affecté(s) à la commande sur {Source.Of.Libelle}.");
+            await OnFermer.InvokeAsync(true);
+        }
+        catch (DemandeOfInvalideException ex)
+        {
+            erreurs = [.. ex.Erreurs];
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Notifications.Erreur($"Affectation impossible : {ex.Message}");
+        }
+        finally
+        {
+            enCours = false;
+        }
+    }
+
+    private Task Annuler() => OnFermer.InvokeAsync(false);
+}

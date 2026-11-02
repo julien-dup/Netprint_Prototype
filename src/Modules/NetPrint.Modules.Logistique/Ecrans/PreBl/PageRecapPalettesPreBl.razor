@@ -1,0 +1,144 @@
+@page "/logistique/prebl/{Numero:int}/palettes"
+@* =====================================================================
+   Récapitulatif palettes d'un pré-BL (WinDev FEN_RecapPalettes) : lots des articles stockés, palettes complètes numérotées
+   à la suite, lots incomplets regroupés en palettes mixtes (n° choisi, même dépôt, 8 lots au plus). « Calculer » montre les
+   n° sans rien écrire ; « Enregistrer » écrit les n° de palettes des lots et le nombre de palettes du pré-BL.
+   ===================================================================== *@
+@inject ISaisiePreBl Saisie
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Palettes du pré-BL @Numero · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo($"logistique/prebl/{Numero}")'>← Pré-BL @Numero</button>
+    <span class="espace"></span>
+    @if (recap is not null)
+    {
+        <button disabled="@occupe" @onclick="CalculerAsync">🧮 Calculer</button>
+        <button class="bouton-principal" disabled="@occupe" @onclick="EnregistrerAsync">💾 Enregistrer</button>
+    }
+</fieldset>
+
+<div class="contenu contenu-detail saisie-bl">
+    @if (recap is null)
+    {
+        <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreur)</p>
+    }
+    else
+    {
+        <section class="carte">
+            <div class="titre-fiche">
+                <span class="type-fiche">RÉCAPITULATIF PALETTES</span> <b class="numero-fiche">@Numero</b>
+                <span class="badge">@recap.NombrePalettes palette@(recap.NombrePalettes > 1 ? "s" : "")</span>
+            </div>
+            @if (recap.Erreur != "") {<p class="avertissement-saisie">@recap.Erreur</p>}
+            <p class="discret">Les palettes complètes sont numérotées à la suite. Donnez le même n° aux lots incomplets à regrouper sur une palette mixte
+                (même dépôt, @LotsMax lots au plus) : chaque palette mixte prend le n° suivant.</p>
+            @if (recap.Lignes.Count == 0)
+            {
+                <p>Aucun lot d'article stocké dans ce pré-BL.</p>
+            }
+            else
+            {
+                <table class="grille grille-fiche">
+                    <thead>
+                        <tr><th class="nombre">Dépôt</th><th>Article</th><th>Commande</th><th>Lot</th><th class="nombre">Quantité</th><th class="nombre">Emb. par</th>
+                            <th>Caisse</th><th class="nombre">Colis</th><th class="nombre" title="Colis incomplets">Inc.</th><th class="nombre" title="Exemplaires de l'UC incomplète">Ex. inc.</th>
+                            <th class="nombre" title="Exemplaires par palette complète">Ex. / pal.</th><th class="nombre" title="Palettes complètes">Pal.</th>
+                            <th class="nombre" title="Exemplaires hors palettes complètes">Hors pal.</th><th class="nombre" title="Colis pris en picking">Picking</th>
+                            <th title="N° de palette mixte (lots incomplets)">Pal. mixte</th><th>N° des palettes</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var l in recap.Lignes)
+                        {
+                            <tr>
+                                <td class="nombre">@l.Depot</td>
+                                <td><b>@l.Article</b> <span class="discret">@l.RefImprime</span><div class="discret">@l.Designation</div></td>
+                                <td>@l.Dossier/@l.Cle</td>
+                                <td>@l.NumeroLot</td>
+                                <td class="nombre">@l.Quantite.ToString("#,##0")</td>
+                                <td class="nombre">@l.EmballagePar.ToString("#,##0")</td>
+                                <td>@l.Caisse</td>
+                                <td class="nombre">@l.Colis</td>
+                                <td class="nombre">@l.ColisIncomplets</td>
+                                <td class="nombre">@l.ExIncomplets.ToString("#,##0")</td>
+                                <td class="nombre">@l.ExParPalette.ToString("#,##0")</td>
+                                <td class="nombre">@l.PalettesCompletes</td>
+                                <td class="nombre">@l.ExHorsPalettes.ToString("#,##0")</td>
+                                <td class="nombre">@l.ColisPicking</td>
+                                <td>
+                                    @if (l.Incomplete)
+                                    {
+                                        <input type="number" class="num3" min="1" value="@Groupe(l)" @onchange="e => Choisir(l, e.Value)" />
+                                    }
+                                </td>
+                                <td><b>@l.Libelle</b></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+
+    private const int LotsMax = Services.ReglesRecapPalettes.LotsParPaletteMixte;
+    private RecapPalettesPreBl? recap;
+    private string? erreur;
+    private bool occupe;
+    private readonly Dictionary<(int, int), int> groupes = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        (recap, erreur, occupe) = (null, null, true);
+        groupes.Clear();
+        try
+        {
+            recap = await Saisie.RecapAsync(Numero);
+            foreach (var l in recap.Lignes.Where(l => l.Incomplete && l.PaletteMixte > 0)) groupes[(l.Ligne, l.Lot)] = l.PaletteMixte;
+        }
+        catch (RegleMetierException ex) { erreur = ex.Message; }
+        catch (Exception ex) { erreur = $"Lecture du pré-BL impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private int Groupe(LigneRecapPreBl l) => groupes.GetValueOrDefault((l.Ligne, l.Lot));
+
+    private void Choisir(LigneRecapPreBl l, object? valeur) =>
+        groupes[(l.Ligne, l.Lot)] = int.TryParse(valeur?.ToString(), out var n) ? Math.Max(0, n) : 0;
+
+    private List<GroupePaletteMixte> Groupes() => [.. groupes.Select(g => new GroupePaletteMixte(g.Key.Item1, g.Key.Item2, g.Value))];
+
+    private async Task CalculerAsync()
+    {
+        occupe = true;
+        try { recap = await Saisie.CalculerRecapAsync(Numero, Groupes()); }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Calcul impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        occupe = true;
+        try
+        {
+            await Saisie.EnregistrerRecapAsync(Numero, Groupes());
+            Notifications.Succes("N° des palettes enregistrés.");
+            Navigation.NavigateTo($"logistique/prebl/{Numero}");
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+            try { recap = await Saisie.CalculerRecapAsync(Numero, Groupes()); } catch (RegleMetierException) { }
+        }
+        catch (Exception ex) { Notifications.Erreur($"Enregistrement impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+}

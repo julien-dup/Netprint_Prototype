@@ -1,6 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
+using NetPrint.Noyau.Evenements;
 using NetPrint.Noyau.ListesDeChoix;
+using NetPrint.Noyau.Messagerie;
 using NetPrint.Noyau.Societes;
+using NetPrint.Noyau.Tiers;
 
 namespace NetPrint.Noyau;
 
@@ -10,7 +13,13 @@ public static class NoyauModule
     public static IServiceCollection AddNoyau(this IServiceCollection services)
     {
         services.AddScoped<ISocietes, SocietesDb2>();
+        services.AddScoped<IContactsTiers, ContactsTiersDb2>();   // destinataires des documents envoyés (PRT051F)
+        services.AddScoped<IMessagerie, MessagerieSmtp>();        // envoi SMTP (FAC010), garde-fou Messagerie:Mode
+        services.AddScoped<IJournalEnvois, JournalEnvoisDb2>();   // journal des envois (ENV100)
+        services.AddScoped<NetPrint.Noyau.Utilisateurs.IUtilisateurs, NetPrint.Noyau.Utilisateurs.UtilisateursDb2>();   // profils (AI00F)
         services.AddScoped<IListesDeChoix, ListesDeChoixDb2>();   // recherches F4 / bouton « … »
+        services.AddScoped<EvenementsDb2>();
+        services.AddScoped<IEvenements, EvenementsService>();   // événements et commentaires (EVE300)
         return services;
     }
 }

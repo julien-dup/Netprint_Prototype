@@ -1,0 +1,350 @@
+@page "/facturation/factures/{Numero:int}/{Jour}"
+@* =====================================================================
+   Fiche d'une facture ou d'un avoir (ConsultationFactures, tables des éléments et des lignes) : en-tête, totaux, envoi,
+   éléments (commandes) et leurs lignes, textes rattachés à la ligne qui les précède, liens vers la commande et le BL.
+   Facture « à éditer » : édition définitive (FAC201), après confirmation. Facture pas encore éditée : modification, suppression de la
+   facture ou d'un de ses éléments (FAC160 / FAC165), ajout de BL (FAC085 / FAC150 mode A). Toute facture non supprimée : copie
+   (FAC150 mode D), puis ouverture de la copie en modification. Facture éditée : avoir total ou d'un BL (FAC080S option SA). Facture éditée non comptabilisée : modification après remise « à éditer » (FAC166).
+   ===================================================================== *@
+@using System.Globalization
+@inject IConsultationFactures Factures
+@inject IEditionFactures Edition
+@inject ISaisieFactures Saisie
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+@inject NavigationManager Navigation
+
+<PageTitle>Facture @Numero · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo("facturation/factures")'>← Liste des factures</button>
+    @if (fiche is not null)
+    {
+        <a class="bouton-ancre" href="@($"api/facturation/factures/{Numero}/{Jour}/pdf")" target="_blank" rel="noopener"
+           title="Facture en PDF, recalculée (FAC202P5) ; « BROUILLON » tant qu'elle n'est pas éditée en définitif">🖨 Imprimer</a>
+        @if (!fiche.Facture.Avoir && fiche.Facture.Statut is StatutsFacture.Editee or StatutsFacture.Comptabilisee)
+        {
+            <button disabled="@enCours" @onclick="() => (choixAvoir, blAvoir, nePlusFacturer) = (!choixAvoir, null, false)"
+                    title="Avoir de toute la facture ou d'un de ses BL, à ajuster ensuite">↩ Avoir</button>
+        }
+        <button disabled="@enCours" @onclick="CopierAsync"
+                title="Crée une nouvelle facture du jour, « à éditer », avec le même en-tête, les mêmes éléments et les mêmes lignes">⧉ Copier</button>
+        @if (fiche.Facture.Statut is StatutsFacture.Editee or StatutsFacture.Comptabilisee)
+        {
+            var f0 = fiche.Facture;
+            var (gen, cli) = NetPrint.Modules.Facturation.Services.ReglesFactures.ClientFacture(f0);
+            <a class="bouton-ancre" href="@($"facturation/envoi?general={gen}&client={cli}&facture={Numero}&jour={Jour}")"
+               title="Envoyer la facture par e-mail au client facturé (PDF), avec ses autres factures à envoyer si besoin">✉ Envoyer</a>
+        }
+        if (fiche.Facture.Statut is StatutsFacture.AEditer or StatutsFacture.Attente)
+        {
+            <button title="Modifier l'en-tête, les lignes ou la date (reportée sur tous les fichiers de la facture)"
+                    @onclick='() => Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}/modifier")'>✏ Modifier</button>
+            <button title="Ajouter à cette facture d'autres BL du même donneur d'ordre (nouveaux éléments)"
+                    @onclick='() => Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}/ajouter")'>➕ Ajouter des BL</button>
+            <button disabled="@enCours" @onclick="() => SupprimerAsync(null)"
+                    title="Supprime la facture ; ses BL et compléments redeviennent à facturer">🗑 Supprimer</button>
+        }
+        else if (fiche.Facture.Statut == StatutsFacture.Editee)
+        {
+            <button disabled="@enCours" @onclick="RemettreAEditerAsync"
+                    title="Annule l'édition définitive (la facture n'est pas comptabilisée) pour pouvoir la modifier">✏ Modifier</button>
+        }
+        if (fiche.Facture.Statut == StatutsFacture.AEditer)
+        {
+            <button disabled="@enCours" @onclick="EditerDefinitivementAsync"
+                    title="Enregistre les totaux, marque les BL facturés et met à jour les commandes ; la facture ne sera plus modifiable">✔ Éditer en définitif</button>
+        }
+    }
+</fieldset>
+
+<div class="contenu contenu-detail fiche-facture">
+    @if (choixAvoir && fiche is not null)
+    {
+        var bls = fiche.Lignes.Where(l => l.Bl > 0).Select(l => l.Bl).Distinct().Order().ToList();
+        <section class="carte choix-avoir">
+            <h3>Avoir de la facture @fiche.Facture.Numero</h3>
+            <label class="champ-case"><input type="radio" name="avoir" checked="@(blAvoir is null)" @onchange="() => blAvoir = null" />
+                <span>Avoir total : toutes les lignes ; ses BL redeviennent à facturer</span></label>
+            @if (bls.Count > 0)
+            {
+                <label class="champ-case"><input type="radio" name="avoir" checked="@(blAvoir is not null)" @onchange="() => blAvoir = bls[0]" />
+                    <span>Avoir d'un BL : ses lignes ; ce BL redevient à facturer</span></label>
+                @if (blAvoir is not null)
+                {
+                    <select @bind="blAvoir">@foreach (var b in bls) {<option value="@b">BL @b</option>}</select>
+                }
+            }
+            <label class="champ-case" title="Annulation définitive : les BL ne seront repris ni par la saisie ni par la facturation automatique">
+                <input type="checkbox" @bind="nePlusFacturer" /><span>Ne plus facturer @(blAvoir is null ? "ces BL" : "ce BL") (annulation définitive)</span></label>
+            <p class="discret">L'avoir est daté d'aujourd'hui, « à éditer », et s'ouvre en modification pour ajuster les quantités et les prix.
+                Les BL sont libérés dès sa création : supprimer l'avoir ne les rattache pas de nouveau à la facture.</p>
+            <div class="boutons-criteres">
+                <button class="bouton-principal" disabled="@enCours" @onclick="CreerAvoirAsync">↩ Créer l'avoir</button>
+                <button @onclick="() => (choixAvoir, blAvoir, nePlusFacturer) = (false, null, false)">Annuler</button>
+            </div>
+        </section>
+    }
+    @if (compteurAbsent is not null)
+    {
+        <CreationCompteurFactures Absent="compteurAbsent" OnCree="() => compteurAbsent = null" OnFermer="() => compteurAbsent = null" />
+    }
+    @if (fiche is null)
+    {
+        <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreur ?? "Cette facture n'existe pas ou ne vous est pas accessible.")</p>
+    }
+    else
+    {
+        var f = fiche.Facture;
+        <section class="carte">
+            <div class="titre-fiche">
+                <span class="type-fiche">@(f.Avoir ? "AVOIR" : "FACTURE")</span> <b class="numero-fiche">@f.Numero</b>
+                <span>du @f.Date.ToString("dd/MM/yyyy")</span>
+                <span class="badge">@f.Statut</span>
+                @if (f.Envoi != "") {<span class="badge">@f.Envoi</span>}
+            </div>
+            <div class="cartes-info">
+                <div class="info">
+                    <h3>Facturé à</h3>
+                    <p><b>@($"{fiche.FormeJuridique} {f.NomFacture}".Trim())</b> <span class="discret">@f.CompteGeneralFacture @f.CompteClientFacture</span></p>
+                    @foreach (var l in new[] { fiche.Rue1, fiche.Rue2, $"{fiche.CodePostal} {f.Ville}".Trim() }.Where(x => x != "")) {<p>@l</p>}
+                    @if (fiche.AlAttention != "") {<p class="discret">À l'attention de @fiche.AlAttention</p>}
+                    @if (fiche.TvaIntracom != "") {<p class="discret">TVA intracommunautaire @fiche.TvaIntracom</p>}
+                </div>
+                <div class="info">
+                    <h3>Donneur d'ordre</h3>
+                    <p><b>@f.NomClient</b> <span class="discret">@f.CompteGeneral @f.CompteClient</span></p>
+                    @if (fiche.ReferenceFacture != "") {<p>Référence : @fiche.ReferenceFacture</p>}
+                    @if (f.Representant > 0) {<p class="discret">Représentant @f.Representant</p>}
+                    @if (f.Enseigne != "") {<p class="discret">Enseigne @f.Enseigne</p>}
+                </div>
+                <div class="info">
+                    <h3>Montants</h3>
+                    <table class="tableau-montants">
+                        <tbody>
+                            <tr><td>HT</td><td class="nombre">@E(f.Ht)</td></tr>
+                            @if (f.Port != 0) {<tr><td>Port</td><td class="nombre">@E(f.Port)</td></tr>}
+                            @if (f.Escompte != 0) {<tr><td>Escompte (déduit)</td><td class="nombre">@E(f.Escompte)</td></tr>}
+                            <tr><td>TVA</td><td class="nombre">@E(f.Tva)</td></tr>
+                            <tr><td><b>TTC</b></td><td class="nombre"><b>@E(f.Ttc)</b></td></tr>
+                            @if (f.Acompte != 0) {<tr><td class="discret">dont acompte versé</td><td class="nombre discret">@E(f.Acompte)</td></tr>}
+                        </tbody>
+                    </table>
+                    @if (f.Statut == StatutsFacture.AEditer) {<p class="discret">TVA et totaux calculés à l'édition définitive.</p>}
+                </div>
+                <div class="info">
+                    <h3>Règlement</h3>
+                    @if (fiche.ModeReglement != "") {<p>Mode @fiche.ModeReglement</p>}
+                    @if (f.Echeance is { } e) {<p>Échéance le <b>@e.ToString("dd/MM/yyyy")</b></p>}
+                </div>
+            </div>
+        </section>
+
+        @if (fiche.Lignes.Any(l => fiche.Elements.All(el => el.Numero != l.Element)))
+        {
+            <p class="avertissement-saisie">Des lignes de cette facture ne sont rattachées à aucun élément : elles sont listées à la fin.</p>
+        }
+        @foreach (var el in fiche.Elements.Append(new ElementFacture(-1, 0, "", "", null, "", "", 0)))
+        {
+            var orphelines = el.Numero == -1;
+            if (orphelines && fiche.Lignes.All(l => fiche.Elements.Any(x => x.Numero == l.Element))) continue;
+            var lignes = orphelines ? fiche.Lignes.Where(l => fiche.Elements.All(x => x.Numero != l.Element)).ToList()
+                : fiche.Lignes.Where(l => l.Element == el.Numero).ToList();
+            <section class="carte element-bl">
+                <div class="titre-element">
+                    @if (el.Dossier > 0)
+                    {
+                        <a href="@($"ventes/commandes/{el.Dossier}/{el.Cle}")" title="Ouvrir la commande">Commande @el.Dossier/@el.Cle</a>
+                        @if (el.ReferenceCommande != "") {<span class="discret">réf. @el.ReferenceCommande</span>}
+                        @if (el.DateCommande is { } dc) {<span class="discret">du @dc.ToString("dd/MM/yyyy")</span>}
+                        @if (el.RefImprime != "") {<span class="discret">réf. imp. @el.RefImprime</span>}
+                    }
+                    else if (orphelines)
+                    {
+                        <span>Lignes sans élément</span>
+                    }
+                    else
+                    {
+                        <span>Élément @el.Numero</span>@if (el.Categorie != "") {<span class="discret">catégorie @el.Categorie</span>}
+                    }
+                    <span class="espace"></span>
+                    @if (!orphelines && fiche.Elements.Count > 1 && f.Statut is StatutsFacture.AEditer or StatutsFacture.Attente)
+                    {
+                        <button class="bouton-retirer" disabled="@enCours" @onclick="() => SupprimerAsync(el.Numero)"
+                                title="Retire cet élément de la facture ; ses BL et compléments redeviennent à facturer">🗑 Retirer</button>
+                    }
+                    <b>@E(lignes.Sum(l => l.Montant))</b>
+                </div>
+                <table class="grille grille-fiche">
+                    <thead><tr><th>Article</th><th>Désignation</th><th class="nombre">Quantité</th><th class="nombre">PU</th><th>Unité</th><th class="nombre">Montant</th>
+                        <th>BL</th><th>Livré le</th><th>Appel</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in lignes)
+                        {
+                            <tr>
+                                <td><b>@l.Article</b>@if (l.Indice != "") {<span class="discret"> @l.Indice</span>}@if (l.RefImprime != "") {<div class="discret">@l.RefImprime</div>}</td>
+                                <td>@l.Designation@foreach (var t in l.Textes) {<div class="discret">@t</div>}</td>
+                                <td class="nombre">@(l.Quantite != 0 ? l.Quantite.ToString("#,##0.###") : "")</td>
+                                <td class="nombre">@(l.PrixUnitaire != 0 ? l.PrixUnitaire.ToString("#,##0.00##") : "")</td>
+                                <td>@l.Unite</td>
+                                <td class="nombre">@(l.Montant != 0 ? l.Montant.ToString("#,##0.00") : "")</td>
+                                <td>@if (l.Bl > 0) {<a href="@($"logistique/bl/{l.Bl}")">@l.Bl</a>}</td>
+                                <td>@l.DateLivraison?.ToString("dd/MM/yyyy")</td>
+                                <td>@l.Appel</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+    [Parameter] public string Jour { get; set; } = "";
+
+    private FicheFacture? fiche;
+    private string? erreur;
+    private bool occupe;
+
+    private int lecture;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        (fiche, erreur, occupe) = (null, null, true);
+        var celleCi = ++lecture;   // une lecture plus ancienne, finie après, n'écrase pas celle-ci
+        try
+        {
+            if (!DateOnly.TryParseExact(Jour, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                erreur = "Date de facture invalide.";
+            else
+            {
+                var lue = await Factures.LireAsync(Numero, date);
+                if (celleCi == lecture) fiche = lue;
+            }
+        }
+        catch (RegleMetierException ex) { erreur = ex.Message; }
+        catch (Exception ex) { erreur = $"Lecture de la facture impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private bool enCours;
+
+    // Édition définitive : confirmation (Échap / Annuler = non), puis fiche relue (statut « éditée », totaux enregistrés)
+    private async Task EditerDefinitivementAsync()
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;   // dès la question : un double clic n'ouvre pas deux confirmations
+        try
+        {
+            var f = fiche.Facture;
+            var quoi = f.Avoir ? "l'avoir" : "la facture";
+            var message = $"Éditer en définitif {quoi} {f.Numero} du {f.Date:dd/MM/yyyy} ?"
+                + "\nLes totaux seront enregistrés, les BL marqués facturés et les commandes mises à jour."
+                + "\nElle ne sera plus modifiable, sauf à annuler son édition tant qu'elle n'est pas comptabilisée.";
+            if (!await Dialogues.ConfirmerAsync(message, "Édition définitive", "Éditer en définitif")) return;
+            await Edition.EditerDefinitivementAsync(f.Numero, f.Date);
+            Notifications.Succes(f.Avoir ? $"Avoir {f.Numero} édité en définitif." : $"Facture {f.Numero} éditée en définitif.");
+            await OnParametersSetAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Édition définitive impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    // Suppression de la facture (element null) ou d'un de ses éléments ; facture entière supprimée : retour à la liste
+    private async Task SupprimerAsync(int? element)
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;
+        try
+        {
+            var f = fiche.Facture;
+            var quoi = f.Avoir ? "l'avoir" : "la facture";
+            var message = element is { } el
+                ? $"Retirer l'élément {el} de {quoi} {f.Numero} ?\nSes BL et compléments de commande redeviendront à facturer."
+                : $"Supprimer {quoi} {f.Numero} du {f.Date:dd/MM/yyyy} ?\nSes BL et compléments de commande redeviendront à facturer ; son numéro ne sera pas réutilisé.";
+            if (!await Dialogues.ConfirmerAsync(message, element is null ? "Supprimer" : "Retirer un élément", element is null ? "Supprimer" : "Retirer")) return;
+            var toute = await Saisie.SupprimerAsync(f.Numero, f.Date, element);
+            Notifications.Succes(toute ? $"{(f.Avoir ? "Avoir" : "Facture")} {f.Numero} supprimé{(f.Avoir ? "" : "e")}." : $"Élément {element} retiré de {quoi} {f.Numero}.");
+            if (toute) Navigation.NavigateTo("facturation/factures");
+            else await OnParametersSetAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    private CompteurFacturesAbsentException? compteurAbsent;   // copie refusée faute de compteur : proposé à la création
+    private bool choixAvoir;
+    private int? blAvoir;   // null : avoir total
+    private bool nePlusFacturer;   // annulation définitive : BL non facturables
+
+    // Avoir (FAC080S option SA) : créé, puis ouvert en modification pour l'ajuster
+    private async Task CreerAvoirAsync()
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;
+        try
+        {
+            var f = fiche.Facture;
+            var a = await Saisie.CreerAvoirAsync(f.Numero, f.Date, blAvoir, nePlusFacturer);
+            Notifications.Succes($"Avoir {a.Numero} du {a.Date:dd/MM/yyyy} créé{(blAvoir is { } b ? $" pour le BL {b}" : "")} : ajustez-le puis éditez-le.");
+            Navigation.NavigateTo($"facturation/factures/{a.Numero}/{a.Date:yyyyMMdd}/modifier");
+        }
+        catch (CompteurFacturesAbsentException ex) { compteurAbsent = ex; }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Création de l'avoir impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    // Copie (FAC150 mode D) : nouvelle facture du jour, puis ouverte en modification pour la corriger
+    private async Task CopierAsync()
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;
+        try
+        {
+            var f = fiche.Facture;
+            var quoi = f.Avoir ? "l'avoir" : "la facture";
+            var message = $"Copier {quoi} {f.Numero} du {f.Date:dd/MM/yyyy} ?"
+                + $"\n{(f.Avoir ? "Un nouvel avoir daté d'aujourd'hui est créé" : "Une nouvelle facture datée d'aujourd'hui est créée")} (n° pris au compteur),"
+                + $" « {(f.Statut == StatutsFacture.Attente ? "à contrôler" : "à éditer")} », avec le même en-tête et les mêmes lignes, sans acompte ni BL rattachés."
+                + " Elle s'ouvre ensuite en modification ; éditée en définitif, elle facture de nouveau les quantités à la commande.";
+            if (!await Dialogues.ConfirmerAsync(message, "Copier", "Copier")) return;
+            var c = await Saisie.CopierAsync(f.Numero, f.Date);
+            Notifications.Succes($"Copie créée : {(f.Avoir ? "avoir" : "facture")} {c.Numero} du {c.Date:dd/MM/yyyy}{(c.AControler ? ", « à contrôler »" : "")}.");
+            Navigation.NavigateTo($"facturation/factures/{c.Numero}/{c.Date:yyyyMMdd}/modifier");
+        }
+        catch (CompteurFacturesAbsentException ex) { compteurAbsent = ex; }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Copie impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    // Facture éditée non comptabilisée : édition définitive annulée (FAC166), puis ouverte en modification
+    private async Task RemettreAEditerAsync()
+    {
+        if (enCours || fiche is null) return;
+        enCours = true;
+        try
+        {
+            var f = fiche.Facture;
+            var quoi = f.Avoir ? "L'avoir" : "La facture";
+            var message = $"{quoi} {f.Numero} est éditée : pour la modifier, son édition définitive sera annulée."
+                + "\nElle redeviendra « à éditer » (totaux et quantités facturées des commandes retirés) et devra être rééditée."
+                + (f.Envoi.StartsWith("Envoyée") ? $"\nAttention : elle a déjà été envoyée au client ({f.Envoi})." : "");
+            if (!await Dialogues.ConfirmerAsync(message, "Modifier une facture éditée", "Annuler l'édition et modifier")) return;
+            await Saisie.RemettreAEditerAsync(f.Numero, f.Date);
+            Notifications.Info($"{quoi} {f.Numero} est de nouveau « à éditer ».");
+            Navigation.NavigateTo($"facturation/factures/{Numero}/{Jour}/modifier");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Remise « à éditer » impossible : {ex.Message}"); }
+        finally { enCours = false; }
+    }
+
+    private static string E(decimal v) => $"{v:#,##0.00} €";
+}
