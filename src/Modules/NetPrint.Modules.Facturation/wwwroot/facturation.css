@@ -1,0 +1,63 @@
+/* Module Facturation : consultation des factures */
+.zone-defilement-liste { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--bord); border-radius: var(--rayon); background: var(--surface); }
+.grille-factures td { white-space: nowrap; }
+.grille-factures th.triable { cursor: pointer; user-select: none; }
+.grille-factures .sens-tri { color: var(--accent); }
+.grille-factures tr.bl-retour td { color: var(--danger); }
+.grille-factures tr.bl-divers td { color: #1d4ed8; }
+.compteur .avertissement { color: var(--orange); }
+.discret { color: var(--texte-3); font-weight: normal; }
+.champ-case { flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; min-height: 32px; }
+.badge-bl-c { background: #e0f2fe; color: #075985; }
+.badge-bl-d, .badge-bl-s { background: #ede9fe; color: #5b21b6; }
+.badge-bl-r { background: var(--danger-clair); color: var(--danger); }
+.badge-bl-v { background: var(--jaune-clair); color: #854d0e; }
+
+.fiche-facture { overflow: auto; }
+.titre-fiche { display: flex; align-items: baseline; gap: 10px; }
+.type-fiche { font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--texte-3); }
+.numero-fiche { font-size: 20px; }
+.cartes-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.cartes-info .info { border: 1px solid var(--bord); border-radius: var(--rayon); padding: 8px 12px; }
+.cartes-info .info h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-3); }
+.cartes-info .info p { margin: 2px 0; }
+.titre-element { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.titre-element .espace { flex: 1; }
+.grille-fiche td { white-space: nowrap; }
+.grille-fiche tr.ligne-texte td { color: var(--texte-2); font-style: italic; }
+.texte-pied { white-space: pre-line; margin: 0; }
+.grille-factures tr.avoir td { color: var(--danger); }
+.nombre { text-align: right; }
+
+/* Facturation automatique */
+.contenu.facturation-auto { display: flex; flex-direction: column; justify-content: flex-start; align-content: start; gap: 10px; min-height: 0; }
+.contenu.facturation-auto > * { flex: none; }
+.contenu.facturation-auto > .zone-defilement-liste { flex: 1 1 auto; }
+.grille-factures tr.refusee td { background: var(--danger-clair); }
+.grille-factures tr.selectionnee td { background: var(--accent-clair, #eef2ff); }
+.grille-factures tr { cursor: pointer; }
+.detail-facture-auto > td { background: var(--surface-2, #f8fafc); padding: 8px 16px; white-space: normal; cursor: default; }
+.detail-facture-auto .grille-fiche { margin: 4px 0 10px; }
+.erreurs-saisie { color: var(--danger); }
+.contenu.facturation-auto .carte .zone-defilement-liste { max-height: 30vh; }
+
+/* Saisie d'une facture à partir de BL */
+.grille-champs { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.barre-preparation { display: flex; align-items: center; gap: 10px; }
+.barre-preparation .espace { flex: 1; }
+.grille-saisie-lignes td { padding: 2px 4px; vertical-align: middle; }
+.grille-saisie-lignes select { max-width: 190px; }
+.grille-saisie-lignes input.designation { width: 100%; min-width: 260px; }
+.grille-saisie-lignes input.code2 { width: 64px; }
+.grille-saisie-lignes tr.ligne-texte input.designation { font-style: italic; }
+.boutons-lignes { display: flex; gap: 8px; }
+.resultat-saisie .boutons-criteres { display: flex; gap: 8px; }
+.compteur-absent { border-color: var(--orange, #d97706); background: var(--jaune-clair); }
+.compteur-absent .ligne-champs { display: flex; align-items: flex-end; gap: 10px; }
+.titre-element .bouton-retirer { padding: 2px 8px; font-size: .85em; background: none; border: 1px dashed #b91c1c; color: #b91c1c; }
+.titre-element .champ-ligne { display: inline-flex; align-items: center; gap: 6px; font-size: .9em; }
+.remise-fin-annee { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 8px 10px; border: 1px dashed #93c5fd; border-radius: 6px; }
+.onglets-envoi { display: flex; gap: 4px; padding: 8px 16px 0; }
+.onglets-envoi button { border-radius: 6px 6px 0 0; border-bottom: none; }
+.onglets-envoi button.actif { background: #fff; font-weight: 600; }
+.ligne-ok td:last-child { color: #15803d; } .ligne-ko td:last-child { color: #b91c1c; }

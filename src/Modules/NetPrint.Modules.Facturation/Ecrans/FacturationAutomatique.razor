@@ -1,0 +1,234 @@
+@page "/facturation/automatique"
+@* =====================================================================
+   Facturation automatique (FAC400 → FAC402P) : critères de lancement, simulation sans écriture (ancien provisoire FAC412 /
+   FAC412P : factures prévues, anomalies, BL écartés et pourquoi), puis génération après confirmation, sur les mêmes critères
+   que la dernière simulation. Rien n'est lu à l'ouverture, sauf le contexte (enseignes, droit d'édition définitive).
+   ===================================================================== *@
+@using System.Globalization
+@inject IFacturationAutomatique Facturation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Facturation automatique · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Facturation/facturation.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <span class="espace"></span>
+    @if (contexte?.PeutEditerDefinitif == true)
+    {
+        <label class="champ-case" title="Les factures « à contrôler » restent à éditer depuis leur fiche">
+            <input type="checkbox" @bind="editerDefinitif" /><span>Éditer en définitif les factures sans anomalie</span>
+        </label>
+    }
+    <button class="bouton-principal" disabled="@(!PeutGenerer)" @onclick="GenererAsync"
+            title="@(PeutGenerer ? "Crée les factures et avoirs simulés, marque les BL facturés" : "Lancez d'abord une simulation sur ces critères")">⚙ Générer les factures</button>
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="SimulerAsync">
+    @if (contexte?.GereEnseignes == true)
+    {
+        <label class="champ"><span>Enseigne</span><input class="code @Err(nameof(C.Enseigne))" maxlength="1" @bind="C.Enseigne" @bind:after="Modifie" /></label>
+    }
+    <label class="champ"><span>BL du</span><input type="number" class="num6 @Err(nameof(C.BlDu))" @bind="C.BlDu" @bind:after="Modifie" /></label>
+    <label class="champ"><span>au</span><input type="number" class="num6 @Err(nameof(C.BlAu))" @bind="C.BlAu" @bind:after="Modifie" /></label>
+    <label class="champ"><span>Expédiés du</span><input type="date" @bind="C.ExpedieDu" @bind:after="Modifie" /></label>
+    <label class="champ"><span>au</span><input type="date" class="@Err(nameof(C.ExpedieAu))" @bind="C.ExpedieAu" @bind:after="Modifie" /></label>
+    <div class="champ">
+        <span>Donneurs d'ordre du</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneralDu" @bind:after="Modifie" />
+            <input type="number" class="num7" title="Compte client" @bind="C.CompteClientDu" @bind:after="Modifie" />
+        </div>
+    </div>
+    <div class="champ">
+        <span>au</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6 @Err(nameof(C.CompteGeneralAu))" title="Compte général" @bind="C.CompteGeneralAu" @bind:after="Modifie" />
+            <input type="number" class="num7 @Err(nameof(C.CompteClientAu))" title="Compte client" @bind="C.CompteClientAu" @bind:after="Modifie" />
+        </div>
+    </div>
+    <label class="champ"><span>Date des factures</span><input type="date" class="@Err(nameof(C.DateFacture))" @bind="C.DateFacture" @bind:after="Modifie" /></label>
+    <label class="champ">
+        <span>Fréquence</span>
+        <select @bind="C.Frequence" @bind:after="Modifie">
+            @foreach (var (frequence, libelle) in FrequencesFacturation.Toutes) {<option value="@frequence">@libelle</option>}
+        </select>
+    </label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@occupe">🔍 Simuler</button>
+    </div>
+</form>
+
+<div class="contenu facturation-auto">
+    @if (compteurAbsent is not null)
+    {
+        <CreationCompteurFactures Absent="compteurAbsent" OnCree="() => compteurAbsent = null" OnFermer="() => compteurAbsent = null" />
+    }
+    @if (resultat is null)
+    {
+        <p class="discret">@(occupe ? "Traitement en cours…" : "Choisissez les BL (n° ou dates d'expédition) et la date des factures, puis lancez la simulation : rien n'est écrit.")</p>
+    }
+    else if (resultat.Erreurs.Count > 0)
+    {
+        <ul class="erreurs-saisie">@foreach (var e in resultat.Erreurs) {<li>@e.Message</li>}</ul>
+    }
+    else
+    {
+        var r = resultat;
+        var avoirs = r.Factures.Count(f => f.Avoir);
+        <p class="compteur">
+            <b>@(generee ? "Génération" : "Simulation")</b> au @r.DateFacture?.ToString("dd/MM/yyyy") :
+            <strong>@(r.Factures.Count - avoirs)</strong> facture@(r.Factures.Count - avoirs > 1 ? "s" : ""),
+            <strong>@avoirs</strong> avoir@(avoirs > 1 ? "s" : ""),
+            <strong>@r.Factures.Count(f => f.AControler)</strong> à contrôler
+            @if (generee) {<span>· <strong>@r.Factures.Count(f => f.Numero is not null)</strong> créée(s), <strong>@r.Factures.Count(f => f.Refus is not null && f.Numero is null)</strong> refusée(s)</span>}
+            <span class="separateur-compteur">·</span> @E(r.Factures.Where(f => !f.Avoir).Sum(f => f.Montant)) HT facturés, @E(r.Factures.Where(f => f.Avoir).Sum(f => f.Montant)) en avoirs
+            @if (r.Ecartes.Count > 0) {<span class="separateur-compteur">·</span><a href="" @onclick="() => voirEcartes = !voirEcartes" @onclick:preventDefault>@r.Ecartes.Count BL écarté@(r.Ecartes.Count > 1 ? "s" : "")</a>}
+            @if (r.Tronque) {<span class="avertissement"> · plus de 10 000 éléments de BL : resserrez la sélection</span>}
+        </p>
+
+        @if (voirEcartes && r.Ecartes.Count > 0)
+        {
+            <section class="carte">
+                <h3>BL écartés</h3>
+                <div class="zone-defilement-liste">
+                    <table class="grille grille-factures">
+                        <thead><tr><th>BL</th><th>Élt</th><th>Commande</th><th>Donneur d'ordre</th><th>Raison</th></tr></thead>
+                        <tbody>
+                            @foreach (var e in r.Ecartes)
+                            {
+                                <tr><td><a href="@($"logistique/bl/{e.Bl}")">@e.Bl</a></td><td>@e.Element</td><td>@e.Dossier/@e.Cle</td>
+                                    <td>@e.CompteGeneral @e.CompteClient <span class="discret">@e.NomClient</span></td><td>@e.Raison</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+
+        <div class="zone-defilement-liste">
+            <table class="grille grille-factures">
+                <thead><tr><th>@(generee ? "N°" : "#")</th><th>Type</th><th>Donneur d'ordre</th><th>Facturé à</th><th>Mode</th><th class="nombre">BL</th>
+                    <th class="nombre">Montant HT</th><th>Observation</th></tr></thead>
+                <tbody>
+                    @foreach (var f in r.Factures)
+                    {
+                        <tr class="@(f.Avoir ? "avoir" : "") @(f.Refus is not null ? "refusee" : "") @(ouverte == f.Rang ? "selectionnee" : "")"
+                            @onclick="() => ouverte = ouverte == f.Rang ? null : f.Rang" title="Détail des lignes">
+                            <td>@if (f.Numero is { } n) {<a href="@($"facturation/factures/{n}/{r.DateFacture:yyyyMMdd}")" @onclick:stopPropagation>@n</a>} else {@f.Rang}</td>
+                            <td>@(f.Avoir ? "Avoir" : "Facture")</td>
+                            <td>@f.CompteGeneral @f.CompteClient <span class="discret">@f.NomClient</span></td>
+                            <td>@(f.CompteClientFacture == 0 ? "" : $"{f.CompteGeneralFacture} {f.CompteClientFacture}")</td>
+                            <td>@f.Mode</td>
+                            <td class="nombre">@f.NombreBl</td>
+                            <td class="nombre">@E(f.Montant)</td>
+                            <td>
+                                @if (f.Refus is not null) {<span class="badge badge-bl-r">@f.Refus</span>}
+                                else if (f.AControler) {<span class="badge badge-bl-v" title="Facture créée « à contrôler » : à corriger avant l'édition">À contrôler : @string.Join(", ", f.Anomalies)</span>}
+                                @if (f.EditeeDefinitif) {<span class="badge">Éditée</span>}
+                                @if (f.Avertissement is not null) {<span class="badge badge-bl-v">@f.Avertissement</span>}
+                            </td>
+                        </tr>
+                        @if (ouverte == f.Rang)
+                        {
+                            <tr class="detail-facture-auto"><td colspan="8">
+                                @foreach (var el in f.Elements)
+                                {
+                                    <div class="titre-element">
+                                        <a href="@($"ventes/commandes/{el.Dossier}/{el.Cle}")">Commande @el.Dossier/@el.Cle</a>
+                                        <span class="discret">BL @string.Join(", ", el.Bls)</span><span class="espace"></span><b>@E(el.Montant)</b>
+                                    </div>
+                                    <table class="grille grille-fiche">
+                                        <tbody>
+                                            @foreach (var l in el.Lignes)
+                                            {
+                                                <tr class="@(l.Texte ? "ligne-texte" : "")">
+                                                    <td>@(l.Texte ? "" : l.Code)</td><td>@l.Designation</td>
+                                                    <td class="nombre">@(l.Texte || l.Quantite == 0 ? "" : l.Quantite.ToString("#,##0.###"))</td>
+                                                    <td>@l.Unite</td>
+                                                    <td class="nombre">@(l.PrixUnitaire == 0 ? "" : l.PrixUnitaire.ToString("#,##0.00##"))</td>
+                                                    <td class="nombre">@(l.Texte ? "" : l.Montant.ToString("#,##0.00"))</td>
+                                                    <td>@(l.Bl > 0 ? $"BL {l.Bl}" : "")</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                            </td></tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private CriteresFacturationAuto C { get; set; } = new() { DateFacture = DateOnly.FromDateTime(DateTime.Today) };
+    private ContexteFacturationAuto? contexte;
+    private ResultatFacturationAuto? resultat;
+    private bool occupe, generee, editerDefinitif, voirEcartes;
+    private int? ouverte;
+    private CompteurFacturesAbsentException? compteurAbsent;   // génération refusée faute de compteur : proposé à la création
+    private string? simule;   // critères de la dernière simulation réussie : la génération porte sur les mêmes
+
+    private bool PeutGenerer => !occupe && !generee && simule is not null && simule == Empreinte() && resultat is { Erreurs.Count: 0, Tronque: false }
+                                && resultat.Factures.Count > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { contexte = await Facturation.PreparerAsync(); }
+        catch (Exception ex) { Notifications.Erreur($"Lecture des paramètres impossible : {ex.Message}"); }
+    }
+
+    private string Empreinte() => string.Join("|", C.Enseigne, C.BlDu, C.BlAu, C.ExpedieDu, C.ExpedieAu, C.CompteGeneralDu, C.CompteClientDu,
+        C.CompteGeneralAu, C.CompteClientAu, C.DateFacture, C.Frequence);
+
+    private void Modifie()
+    {
+        if (generee) generee = false;
+        compteurAbsent = null;   // proposé pour d'autres critères (date)
+    }
+
+    private string Err(string champ) => resultat?.Erreurs.Any(e => e.Champ == champ) == true ? "en-erreur" : "";
+
+    private async Task SimulerAsync()
+    {
+        if (occupe) return;
+        (occupe, generee, ouverte, voirEcartes, simule, compteurAbsent) = (true, false, null, false, null, null);
+        try
+        {
+            resultat = await Facturation.SimulerAsync(C);
+            if (resultat.Erreurs.Count == 0) simule = Empreinte();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Simulation impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task GenererAsync()
+    {
+        if (!PeutGenerer) return;
+        occupe = true;   // dès la question : un double clic n'ouvre pas deux confirmations
+        try
+        {
+            var r = resultat!;
+            var message = $"Créer {r.Factures.Count} facture(s) et avoir(s) au {r.DateFacture:dd/MM/yyyy} ?"
+                + "\nLes BL seront marqués facturés et les n° de facture pris sur le compteur."
+                + (editerDefinitif ? "\nLes factures sans anomalie seront éditées en définitif." : "");
+            if (!await Dialogues.ConfirmerAsync(message, "Facturation automatique", "Générer")) return;
+            resultat = await Facturation.GenererAsync(C, editerDefinitif, r.Empreinte);
+            generee = resultat.Erreurs.Count == 0;
+            var creees = resultat.Factures.Count(f => f.Numero is not null);
+            if (creees > 0) Notifications.Succes($"{creees} facture(s) et avoir(s) créé(s).");
+            if (resultat.Factures.Any(f => f.Refus is not null || f.Avertissement is not null))
+                Notifications.Erreur("Des factures n'ont pas pu être créées ou éditées : voir la colonne Observation.");
+        }
+        catch (CompteurFacturesAbsentException ex) { compteurAbsent = ex; }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Génération impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private static string E(decimal v) => v.ToString("#,##0.00 €", CultureInfo.GetCultureInfo("fr-FR"));
+}

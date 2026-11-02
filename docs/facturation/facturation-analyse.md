@@ -70,9 +70,9 @@ flowchart TD
 
 | Étape | Contenu | Remplace |
 |---|---|---|
-| F1 | **Consultation des factures** : critères combinables, vue facture / élément / ligne, statuts d'édition, d'envoi et de règlement (si compta intégrée), pièces jointes FACDOC, représentant limité | ConsultationFactures, FAC080S (liste), FAC525 |
-| F2 | **Calcul et édition PDF native** : moteur de calcul (totaux, TVA multi-taux, port, remises, escompte, acompte, échéance) repris de FAC201 / FAC199, mise en page d'après FAC202P5, **PDF archivé à l'émission** puis relu ; édition définitive (marquage des BL, dossiers, commandes, historique) | FAC199, FAC201, FAC202P5, FAC200CLP |
-| F3 | **Saisie manuelle** : création depuis un dossier, un client ou un BL (bouton « Facturer » de la fiche BL), ajout d'élément, modification, copie, suppression | FAC085, FAC150, FAC160, option FA d'EXP010S |
+| F1 (en cours) | **Consultation des factures** (01/11 : module `NetPrint.Modules.Facturation`, menu « 🧾 Factures », liste et fiche) : critères combinables, vue facture / élément / ligne, statuts d'édition, d'envoi et de règlement (si compta intégrée), pièces jointes FACDOC, représentant limité | ConsultationFactures, FAC080S (liste), FAC525 |
+| F2 | **Calcul et édition PDF native** : moteur de calcul (totaux, TVA multi-taux, port, remises, escompte, acompte, échéance) repris de FAC201 / FAC199, mise en page d'après FAC202P5, PDF recalculé à chaque affichage comme aujourd'hui (David, 01/11 : pas de stockage pour l'instant ; l'archivage à l'émission reste une idée intéressante) ; édition définitive (marquage des BL, dossiers, commandes, historique) | FAC199, FAC201, FAC202P5, FAC200CLP |
+| F3 | **Saisie manuelle** : création depuis un dossier, un client ou un BL (bouton « Facturer » de la fiche BL), ajout d'élément, modification, copie, suppression. *1re partie faite le 01/11 : facturer des BL choisis (voir points en attente)* | FAC085, FAC150, FAC160, option FA d'EXP010S |
 | F4 | **Avoirs** depuis une facture (total, partiel sur plusieurs BL), avec libération explicite des BL | FAC080S option SA |
 | F5 | **Facturation automatique** des BL, un seul service avec un mode simulation (provisoire) | FAC400 → FAC402P, FAC412 / FAC412P |
 | F6 | **Envoi des factures** : mail (SMTP / .eml) avec journal ENV100, puis Factur-X natif et plateforme SuperPDP (jeton partagé avec FactureElectronique), FTP / EDI après inventaire | EnvoideFactures |
@@ -95,12 +95,13 @@ réel. F1 peut démarrer avant, en lecture seule, avec un PDF provisoire.
 
 ## 6. Questions pour David
 
-1. **PDF de référence** : en SaaS, faut-il archiver le PDF à l'émission et toujours montrer celui-là (au lieu de le recalculer) ?
+1. ~~PDF de référence~~ : **réponse de David (01/11)** : on garde le fonctionnement actuel, PDF recalculé, pas de stockage pour l'instant (fonction intéressante pour plus tard).
 2. **VisuFacture** : qui le lance, sert-il encore ? (aucune référence trouvée dans NP11 ni dans les autres projets WinDev)
-3. **Modification d'une facture comptabilisée** : l'interdire (passer par un avoir) ou la garder en la traçant ?
-4. **Avoir** : un avoir total doit-il toujours remettre les BL « à facturer » (le RPG le fait, la facturation automatique peut alors
-   les refacturer) ?
+3. ~~Modification d'une facture comptabilisée~~ : **réponse de David (01/11)** : interdite (on passe par un avoir).
+4. ~~Avoir total et BL~~ : **réponse de David (01/11)** : oui, l'avoir total libère les BL (ils redeviennent à facturer), comme le RPG. Case « ne plus facturer ces BL » (HFACTU = N) pour une annulation définitive : acceptée et faite le 01/11.
 5. **CCTYPC 2** : FAC085 refuse le type 2 (« mise en stock »), le glossaire dit 2 = fabrication : lequel est juste ?
 6. **FDTAGR** : décrit « facture réglée » dans la DDS, utilisé comme « exclure du CA » : confirmer.
 7. **Envoi FTP / EDI** : quels formats PRT057F (CSV1/2, TXT1, EDI1/2, EDIP) sont réellement utilisés, et chez quels clients ?
 8. **Coexistence** : pendant la transition, EnvoideFactures et le SaaS tourneront-ils sur la même FAC080 (risque de double envoi) ?
+9. ~~Avoirs en montants positifs~~ : **réponse de David (01/11)** : on garde le positif (quantités et montants), le signe est porté par le type A (FDTYPE).
+10. ~~Mode 7 de la facturation automatique~~ : **réponse de David (01/11)** : comme le RPG (regroupé par commande, TART7 jamais alimenté). Note : un vrai regroupement par article se ferait dans `GenerationFactures.CleFacture` / `CleElement` (cas 7).

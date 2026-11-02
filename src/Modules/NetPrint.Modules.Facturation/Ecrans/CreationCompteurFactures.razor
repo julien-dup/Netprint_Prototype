@@ -1,0 +1,51 @@
+@* =====================================================================
+   Compteur de factures manquant (FAC040) : message, premier n° proposé (modifiable) et création sur place ; l'écran appelant
+   relance ensuite la facturation. Utilisé par la saisie et la facturation automatique.
+   ===================================================================== *@
+@inject ICompteursFactures Compteurs
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<section class="carte compteur-absent">
+    <h3>Compteur de factures manquant</h3>
+    <p>@Absent.Message Créez-le, puis relancez.</p>
+    <div class="ligne-champs">
+        <label class="champ"><span>Premier n° de facture @(Absent.Mois == 0 ? $"de {Absent.Annee}" : $"de {Absent.Mois:00}/{Absent.Annee}")</span>
+            <input type="number" class="num7" @bind="premier" /></label>
+        <button class="bouton-principal" disabled="@occupe" @onclick="CreerAsync">➕ Créer le compteur</button>
+        <button @onclick="OnFermer">Annuler</button>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public CompteurFacturesAbsentException Absent { get; set; } = null!;
+    [Parameter] public EventCallback OnCree { get; set; }
+    [Parameter] public EventCallback OnFermer { get; set; }
+
+    private int premier;
+    private bool occupe;
+    private CompteurFacturesAbsentException? affiche;
+
+    // N° proposé repris seulement pour un nouveau compteur manquant : un nouveau rendu de l'écran n'efface pas la saisie
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(affiche, Absent)) return;
+        affiche = Absent;
+        premier = Absent.PremierPropose;
+    }
+
+    private async Task CreerAsync()
+    {
+        if (occupe) return;
+        occupe = true;
+        try
+        {
+            await Compteurs.CreerAsync(Absent.Annee, Absent.Mois, premier);
+            Notifications.Succes($"Compteur créé : la prochaine facture portera le n° {premier}.");
+            await OnCree.InvokeAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Création du compteur impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+}
