@@ -1,0 +1,208 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using NetPrint.Modules.Logistique.Contrats;
+using NetPrint.Modules.Logistique.Donnees;
+using NetPrint.Modules.Logistique.Services;
+using NetPrint.Socle;
+using NetPrint.Socle.Documents;
+using NetPrint.Socle.Modules;
+
+namespace NetPrint.Modules.Logistique;
+
+// Branchement du module dans NetPrint.Web : builder.Services.AddModuleLogistique(); app.MapModuleLogistique();
+public static class LogistiqueModule
+{
+    public static IServiceCollection AddModuleLogistique(this IServiceCollection services)
+    {
+        services.AddSingleton(new DescriptionModule(
+            Code: "LOGISTIQUE-BL",
+            Nom: "Bons de livraison",
+            Url: "/logistique/bl",
+            Icone: "🚚",
+            Ordre: 4,
+            Assemblage: typeof(LogistiqueModule).Assembly,
+            Description: "Bons de livraison : consultation, saisie, BL divers, édition, envoi, retours de marchandises."));
+
+        services.AddSingleton(new DescriptionModule(
+            Code: "LOGISTIQUE-LIVRAISONS",
+            Nom: "Livraisons à effectuer",
+            Url: "/logistique/livraisons",
+            Icone: "📦",
+            Ordre: 5,
+            Assemblage: typeof(LogistiqueModule).Assembly,
+            Description: "Lignes de commande à livrer sur une période : stock, en-cours, OPR, pré-BL ; création du BL et fiche de préparation."));
+
+        services.AddSingleton(new DescriptionModule(
+            Code: "LOGISTIQUE-OPR",
+            Nom: "Ordres de préparation",
+            Url: "/logistique/opr",
+            Icone: "🧺",
+            Ordre: 6,
+            Assemblage: typeof(LogistiqueModule).Assembly,
+            Description: "OPR : lignes de commande à préparer regroupées par client, adresse, date et transporteur ; création, ajout, modification."));
+
+        services.AddSingleton(new DescriptionModule(
+            Code: "LOGISTIQUE-PREBL",
+            Nom: "Pré-BL palettes",
+            Url: "/logistique/prebl",
+            Icone: "🏷",
+            Ordre: 7,
+            Assemblage: typeof(LogistiqueModule).Assembly,
+            Description: "Pré-BL des palettes code-barre : lignes, lots, palettes et leur pointage sur les terminaux, transformation en BL."));
+
+        services.AddScoped<ConsultationBlDb2>();
+        services.AddScoped<IConsultationBl, ConsultationBlService>();   // ConsultationBL / EXP010S
+        services.AddScoped<Ecrans.Bl.EtatListeBl>();                    // critères et liste conservés pendant la session
+        services.AddScoped<EditionBlDb2>();
+        services.AddScoped<IEditionBl, EditionBlService>();             // EXP030 / EXP035P2
+        services.AddScoped<IEnvoiBl, EnvoiBlService>();                 // EXP010S option EE (envoi par e-mail)
+        services.AddScoped<SaisieBlDb2>();
+        services.AddScoped<ISaisieBl, SaisieBlService>();               // EXP010, cahier des charges lot 1
+        services.AddScoped<IBlDivers, BlDiversService>();               // BL divers (EXP010 état D)
+        services.AddScoped<IRetourBl, RetourBlService>();               // retours de marchandises (EXP010S RM, ConsultationBL)
+        services.AddScoped<PreparationDb2>();
+        services.AddScoped<IPreparation, PreparationService>();           // EXP078
+        services.AddScoped<LivraisonsDb2>();
+        services.AddScoped<ILivraisons, LivraisonsService>();              // LivraisonsAEffectuer
+        services.AddScoped<Ecrans.Livraisons.EtatLivraisons>();
+        services.AddScoped<OprDb2>();
+        services.AddScoped<IOpr, OprService>();                             // WinDev OPR (ordres de préparation)
+        services.AddScoped<IEditionOpr, EditionOprService>();               // OPR150
+        services.AddScoped<ILivraisonOpr, LivraisonOprService>();           // FEN_BonLivraison, FEN_CreationBL, FEN_DetailBL
+        services.AddScoped<Ecrans.Opr.EtatListeOpr>();
+        services.AddScoped<PreBlDb2>();
+        services.AddScoped<IPreBl, PreBlService>();                         // WinDev PreBL / PreBLSansPalette
+        services.AddScoped<ISaisiePreBl, SaisiePreBlService>();             // FEN_CreationPREBL, FEN_SaisiePREBL
+        services.AddScoped<IEditionPreBl, EditionPreBlService>();           // EXP530NAV / EXP535P2
+        services.AddScoped<IEnvoiPreBl, EnvoiPreBlService>();               // FEN_EnvoideBL (envoi groupé)
+        services.AddScoped<Ecrans.PreBl.EtatListePreBl>();
+        return services;
+    }
+
+    public static IEndpointRouteBuilder MapModuleLogistique(this IEndpointRouteBuilder app)
+    {
+        var api = app.MapGroup("/api/logistique").RequireAuthorization();
+
+        // BL en PDF, sans écriture : GET /api/logistique/bl/165139/pdf?apercu=1 (aperçu : filigrane)
+        api.MapGet("/bl/{numero:int}/pdf", async (int numero, int? apercu, HttpContext http, IEditionBl edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.EditerAsync(numero, apercu == 1, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Édition du BL impossible : {ex.Message}", "text/plain; charset=utf-8",
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // PDF d'un BL tel qu'il a été envoyé (journal ENV100) : GET /api/logistique/bl/165139/envois/12/pdf
+        api.MapGet("/bl/{numero:int}/envois/{id:long}/pdf", async (int numero, long id, HttpContext http, IEnvoiBl envoi, CancellationToken ct) =>
+        {
+            try
+            {
+                return await envoi.PdfEnvoyeAsync(numero, id, ct) is { } pdf ? DocumentsPdf.Reponse(http, pdf) : Results.NotFound();
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+        });
+
+        // OPR en PDF, sans écriture : GET /api/logistique/opr/65980/pdf?ajouts=1 (seulement les lignes jamais éditées)
+        api.MapGet("/opr/{numero:int}/pdf", async (int numero, int? ajouts, HttpContext http, IEditionOpr edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.EditerAsync(numero, ajouts == 1, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Édition de l'OPR impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Feuille de préparation d'un pré-BL : GET /api/logistique/prebl/29406/preparation?depot=61&codes=1
+        api.MapGet("/prebl/{numero:int}/preparation", async (int numero, int? depot, int? codes, HttpContext http, IEditionPreBl edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.FeuillePreparationAsync(numero, depot is > 0 and < 1000 ? depot : null, codes != 0, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Feuille de préparation impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Feuille camion de pré-BL : GET /api/logistique/prebl/camion?n=29405&n=29406&valorisee=1
+        api.MapGet("/prebl/camion", async (int[] n, int? valorisee, HttpContext http, IEditionPreBl edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.FeuilleCamionAsync(n, valorisee == 1, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Feuille camion impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Pré-BL en PDF (EXP535P2), sans écriture : GET /api/logistique/prebl/29406/pdf
+        api.MapGet("/prebl/{numero:int}/pdf", async (int numero, HttpContext http, IEditionPreBl edition, CancellationToken ct) =>
+        {
+            try
+            {
+                return DocumentsPdf.Reponse(http, await edition.EditerAsync(numero, false, ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status404NotFound);
+            }
+            catch (System.Data.Odbc.OdbcException ex)
+            {
+                return Results.Text($"Édition du pré-BL impossible : {ex.Message}", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Fiche de préparation (EXP078) : GET /api/logistique/preparation?du=2023-11-01&au=2023-11-30&gen=411100&cli=376
+        api.MapGet("/preparation", async (HttpContext http, IPreparation preparation, CancellationToken ct) =>
+        {
+            var q = http.Request.Query;
+            int? Entier(string nom) => int.TryParse(q[nom], out var n) && n > 0 ? n : null;
+            string? Texte(string nom) => string.IsNullOrWhiteSpace(q[nom]) ? null : q[nom].ToString();
+            if (!DateOnly.TryParse(q["du"], out var du) || !DateOnly.TryParse(q["au"], out var au))
+                return Results.Text("Indiquez la période (du, au).", "text/plain; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
+            try
+            {
+                return DocumentsPdf.Reponse(http, await preparation.EditerAsync(new CriteresPreparation(du, au, Entier("gen"), Entier("cli"),
+                    Entier("cde"), q["nonstockes"] == "1", Texte("fab"), Texte("ens"), Texte("art"), Entier("adr"), Texte("rfi"), Texte("appel"),
+                    Entier("numopr"), Enum.TryParse<FiltreOpr>(q["opr"], out var opr) ? opr : FiltreOpr.Tous, Entier("rep")), ct));
+            }
+            catch (RegleMetierException ex)
+            {
+                return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
+            }
+        });
+        return app;
+    }
+}

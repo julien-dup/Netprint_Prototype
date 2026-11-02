@@ -75,7 +75,7 @@ internal sealed class DemandesOfDb2(IConfiguration config)
                         ct, [.. colonnes.Select(c => c.Valeur)]);
                     of = new NumeroOf(numero, cle);
                 }
-                catch (OdbcException ex) when (essai < 3 && ex.Errors.Count > 0 && ex.Errors[0].SQLState == "23505")
+                catch (OdbcException ex) when (essai < 3 && ex.Errors.Count > 0 && ex.Errors[0].SQLState is "23505" or "23000")
                 {
                 }
             }

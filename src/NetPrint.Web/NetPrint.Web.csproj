@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Modules\NetPrint.Modules.Ventes\NetPrint.Modules.Ventes.csproj" />
     <ProjectReference Include="..\Modules\NetPrint.Modules.Production\NetPrint.Modules.Production.csproj" />
+    <ProjectReference Include="..\Modules\NetPrint.Modules.Logistique\NetPrint.Modules.Logistique.csproj" />
   </ItemGroup>
 
 </Project>

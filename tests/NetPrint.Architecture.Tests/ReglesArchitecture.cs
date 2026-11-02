@@ -20,6 +20,7 @@ public class ReglesArchitecture
     [
         typeof(VentesModule).Assembly,
         typeof(NetPrint.Modules.Production.ProductionModule).Assembly,
+        typeof(NetPrint.Modules.Logistique.LogistiqueModule).Assembly,
     ];
 
     public static TheoryData<string> NomsModules()

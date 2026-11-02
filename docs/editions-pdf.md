@@ -1,7 +1,7 @@
 # Produire un document PDF (ARC, devis, BL, facture…)
 
 Les éditions sont produites par l'application, en .NET, **sans programme IBM i** (pas de PRTF, d'overlay ni de
-QCMDEXC). Premier document fait ainsi : l'**ARC des commandes** (reprise d'ARC105P). L'édition du devis suit le même
+QCMDEXC). Premier document fait ainsi : l'**ARC des commandes** (reprise d'ARC105P). Le **bon de livraison** (module Logistique, reprise d'EXP035P2 : `Impressions/DocumentBl.cs`, `GET /api/logistique/bl/{n}/pdf?apercu=1`) suit le même schéma. L'édition du devis suit le même
 schéma.
 
 ## Ce qui est commun

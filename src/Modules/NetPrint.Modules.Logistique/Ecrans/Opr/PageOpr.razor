@@ -1,0 +1,234 @@
+@page "/logistique/opr/{Numero:int}"
+@* =====================================================================
+   Fiche d'un OPR et modification (WinDev FEN_ModificationOPR) : commentaire de l'OPR (4 lignes), lignes à préparer
+   modifiables (quantité, date, transporteur, options, observation) ou à retirer ; lignes en préparation ou livrées en
+   lecture seule. Le verrou de l'OPR n'est posé que le temps de l'enregistrement.
+   ===================================================================== *@
+@using NetPrint.Modules.Logistique.Ecrans.Opr
+@inject IOpr Oprs
+@inject IEditionOpr Edition
+@inject Microsoft.JSInterop.IJSRuntime JS
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>OPR @Numero · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo("logistique/opr")'>← Liste des OPR</button>
+    @if (fiche is not null && droits.Editer)
+    {
+        @* PDF dans un onglet (OPR150) ; « Imprimer » marque les lignes éditées, l'aperçu n'écrit rien *@
+        <a class="bouton-ancre" href="@($"api/logistique/opr/{Numero}/pdf")" target="_blank" rel="noopener" title="Aperçu de l'OPR en PDF, sans le marquer édité">👁 Aperçu</a>
+        <a class="bouton-ancre" href="@($"api/logistique/opr/{Numero}/pdf")" target="_blank" rel="noopener" @onclick="MarquerEditeAsync"
+           title="OPR en PDF à imprimer ; ses lignes sont marquées éditées">🖨 Imprimer</a>
+        <button disabled="@occupe" title="Seulement les lignes ajoutées depuis la dernière impression (PDF téléchargé)" @onclick="ImprimerAjoutsAsync">🖨 Imprimer les ajouts</button>
+    }
+    @if (fiche is not null && fiche.Etat != EtatsOpr.Livre)
+    {
+        <button disabled="@(!droits.Creer)" title="Ajouter des lignes de commande du même client, à la même adresse"
+                @onclick='() => Navigation.NavigateTo($"logistique/opr/{Numero}/ajout")'>➕ Ajouter des lignes</button>
+        <button title="Situation de la préparation (palettes, colis) et génération des BL (droit de modification)" disabled="@(!droits.Modifier)"
+                @onclick='() => Navigation.NavigateTo($"logistique/opr/{Numero}/livraison")'>📦 Situation et BL</button>
+        <button class="bouton-danger" disabled="@(!droits.Supprimer || fiche.Etat != EtatsOpr.APreparer)" @onclick="SupprimerAsync">🗑 Supprimer l'OPR</button>
+        <span class="espace"></span>
+        <button class="bouton-principal" disabled="@(!droits.Modifier || occupe)" @onclick="EnregistrerAsync">💾 Enregistrer</button>
+    }
+</fieldset>
+
+<div class="contenu contenu-detail fiche-bl">
+    @if (fiche is null)
+    {
+        <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreur ?? "Cet OPR n'existe pas ou ne vous est pas accessible.")</p>
+    }
+    else
+    {
+        <section class="carte">
+            <div class="titre-fiche">
+                <span class="type-fiche">ORDRE DE PRÉPARATION</span> <b class="numero-fiche">@fiche.Numero</b>
+                <span class="badge">@fiche.Etat</span>
+                @if (fiche.SousTraite) {<span class="badge">sous-traitance</span>}
+            </div>
+            <div class="cartes-info">
+                <div class="info">
+                    <h3>Client</h3>
+                    <p><b>@fiche.NomClient</b> <span class="discret">@fiche.CompteGeneral @fiche.CompteClient</span></p>
+                    <p class="discret">Créé le @fiche.DateCreation?.ToString("dd/MM/yyyy") par @fiche.Profil</p>
+                </div>
+                <div class="info">
+                    <h3>Livrer à</h3>
+                    <p><b>@fiche.Adresse.RaisonSociale</b>@if (fiche.Adresse.Numero > 0) {<span class="discret"> (adresse n° @fiche.Adresse.Numero)</span>}</p>
+                    <p>@fiche.Adresse.Rue1</p>
+                    @if (fiche.Adresse.Rue2 != "") {<p>@fiche.Adresse.Rue2</p>}
+                    <p>@fiche.Adresse.CodePostal @fiche.Adresse.Ville @fiche.Adresse.Pays</p>
+                </div>
+                <div class="info">
+                    <h3>Commentaire de l'OPR</h3>
+                    @for (var i = 0; i < 4; i++)
+                    {
+                        var n = i;
+                        <input class="large" maxlength="40" disabled="@(!Modifiable)" value="@textes[n]" @onchange="e => textes[n] = e.Value?.ToString() ?? string.Empty" />
+                    }
+                </div>
+            </div>
+        </section>
+
+        @foreach (var commande in fiche.Lignes.GroupBy(l => (l.Dossier, l.Cle)))
+        {
+            <section class="carte element-bl">
+                <div class="titre-element">
+                    <a href="@($"ventes/commandes/{commande.Key.Dossier}/{commande.Key.Cle}")" title="Ouvrir la commande">Commande @commande.Key.Dossier/@commande.Key.Cle</a>
+                    @if (commande.First().ReferenceCommande != "") {<span class="discret">réf. @commande.First().ReferenceCommande</span>}
+                    <span class="espace"></span>
+                    @if (commande.Any(l => l.Etat != EtatsOpr.Livre))
+                    {
+                        <button type="button" title="Créer le BL de cette commande à partir de l'OPR (lignes préparées)"
+                                @onclick='() => Navigation.NavigateTo($"logistique/bl/nouveau?dossier={commande.Key.Dossier}&cle={commande.Key.Cle}&opr=1")'>🚚 Créer le BL</button>
+                    }
+                </div>
+                <table class="grille grille-fiche lignes-opr">
+                    <thead>
+                        <tr><th>L.</th><th>Article</th><th>État</th><th class="nombre">Reste cde</th><th class="nombre">À préparer</th><th>Date prévue</th>
+                            <th>Transp.</th><th title="Impératif · Mécompte · À solder · Prélèvement · Acompte">Options</th><th>Observation</th><th title="Retirer la ligne de l'OPR">Retirer</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var l in commande)
+                        {
+                            var s = saisies[l.NumeroLigne];
+                            var actif = Modifiable && l.Modifiable;
+                            <tr class="@(s.Supprimer ? "ligne-retiree" : "")">
+                                <td>@l.NumeroLigne</td>
+                                <td><b>@l.Article</b>@if (l.Indice != "") {<span class="discret"> @l.Indice</span>}<div class="discret">@l.Designation</div></td>
+                                <td>@l.Etat@if (l.Bl > 0) {<div><a href="@($"logistique/bl/{l.Bl}")">BL @l.Bl</a></div>}
+                                    @if (l.QuantitePreparee > 0) {<div class="discret">préparé @l.QuantitePreparee.ToString("#,##0")</div>}</td>
+                                <td class="nombre">@l.Reste.ToString("#,##0")</td>
+                                <td class="nombre"><input type="number" class="num7" min="1" disabled="@(!actif)" @bind="s.Quantite" /></td>
+                                <td><input type="date" disabled="@(!actif)" @bind="s.Date" /></td>
+                                <td><input type="number" class="num3" min="0" disabled="@(!actif)" title="@l.NomTransporteur" @bind="s.Transporteur" /></td>
+                                <td class="options-opr">
+                                    <label title="Impératif"><input type="checkbox" disabled="@(!actif)" @bind="s.Imperatif" />I</label>
+                                    <label title="Mécompte"><input type="checkbox" disabled="@(!actif)" @bind="s.Mecompte" />M</label>
+                                    <label title="À solder"><input type="checkbox" disabled="@(!actif)" @bind="s.ASolder" />S</label>
+                                    <label title="Prélèvement (retour usine)"><input type="checkbox" disabled="@(!actif)" @bind="s.Prelevement" />P</label>
+                                    <label title="Acompte"><input type="checkbox" disabled="@(!actif)" @bind="s.Acompte" />A</label>
+                                </td>
+                                <td><input class="observation-opr" maxlength="400" disabled="@(!actif)" @bind="s.Observation" /></td>
+                                <td><input type="checkbox" disabled="@(!actif)" @bind="s.Supprimer" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+
+    private sealed class Saisie
+    {
+        public int Quantite { get; set; }
+        public DateOnly? Date { get; set; }
+        public int Transporteur { get; set; }
+        public bool Imperatif { get; set; }
+        public bool Mecompte { get; set; }
+        public bool ASolder { get; set; }
+        public bool Prelevement { get; set; }
+        public bool Acompte { get; set; }
+        public string Observation { get; set; } = "";
+        public bool Supprimer { get; set; }
+    }
+
+    private FicheOpr? fiche;
+    private string? erreur;
+    private bool occupe;
+    private DroitsOpr droits = new(true, false, false, false);
+    private string[] textes = ["", "", "", ""];
+    private Dictionary<int, Saisie> saisies = [];
+
+    private bool Modifiable => fiche is not null && fiche.Etat != EtatsOpr.Livre && droits.Modifier;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        occupe = true;
+        try
+        {
+            droits = await Oprs.DroitsAsync();
+            fiche = await Oprs.LireAsync(Numero);
+            erreur = null;
+            if (fiche is null) return;
+            textes = [.. Enumerable.Range(0, 4).Select(i => fiche.Textes.ElementAtOrDefault(i) ?? "")];
+            saisies = fiche.Lignes.ToDictionary(l => l.NumeroLigne, l => new Saisie
+            {
+                Quantite = l.Quantite, Date = l.DatePrevue, Transporteur = l.Transporteur, Imperatif = l.Imperatif, Mecompte = l.Mecompte,
+                ASolder = l.ASolder, Prelevement = l.Prelevement, Acompte = l.Acompte, Observation = l.Observation,
+            });
+        }
+        catch (RegleMetierException ex) { (fiche, erreur) = (null, ex.Message); }
+        catch (Exception ex) { (fiche, erreur) = (null, $"Lecture de l'OPR impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        if (fiche is null) return;
+        var lignes = fiche.Lignes.Where(l => l.Modifiable).Select(l => (Ligne: l, Saisie: saisies[l.NumeroLigne])).ToList();
+        if (lignes.Any(x => !x.Saisie.Supprimer && x.Saisie.Date is null))
+        {
+            await Dialogues.AlerterAsync("Indiquez la date prévue de chaque ligne.");
+            return;
+        }
+        var retirees = lignes.Count(x => x.Saisie.Supprimer);
+        if (retirees > 0 && !await Dialogues.ConfirmerAsync($"Retirer {retirees} ligne{(retirees > 1 ? "s" : "")} de l'OPR {Numero} ?", "Modification", "Retirer"))
+            return;
+        occupe = true;
+        try
+        {
+            await Oprs.ModifierAsync(new ModificationOpr(Numero, textes, [.. lignes.Select(x => new LigneModifieeOpr(x.Ligne.NumeroLigne, x.Saisie.Supprimer,
+                x.Saisie.Date ?? DateOnly.FromDateTime(DateTime.Today), x.Saisie.Quantite, x.Saisie.Transporteur, x.Saisie.Imperatif, x.Saisie.Mecompte,
+                x.Saisie.ASolder, x.Saisie.Prelevement, x.Saisie.Acompte, x.Saisie.Observation))]));
+            Notifications.Succes($"OPR {Numero} enregistré.");
+            await OnParametersSetAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Enregistrement impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    // « Imprimer » : le lien ouvre le PDF (sans écriture) ; le clic marque les lignes éditées, comme OPR150 après impression
+    private async Task MarquerEditeAsync()
+    {
+        try { await Edition.MarquerEditeAsync(Numero); }
+        catch (RegleMetierException ex) { Notifications.Info(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"L'OPR n'a pas pu être marqué édité : {ex.Message}"); }
+    }
+
+    // Les ajouts : le PDF est produit avant de marquer les lignes (sinon il serait vide), puis téléchargé
+    private async Task ImprimerAjoutsAsync()
+    {
+        occupe = true;
+        try
+        {
+            var pdf = await Edition.ImprimerAjoutsAsync(Numero);
+            await JS.TelechargerAsync(pdf.Nom, NetPrint.Socle.Documents.DocumentGenere.TypePdf, pdf.Contenu);
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Édition impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private async Task SupprimerAsync()
+    {
+        if (!await Dialogues.ConfirmerAsync($"Supprimer l'OPR {Numero} ?", "Suppression", "Supprimer")) return;
+        try
+        {
+            await Oprs.SupprimerAsync(Numero);
+            Notifications.Succes($"OPR {Numero} supprimé.");
+            Navigation.NavigateTo("logistique/opr");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
+    }
+}

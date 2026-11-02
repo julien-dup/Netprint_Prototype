@@ -1,0 +1,224 @@
+@page "/logistique/prebl/{Numero:int}"
+@* =====================================================================
+   Fiche d'un pré-BL (WinDev FEN_SaisiePREBL, en lecture) : en-tête, lignes de commande, lots et palettes SSCC avec leur
+   pointage sur les terminaux, texte de pied ; indique si le pré-BL peut être transformé en BL.
+   ===================================================================== *@
+@using NetPrint.Modules.Logistique.Ecrans
+@inject IPreBl PreBls
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Pré-BL @Numero · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo("logistique/prebl")'>← Liste des pré-BL</button>
+    @if (fiche is not null)
+    {
+        <a class="bouton-ancre" href="@($"api/logistique/prebl/{Numero}/pdf")" target="_blank" rel="noopener" title="Pré-BL en PDF (EXP535P2)">🖨 Imprimer</a>
+        <a class="bouton-ancre" href="@($"api/logistique/prebl/{Numero}/preparation")" target="_blank" rel="noopener"
+           title="Palettes à prendre, par dépôt et emplacement, avec leurs codes-barres">📋 Feuille de préparation</a>
+        <a class="bouton-ancre" href="@($"api/logistique/prebl/camion?n={Numero}")" target="_blank" rel="noopener"
+           title="Feuille camion de ce pré-BL (plusieurs pré-BL : depuis la liste)">🚛 Feuille camion</a>
+        @if (fiche.Etat != EtatsPreBl.Livre)
+        {
+            <button title="Envoyer le pré-BL au client (bon de livraison en PDF)" @onclick="() => envoi = true">✉ Envoyer</button>
+        }
+    }
+    @if (fiche?.Etat == EtatsPreBl.Livre)
+    {
+        <button title="Le BL porte le numéro du pré-BL" @onclick='() => Navigation.NavigateTo($"logistique/bl/{Numero}")'>🚚 Voir le BL @Numero</button>
+    }
+    else if (fiche is not null)
+    {
+        <button disabled="@(!droits.Modifier)" title="Modifier l'en-tête, les lignes, les lots et les palettes ; supprimer le pré-BL"
+                @onclick='() => Navigation.NavigateTo($"logistique/prebl/{Numero}/modifier")'>✏ Modifier</button>
+        <button disabled="@(!droits.Modifier)" title="Numéroter les palettes (complètes et mixtes) du chargement"
+                @onclick='() => Navigation.NavigateTo($"logistique/prebl/{Numero}/palettes")'>🧮 Récap palettes</button>
+        <span class="espace"></span>
+        <button class="bouton-principal" disabled="@(fiche.Refus != "" || !droits.Modifier || occupe)"
+                title="@(fiche.Refus != "" ? fiche.Refus : droits.Modifier ? "Créer le BL du même numéro : sortie du stock, palettes expédiées, commande mise à jour" : "Droit de modification des OPR nécessaire")"
+                @onclick="TransformerAsync">🚚 Transformer en BL</button>
+    }
+</fieldset>
+
+@if (envoi && fiche is not null)
+{
+    <NetPrint.Modules.Logistique.Ecrans.Bl.FenetreEnvoiBl PreBls="@([Numero])" Client="@fiche.NomClient" OnFermer="() => envoi = false" />
+}
+
+<div class="contenu contenu-detail fiche-bl">
+    @if (fiche is null)
+    {
+        <p class="@(occupe ? "chargement" : "")">@(occupe ? "Chargement…" : erreur ?? "Ce pré-BL n'existe pas ou ne vous est pas accessible.")</p>
+    }
+    else
+    {
+        var palettes = fiche.Lignes.SelectMany(l => l.Lots).SelectMany(l => l.PalettesSscc).ToList();
+        <section class="carte">
+            <div class="titre-fiche">
+                <span class="type-fiche">PRÉ-BL</span> <b class="numero-fiche">@fiche.Numero</b>
+                <span class="badge @(fiche.Etat == EtatsPreBl.Livre ? "badge-bl-r" : fiche.Refus == "" ? "badge-bl-c" : "")">@(fiche.Refus == "" ? "Prêt à transformer en BL" : fiche.Etat)</span>
+                @if (fiche.StockPaye) {<span class="badge" title="Stock déjà payé par le client : le BL ne sera pas facturable">stock payé</span>}
+                @if (fiche.SansPalette) {<span class="badge" title="Paramètre société EXP005.FEPREB : les palettes viennent des scans des préparateurs">sans choix des palettes</span>}
+            </div>
+            @if (fiche.Etat != EtatsPreBl.Livre && fiche.Refus != "") {<p class="avertissement-saisie">Pas encore transformable en BL : @fiche.Refus</p>}
+            <div class="cartes-info">
+                <div class="info">
+                    <h3>Client</h3>
+                    <p><b>@fiche.NomClient</b> <span class="discret">@fiche.CompteGeneral @fiche.CompteClient</span></p>
+                    <p class="discret">Créé le @fiche.DateCreation?.ToString("dd/MM/yyyy") par @fiche.Profil</p>
+                </div>
+                <div class="info">
+                    <h3>Livrer à</h3>
+                    <p><b>@fiche.Adresse.RaisonSociale</b>@if (fiche.Adresse.Numero > 0) {<span class="discret"> (adresse n° @fiche.Adresse.Numero)</span>}</p>
+                    <p>@fiche.Adresse.Rue1</p>
+                    @if (fiche.Adresse.Rue2 != "") {<p>@fiche.Adresse.Rue2</p>}
+                    <p>@fiche.Adresse.CodePostal @fiche.Adresse.Ville @fiche.Adresse.Pays</p>
+                </div>
+                <div class="info">
+                    <h3>Expédition</h3>
+                    <p>Départ le <b>@fiche.DateDepart?.ToString("dd/MM/yyyy")</b></p>
+                    <p>@(fiche.Transporteur > 0 ? $"Transporteur {fiche.Transporteur} {fiche.NomTransporteur}" : "Sans transporteur")
+                        <span class="discret">· livraison @Libelle(fiche.TypeLivraison, TypesLivraison) · port @Libelle(fiche.TypePort, TypesPort)</span></p>
+                    <p>@fiche.Palettes palette@(fiche.Palettes > 1 ? "s" : "") · @fiche.Colis colis · @fiche.Poids kg
+                        @if (palettes.Count > 0) {<span class="discret"> · pointées @palettes.Count(p => p.Pointee) / @palettes.Count</span>}</p>
+                </div>
+                @if (fiche.Observations.Count > 0 || fiche.Mention != "")
+                {
+                    <div class="info">
+                        <h3>Observations</h3>
+                        @foreach (var o in fiche.Observations) {<p>@o</p>}
+                        @if (fiche.Mention != "") {<p class="discret">Mention BL / facture : @fiche.Mention</p>}
+                    </div>
+                }
+            </div>
+        </section>
+
+        @foreach (var l in fiche.Lignes)
+        {
+            <section class="carte element-bl">
+                <div class="titre-element">
+                    <span>@l.Numero.</span>
+                    <b>@l.Article</b>@if (l.Indice != "") {<span class="discret">@l.Indice</span>}
+                    @if (l.RefImprime != "") {<span class="discret">@l.RefImprime</span>}
+                    <a href="@($"ventes/commandes/{l.Dossier}/{l.Cle}")" title="Ouvrir la commande">commande @l.Dossier/@l.Cle ligne @l.LigneCommande</a>
+                    @if (l.ReferenceCommande != "") {<span class="discret">réf. @l.ReferenceCommande</span>}
+                    @if (l.Appel != "") {<span class="discret">appel @l.Appel</span>}
+                    <span class="espace"></span>
+                    <b>@l.Quantite.ToString("#,##0")</b>
+                    @if (l.Frais) {<span class="badge" title="Article non stocké">frais</span>}
+                    @if (l.AppelASolder) {<span class="badge" title="La ligne de commande sera soldée">à solder</span>}
+                </div>
+                @foreach (var d in l.Designations) {<p class="discret">@d</p>}
+                @if (l.Lots.Count > 0)
+                {
+                    <table class="grille grille-fiche">
+                        <thead><tr><th>Lot</th><th class="nombre">Dépôt</th><th class="nombre">Quantité</th><th class="nombre">Palettes</th><th class="nombre">Colis</th>
+                            <th>N° palettes</th><th>Préparation</th><th>Palettes SSCC</th></tr></thead>
+                        <tbody>
+                            @foreach (var lot in l.Lots)
+                            {
+                                <tr class="@(lot.AProduire ? "ligne-bloquante" : "")">
+                                    <td>@(lot.AProduire ? $"OF {lot.Lot} à produire" : lot.Lot)</td>
+                                    <td class="nombre">@lot.Depot</td>
+                                    <td class="nombre">@lot.Quantite.ToString("#,##0")</td>
+                                    <td class="nombre">@lot.Palettes@if (lot.PaletteMixte > 0) {<span class="discret" title="N° de palette mixte"> (mixte @lot.PaletteMixte)</span>}</td>
+                                    <td class="nombre">@lot.Colis</td>
+                                    <td>@lot.LibellePalettes</td>
+                                    <td>@(lot.Cloture ? "clôturée" : "")</td>
+                                    <td>
+                                        @if (lot.PalettesSscc.Count > 0)
+                                        {
+                                            <table class="tableau-envois">
+                                                <tbody>
+                                                    @foreach (var p in lot.PalettesSscc)
+                                                    {
+                                                        <tr>
+                                                            <td title="@p.Sscc">…@(p.Sscc.Length > 9 ? p.Sscc[^9..] : p.Sscc)</td>
+                                                            <td class="nombre">@p.Quantite.ToString("#,##0")</td>
+                                                            <td><span class="badge @(p.Pointee ? "badge-bl-c" : "")">@LibellesPalette.Statut(p.Statut)</span></td>
+                                                            <td>@(p.Picking ? "picking" : "")</td>
+                                                            <td class="discret">@p.Observation</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        }
+                                        else if (!lot.AProduire)
+                                        {
+                                            <span class="discret">aucune palette</span>
+                                        }
+                                    </td>
+                                </tr>
+                                @foreach (var o in lot.Observations) {<tr class="ligne-texte"><td></td><td colspan="7">@o</td></tr>}
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+
+        @if (fiche.Pied.Count > 0)
+        {
+            <section class="carte">
+                <h3>Texte de pied</h3>
+                @foreach (var t in fiche.Pied) {<p>@t</p>}
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int Numero { get; set; }
+
+    private static readonly Dictionary<string, string> TypesLivraison = new()
+        { ["E"] = "express", ["M"] = "messagerie", ["A"] = "affrètement", ["I"] = "international", ["P"] = "multi-palettes" };
+    private static readonly Dictionary<string, string> TypesPort = new()
+        { ["F"] = "franco", ["D"] = "dû", ["A"] = "avancé", ["E"] = "enlèvement", ["P"] = "payé" };
+
+    private FichePreBl? fiche;
+    private bool envoi;
+    private DroitsOpr droits = new(true, false, false, false);
+    private string? erreur;
+    private bool occupe;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        (fiche, erreur, occupe, envoi) = (null, null, true, false);
+        try
+        {
+            droits = await PreBls.DroitsAsync();
+            fiche = await PreBls.LireAsync(Numero);
+        }
+        catch (RegleMetierException ex) { erreur = ex.Message; }
+        catch (Exception ex) { erreur = $"Lecture du pré-BL impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private async Task TransformerAsync()
+    {
+        if (fiche is null) return;
+        if (!await Dialogues.ConfirmerAsync($"Transformer le pré-BL {Numero} en BL ?\nLe BL {Numero} est créé au {fiche.DateDepart:dd/MM/yyyy}, les palettes sortent du stock.",
+                "Transformation en BL", "Transformer")) return;
+        occupe = true;
+        try
+        {
+            var r = await PreBls.TransformerAsync(Numero);
+            foreach (var a in r.Avertissements) Notifications.Info(a);
+            Notifications.Succes($"BL {r.NumeroBl} créé.");
+            Navigation.NavigateTo($"logistique/bl/{r.NumeroBl}");
+        }
+        catch (RegleMetierException ex)
+        {
+            await Dialogues.AlerterAsync(ex.Message);
+            await OnParametersSetAsync();   // situation relue (pré-BL transformé ou palette changée entre-temps)
+        }
+        catch (Exception ex) { Notifications.Erreur($"Transformation impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+
+    private static string Libelle(string code, Dictionary<string, string> libelles) =>
+        code == "" ? "—" : libelles.GetValueOrDefault(code, code);
+}

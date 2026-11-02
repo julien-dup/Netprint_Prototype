@@ -1,0 +1,548 @@
+@page "/logistique/bl/nouveau"
+@page "/logistique/bl/{NumeroBl:int}/element/{Element:int}/modifier"
+@* =====================================================================
+   Saisie d'un BL produit fini / négoce (EXP010, cahier des charges lot 1 du 15/10) : création, ajout d'un dossier à un BL
+   existant (?bl=n°) ou modification d'un élément. Création et ajout en trois temps :
+   1. dossier et lignes de commande à livrer (lignes à la demande en rouge, lignes d'OPR signalées) ;
+   2. saisie : expédition, destinataire, facturation, lignes (quantité, colisage, soldé), répartition par lot / emplacement,
+      texte de pied ; « Contrôler » recalcule colis, poids et vérifie le stock de tout le BL ;
+   3. fin : n° de BL attribué, fiche, impression, nouveau BL sur le dossier.
+   ===================================================================== *@
+@inject ISaisieBl Saisies
+@inject EtatListeBl Etat
+@inject IEditionBl Edition
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>@TitrePage · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    @if (NumeroBl > 0 || Ajout > 0)
+    {
+        <button @onclick="RetourFiche" title="Retour à la fiche du BL">← BL @(NumeroBl > 0 ? NumeroBl : Ajout)</button>
+    }
+    else
+    {
+        <button @onclick='() => Navigation.NavigateTo("logistique/bl")' title="Retour à la liste des BL">← Liste des BL</button>
+    }
+    <span class="espace"></span>
+    @if (saisie is not null && numeroCree is null)
+    {
+        <button disabled="@occupe" @onclick="ControlerAsync" title="Recalcule colis et poids, vérifie la saisie et le stock">✔ Contrôler</button>
+        <button class="bouton-principal" disabled="@occupe" @onclick="ValiderAsync">💾 Valider le BL</button>
+        <button disabled="@occupe" @onclick="AbandonnerAsync">Abandonner</button>
+    }
+</fieldset>
+
+<div class="contenu contenu-detail saisie-bl">
+    @if (numeroCree is { } numero)
+    {
+        <section class="carte fin-bl">
+            <h2>BL n° @numero @(NumeroBl > 0 ? "modifié" : Ajout > 0 ? "complété" : "créé")</h2>
+            <p>Dossier @dossier/@cle · @(preparation?.NomClient)</p>
+            <div class="ligne-champs">
+                <button class="bouton-principal" @onclick='() => Navigation.NavigateTo($"logistique/bl/{numero}")'>🔎 Ouvrir la fiche du BL</button>
+                <a class="bouton-ancre" href="@($"api/logistique/bl/{numero}/pdf")" target="_blank" rel="noopener" @onclick="() => MarquerEditeAsync(numero)"
+                   title="BL en PDF à imprimer ; le BL est marqué édité">🖨 Imprimer</a>
+                <button @onclick="() => AjouterAuBl(numero)">➕ Ajouter un autre dossier à ce BL</button>
+                @if (NumeroBl == 0 && Ajout == 0)
+                {
+                    <button @onclick="NouveauSurLeDossierAsync">➕ Nouveau BL sur ce dossier</button>
+                    <button @onclick="Recommencer">Nouveau BL</button>
+                }
+            </div>
+        </section>
+    }
+    else if (saisie is null)
+    {
+        @* ---------- 1. Dossier et lignes ---------- *@
+        @if (Ajout > 0)
+        {
+            <p class="aide">➕ Ajout d'un dossier au BL <b>@Ajout</b> : seules les lignes qui vont au même destinataire et au même client facturé sont proposées.</p>
+        }
+        <form class="panneau-criteres" @onsubmit="PreparerAsync">
+            <div class="champ">
+                <span>Dossier</span>
+                <div class="ligne-champs">
+                    <input type="number" class="num6" @bind="dossier" autofocus />
+                    <input class="code" maxlength="1" title="Clé du dossier" @bind="cle" />
+                    <BoutonRecherche Liste="ListeChoix.Dossier" Titre="Rechercher un dossier" OnChoix="ChoisirDossier" />
+                </div>
+            </div>
+            <div class="champ">
+                <span>Lignes à livrer</span>
+                <div class="ligne-champs choix-source">
+                    <label class="champ-case"><input type="radio" name="source" checked="@(!Etat.SourceOpr)" @onchange="() => ChoisirSource(false)" /> Lignes de commande</label>
+                    <label class="champ-case"><input type="radio" name="source" checked="@Etat.SourceOpr" @onchange="() => ChoisirSource(true)" /> Ordres de préparation</label>
+                </div>
+            </div>
+            <div class="boutons-criteres">
+                <button type="submit" class="bouton-principal" disabled="@occupe">Afficher les lignes à livrer</button>
+            </div>
+        </form>
+        @if (preparation is { } p)
+        {
+            <section class="carte">
+                <div class="titre-element">
+                    <b>Dossier @p.Dossier/@p.Cle</b> <span>@p.Designation</span>
+                    <span class="discret">@p.CompteGeneral @p.CompteClient · @p.NomClient · @(p.TypeDossier == "3" ? "négoce" : "produit fini")</span>
+                    <span class="espace"></span>
+                    <button class="bouton-principal" disabled="@(occupe || choisies.Count == 0)" @onclick="OuvrirAsync">Saisir le BL (@choisies.Count ligne@(choisies.Count > 1 ? "s" : ""))</button>
+                </div>
+                <table class="grille grille-fiche">
+                    <thead>
+                        <tr><th></th><th>Ligne</th><th>Article</th><th>Désignation</th><th class="nombre">Commandé</th><th class="nombre">Livré</th>
+                            <th class="nombre">Reste</th>@if (sourceOpr) {<th class="nombre">Qté OPR</th>}<th>Livraison</th><th>Adresse</th><th>Facturé à</th><th>OPR</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var l in p.Lignes)
+                        {
+                            <tr class="@(l.ADemande ? "ligne-a-la-demande" : "")" @onclick="() => Basculer(l)">
+                                <td><input type="checkbox" checked="@choisies.Contains(l.NumeroLigne)" @onclick:stopPropagation="true" @onchange="() => Basculer(l)" /></td>
+                                <td>@l.NumeroLigne</td>
+                                <td>@l.Article @l.Indice</td>
+                                <td>@l.Designation</td>
+                                <td class="nombre">@l.Commande.ToString("N0")</td>
+                                <td class="nombre">@l.Livre.ToString("N0")</td>
+                                <td class="nombre"><b>@l.Reste.ToString("N0")</b></td>
+                                @if (sourceOpr) {<td class="nombre">@l.AProposer.ToString("N0")@(l.DOffice ? " ⓘ" : "")</td>}
+                                <td>@l.DateLivraison?.ToString("dd/MM/yyyy")</td>
+                                <td>@(l.Adresse.Numero > 0 ? $"n° {l.Adresse.Numero} · " : "")@l.Adresse.Libelle</td>
+                                <td>@l.CompteGeneralFacture @l.CompteClientFacture</td>
+                                <td>@if (l.Opr is { } opr) {<span class="badge" title="La ligne fait partie d'un ordre de préparation traité">OPR @opr</span>}</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <p class="legende"><span class="ligne-a-la-demande">En rouge</span> : ligne à la demande (contrat), non cochée par défaut.
+                    @if (sourceOpr) {<span> · ⓘ article ni stocké ni imprimable, coché d'office avec les lignes de son OPR.</span>}</p>
+            </section>
+        }
+    }
+    else
+    {
+        var s = saisie;
+        @* ---------- 2. Saisie ---------- *@
+        <section class="carte entete-saisie-bl">
+            <div class="titre-fiche">
+                <span class="type-fiche">@TitreSaisie(s)</span>
+                <b>Dossier @s.Dossier/@s.Cle</b>
+                <span class="discret">@s.CompteGeneral @s.CompteClient · @s.NomClient@(s.Enseigne == "" ? "" : $" · enseigne {s.Enseigne}")</span>
+            </div>
+            <div class="cartes-saisie">
+                <div class="info">
+                    <h3>Expédition</h3>
+                    <label class="champ"><span>Date d'expédition</span><input type="date" @bind="s.DateExpedition" /></label>
+                    <label class="champ">
+                        <span>Port</span>
+                        <select @bind="s.TypePort">
+                            <option value="F">F · Franco</option><option value="D">D · Dû</option><option value="A">A · Avancé</option>
+                            <option value="E">E · Enlèvement</option>
+                        </select>
+                    </label>
+                    @if (s.TypePort != "E")
+                    {
+                        <label class="champ">
+                            <span>Mode de livraison</span>
+                            <select @bind="s.TypeLivraison">
+                                <option value=""></option><option value="M">M · Messagerie</option><option value="E">E · Express</option>
+                                <option value="A">A · Affrètement</option><option value="I">I · International</option><option value="P">P · Multi-palettes</option>
+                            </select>
+                        </label>
+                        <label class="champ"><span>Transporteur</span><input type="number" class="num3" @bind="s.Transporteur" /></label>
+                        <label class="champ">
+                            <span>Barème</span>
+                            <select @bind="s.Bareme"><option value="0"></option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+                        </label>
+                    }
+                    <label class="champ"><span>Palettes</span><input type="number" class="num3" min="0" max="99" @bind="s.Palettes" /></label>
+                </div>
+                <div class="info">
+                    <h3>Destinataire @(s.Adresse.Numero > 0 ? $"(adresse n° {s.Adresse.Numero})" : "")</h3>
+                    <label class="champ large"><span>Raison sociale</span><input maxlength="34" value="@s.Adresse.RaisonSociale" @onchange='e => Adresse(a => a with { RaisonSociale = Texte(e) })' /></label>
+                    <label class="champ large"><span>Rue</span><input maxlength="38" value="@s.Adresse.Rue1" @onchange='e => Adresse(a => a with { Rue1 = Texte(e) })' /></label>
+                    <label class="champ large"><span>Rue (suite)</span><input maxlength="38" value="@s.Adresse.Rue2" @onchange='e => Adresse(a => a with { Rue2 = Texte(e) })' /></label>
+                    <div class="ligne-champs">
+                        <label class="champ"><span>Code postal</span><input class="court" maxlength="10" value="@s.Adresse.CodePostal" @onchange='e => Adresse(a => a with { CodePostal = Texte(e) })' /></label>
+                        <label class="champ"><span>Ville</span><input maxlength="38" value="@s.Adresse.Ville" @onchange='e => Adresse(a => a with { Ville = Texte(e) })' /></label>
+                    </div>
+                    <div class="ligne-champs">
+                        <label class="champ"><span>Dépt</span><input class="code" maxlength="2" value="@s.Adresse.Departement" @onchange='e => Adresse(a => a with { Departement = Texte(e) })' /></label>
+                        <label class="champ"><span>Pays</span><input class="code" maxlength="3" value="@s.Adresse.Pays" @onchange='e => Adresse(a => a with { Pays = Texte(e) })' /></label>
+                    </div>
+                    <label class="champ large"><span>Observations</span><input maxlength="40" @bind="s.Observation1" /></label>
+                    <label class="champ large"><input maxlength="40" @bind="s.Observation2" /></label>
+                    <label class="champ large"><input maxlength="40" @bind="s.Observation3" /></label>
+                </div>
+                <div class="info">
+                    <h3>Facturation</h3>
+                    <label class="champ champ-case"><input type="checkbox" @bind="s.Facturable" /> Facturable</label>
+                    <label class="champ champ-case"><input type="checkbox" @bind="s.FacturationAutomatique" /> Facturation automatique</label>
+                    <div class="champ">
+                        <span>Client facturé</span>
+                        <div class="ligne-champs">
+                            <input type="number" class="num6" @bind="s.CompteGeneralFacture" />
+                            <input type="number" class="num7" @bind="s.CompteClientFacture" />
+                        </div>
+                    </div>
+                    <div class="ligne-champs">
+                        <label class="champ"><span>Réf. commande</span><input class="court" maxlength="15" @bind="s.ReferenceCommande" /></label>
+                        <label class="champ"><span>du</span><input type="date" @bind="s.DateCommande" /></label>
+                    </div>
+                    <label class="champ"><span>Représentant</span><input type="number" class="num3" @bind="s.Representant" /></label>
+                    <label class="champ large"><span>Mention BL / facture</span><input maxlength="40" @bind="s.Mention" /></label>
+                    <label class="champ large"><span>Incoterm</span><input maxlength="30" @bind="s.Incoterm" /></label>
+                </div>
+            </div>
+        </section>
+
+        <section class="carte">
+            <h3>Lignes du BL</h3>
+            <table class="grille grille-fiche lignes-saisie-bl">
+                <thead>
+                    <tr><th>Article</th><th>Désignation</th><th class="nombre">Quantité</th><th class="nombre">Reste</th><th>Emballage</th>
+                        <th class="nombre">Par</th><th class="nombre">Colis</th><th class="nombre">Incomplet</th><th class="nombre">Mécompte</th>
+                        <th class="nombre">Poids</th><th>Soldé</th><th>État</th><th>Lots</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var l in s.Lignes)
+                    {
+                        if (l.Texte)
+                        {
+                            <tr class="ligne-texte"><td></td><td colspan="12">@string.Join(" ", new[] { l.Designation, l.Designation2, l.Designation3 }.Where(x => x != ""))</td></tr>
+                            continue;
+                        }
+                        <tr class="@(l == ligneLots ? "selection" : "")">
+                            <td><b>@l.Article</b> @l.Indice</td>
+                            <td>@l.Designation</td>
+                            <td class="nombre"><input type="number" class="num7" min="0" value="@l.Quantite" @onchange="e => Quantite(l, e)" /></td>
+                            <td class="nombre">@l.Reste.ToString("N0")</td>
+                            <td>
+                                <select value="@l.TypeEmballage" @onchange="e => Emballage(l, e)">
+                                    <option value=""></option>
+                                    @foreach (var (codeEmb, libelle) in Emballages) {<option value="@codeEmb">@codeEmb · @libelle</option>}
+                                </select>
+                            </td>
+                            <td class="nombre"><input type="number" class="num6" min="0" value="@l.EmballagePar" disabled="@(l.TypeEmballage == "S")" @onchange="e => EmballagePar(l, e)" /></td>
+                            <td class="nombre">@l.Colis</td>
+                            <td class="nombre">@l.ColisIncomplet</td>
+                            <td class="nombre">@l.Mecompte.ToString("N0")</td>
+                            <td class="nombre">@l.Poids.ToString("0.##")</td>
+                            <td><input type="checkbox" title="Solder la ligne de commande même si tout n'est pas livré" @bind="l.Solder" /></td>
+                            <td>
+                                <select @bind="l.Etat"><option value="T">Totalité</option><option value="S">Solde</option><option value="A">Acompte</option><option value="E">Suite</option></select>
+                            </td>
+                            <td>
+                                @if (l.GereEnStock)
+                                {
+                                    <button type="button" class="@(l.Reparti == l.Quantite ? "reparti" : "a-repartir")" @onclick="() => LotsAsync(l)"
+                                            title="Répartir la quantité par lot / emplacement">
+                                        @(l.Reparti == l.Quantite ? "✓" : "⚠") @l.Reparti.ToString("N0")
+                                    </button>
+                                }
+                                else {<span class="discret">non stocké</span>}
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+
+        @if (ligneLots is { } ll)
+        {
+            <section class="carte repartition-lots">
+                <div class="titre-element">
+                    <h3>Répartition de @ll.Article @ll.Indice · @ll.Quantite.ToString("N0") ex. (stock @ll.TypeStock)</h3>
+                    <span class="espace"></span>
+                    <span class="@(ll.Reparti == ll.Quantite ? "" : "avertissement")">Réparti @ll.Reparti.ToString("N0") · reste @((ll.Quantite - ll.Reparti).ToString("N0"))</span>
+                    <button type="button" @onclick="() => ligneLots = null">Fermer</button>
+                </div>
+                @if (positions.Count == 0)
+                {
+                    <p class="discret">Aucun stock disponible pour cet article dans le dépôt principal.</p>
+                }
+                else
+                {
+                    <table class="grille grille-fiche">
+                        <thead><tr><th>Dépôt</th><th>Lot</th><th>Emplacement</th><th>DLU</th><th>Entrée</th><th class="nombre">Disponible</th><th class="nombre">Quantité prise</th></tr></thead>
+                        <tbody>
+                            @foreach (var pos in positions)
+                            {
+                                var prise = ll.Prises.FirstOrDefault(x => x.Depot == pos.Depot && x.Lot == pos.Lot && x.Emplacement == pos.Emplacement);
+                                <tr>
+                                    <td>@pos.Depot</td><td>@pos.Lot</td><td>@pos.Emplacement</td>
+                                    <td>@pos.DateLimite?.ToString("dd/MM/yyyy")</td><td>@pos.DateEntree?.ToString("dd/MM/yyyy")</td>
+                                    <td class="nombre">@pos.Stock.ToString("N0")</td>
+                                    <td class="nombre"><input type="number" class="num7" min="0" max="@pos.Stock" value="@(prise?.Quantite ?? 0)" @onchange="e => Prendre(ll, pos, e)" /></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+
+        <section class="carte pied-saisie-bl">
+            <div class="cartes-saisie">
+                <div class="info">
+                    <h3>Texte de pied</h3>
+                    <textarea rows="4" maxlength="400" placeholder="40 caractères par ligne" @bind="textePied"></textarea>
+                </div>
+                <div class="info">
+                    <h3>Totaux</h3>
+                    @if (controle is { } c)
+                    {
+                        <p>Poids <b>@c.Poids kg</b> · colis <b>@c.Colis</b> · palettes <b>@s.Palettes</b>
+                            @if (c.Port is { } port) {<span> · port du BL <b>@port.ToString("N2") €</b></span>}</p>
+                        @foreach (var e in c.Erreurs) {<p class="erreur-saisie">⛔ @e</p>}
+                        @foreach (var a in c.Avertissements) {<p class="avertissement">⚠ @a</p>}
+                        @if (c.Valide) {<p class="ok">✓ Saisie prête à être validée.</p>}
+                    }
+                    else {<p class="discret">« Contrôler » calcule le poids et les colis et vérifie le stock.</p>}
+                </div>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public int NumeroBl { get; set; }
+    [Parameter] public int Element { get; set; }
+    [SupplyParameterFromQuery(Name = "bl")] public int Ajout { get; set; }
+    // Depuis les livraisons à effectuer : dossier et lignes pré-choisies (?dossier=…&cle=…&lignes=1,2&opr=1)
+    [SupplyParameterFromQuery(Name = "dossier")] public int DossierDemande { get; set; }
+    [SupplyParameterFromQuery(Name = "cle")] public string? CleDemandee { get; set; }
+    [SupplyParameterFromQuery(Name = "lignes")] public string? LignesDemandees { get; set; }
+    [SupplyParameterFromQuery(Name = "opr")] public int OprDemande { get; set; }
+
+    private string TitrePage => NumeroBl > 0 ? $"Modifier le BL {NumeroBl}" : Ajout > 0 ? $"Ajouter au BL {Ajout}" : "Nouveau BL";
+
+    private static string TitreSaisie(SaisieBl s) =>
+        s.Modification ? $"BL {s.NumeroBl} · ÉLÉMENT {s.Element} · MODIFICATION" : s.Ajout ? $"AJOUT AU BL {s.NumeroBl}" : "NOUVEAU BL";
+
+    // Changement d'adresse (modification, ajout, nouveau) : saisie remise à zéro ; modification : élément chargé. Un nouveau
+    // passage des paramètres sans changement d'adresse ne touche pas à la saisie en cours.
+    private (int, int, int, int, string?, string?, int)? adresse;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (adresse == (NumeroBl, Element, Ajout, DossierDemande, CleDemandee, LignesDemandees, OprDemande)) return;
+        adresse = (NumeroBl, Element, Ajout, DossierDemande, CleDemandee, LignesDemandees, OprDemande);
+        Reinitialiser();
+        if (DossierDemande > 0 && NumeroBl == 0)
+        {
+            (dossier, cle) = (DossierDemande, CleDemandee ?? "");
+            Etat.SourceOpr = OprDemande == 1;
+            await PreparerAsync();
+            var demandees = (LignesDemandees ?? "").Split(',').Select(x => int.TryParse(x, out var n) ? n : 0).ToHashSet();
+            if (preparation is not null)
+            {
+                choisies.Clear();
+                foreach (var l in preparation.Lignes.Where(l => demandees.Contains(l.NumeroLigne))) Basculer(l);   // OPR : lignes d'office aussi
+            }
+            return;
+        }
+        if (NumeroBl > 0 && Element > 0)
+            await Executer(async () =>
+            {
+                saisie = await Saisies.OuvrirElementAsync(NumeroBl, Element);
+                textePied = string.Join(Environment.NewLine, saisie.TextePied);
+            });
+    }
+
+    private void RetourFiche() => Navigation.NavigateTo($"logistique/bl/{(NumeroBl > 0 ? NumeroBl : Ajout)}");
+    private void AjouterAuBl(int numero)
+    {
+        if (Ajout == numero) Reinitialiser();   // déjà sur cette adresse : nouvelle saisie
+        else Navigation.NavigateTo($"logistique/bl/nouveau?bl={numero}");
+    }
+
+    private void Reinitialiser()
+    {
+        (numeroCree, saisie, preparation, controle, ligneLots, dossier, cle) = (null, null, null, null, null, null, "");
+        choisies.Clear();
+    }
+
+    private int? dossier;
+    private bool sourceOpr;   // source des lignes affichées (le dernier choix est gardé pour la session : EtatListeBl)
+    private string cle = "";
+    private PreparationBl? preparation;
+    private readonly HashSet<int> choisies = [];
+    private SaisieBl? saisie;
+    private LigneSaisieBl? ligneLots;
+    private IReadOnlyList<PositionStock> positions = [];
+    private ControleBl? controle;
+    private string textePied = "";
+    private int? numeroCree;
+    private bool occupe;
+
+    private static readonly (string Code, string Libelle)[] Emballages =
+        [("B", "Bobine"), ("C", "Carton"), ("F", "Filtainer"), ("P", "Paquet"), ("Q", "Palette"), ("R", "Rouleau"), ("S", "Sans"), ("T", "Barquette")];
+
+    private void ChoisirDossier(LigneChoix l)
+    {
+        dossier = int.TryParse(l.Code, out var n) ? n : null;
+        cle = l.Valeurs.Count > 1 ? l.Valeurs[1] : "";
+    }
+
+    private async Task PreparerAsync()
+    {
+        if (dossier is not > 0) { Notifications.Erreur("Saisissez un n° de dossier."); return; }
+        await Executer(async () =>
+        {
+            sourceOpr = Etat.SourceOpr;
+            preparation = await Saisies.PreparerAsync(dossier.Value, cle, Ajout, sourceOpr);
+            choisies.Clear();
+            choisies.UnionWith(NetPrint.Modules.Logistique.Services.ReglesSaisieBl.LignesCocheesParDefaut(preparation.Lignes, sourceOpr));
+        });
+    }
+
+    // Cocher une ligne d'OPR coche aussi les articles ni stockés ni imprimables de ses OPR
+    private void Basculer(LigneProposee l)
+    {
+        if (choisies.Remove(l.NumeroLigne)) return;
+        choisies.Add(l.NumeroLigne);
+        if (sourceOpr && preparation is not null)
+            choisies.UnionWith(NetPrint.Modules.Logistique.Services.ReglesSaisieBl.LignesDOffice(preparation.Lignes, l));
+    }
+
+    // Changement de source : les lignes affichées ne correspondent plus, elles sont effacées
+    private void ChoisirSource(bool opr)
+    {
+        Etat.SourceOpr = opr;
+        preparation = null;
+        choisies.Clear();
+    }
+
+    private async Task OuvrirAsync()
+    {
+        var p = preparation!;
+        var opr = p.Lignes.Where(l => choisies.Contains(l.NumeroLigne) && l.Opr is not null).ToList();
+        if (!sourceOpr && opr.Count > 0 && !await Dialogues.ConfirmerAsync(
+                string.Join("\n", opr.Select(l => $"La ligne {l.NumeroLigne} fait partie de l'OPR n° {l.Opr}.")) + "\nLa livrer hors OPR ?",
+                "Lignes d'ordre de préparation", "Livrer")) return;
+        await Executer(async () =>
+        {
+            saisie = await Saisies.OuvrirAsync(p.Dossier, p.Cle, [.. choisies.Order()], Ajout, sourceOpr);
+            textePied = string.Join(Environment.NewLine, saisie.TextePied);
+            controle = null;
+            ligneLots = null;
+        });
+    }
+
+    private void Adresse(Func<AdresseBl, AdresseBl> modifier) => saisie!.Adresse = modifier(saisie.Adresse);
+    private static string Texte(ChangeEventArgs e) => (e.Value?.ToString() ?? "").Trim();
+    private static int Entier(ChangeEventArgs e) => int.TryParse(e.Value?.ToString(), out var n) ? n : 0;
+
+    private void Quantite(LigneSaisieBl l, ChangeEventArgs e)
+    {
+        l.Quantite = Math.Max(0, Entier(e));
+        Recalculer(l);
+    }
+
+    private void Emballage(LigneSaisieBl l, ChangeEventArgs e)
+    {
+        l.TypeEmballage = e.Value?.ToString() ?? "";
+        Recalculer(l);
+    }
+
+    private void EmballagePar(LigneSaisieBl l, ChangeEventArgs e)
+    {
+        l.EmballagePar = Math.Max(0, Entier(e));
+        Recalculer(l);
+    }
+
+    // Colisage recalculé à chaque modification (même règle que la validation)
+    private void Recalculer(LigneSaisieBl l)
+    {
+        NetPrint.Modules.Logistique.Services.ReglesSaisieBl.Coliser(l);
+        controle = null;
+    }
+
+    private async Task LotsAsync(LigneSaisieBl l)
+    {
+        ligneLots = l;
+        positions = [];
+        await Executer(async () => positions = await Saisies.PositionsAsync(saisie!, l));
+    }
+
+    private void Prendre(LigneSaisieBl l, PositionStock p, ChangeEventArgs e)
+    {
+        var quantite = Math.Max(0, Entier(e));
+        l.Prises.RemoveAll(x => x.Depot == p.Depot && x.Lot == p.Lot && x.Emplacement == p.Emplacement);
+        if (quantite > 0) l.Prises.Add(new PriseLot { Depot = p.Depot, Lot = p.Lot, Emplacement = p.Emplacement, Quantite = quantite });
+        controle = null;
+    }
+
+    private void Pied() => saisie!.TextePied = [.. textePied.Replace("\r", "").Split('\n')];
+
+    private async Task ControlerAsync()
+    {
+        Pied();
+        await Executer(async () => controle = await Saisies.ControlerAsync(saisie!));
+    }
+
+    private async Task ValiderAsync()
+    {
+        Pied();
+        await Executer(async () =>
+        {
+            controle = await Saisies.ControlerAsync(saisie!);
+            if (!controle.Valide) { Notifications.Erreur("Le BL n'est pas validé : corrigez les erreurs signalées."); return; }
+            if (controle.Avertissements.Count > 0
+                && !await Dialogues.ConfirmerAsync(string.Join("\n", controle.Avertissements), "Avertissements", "Valider quand même")) return;
+            try
+            {
+                numeroCree = await Saisies.ValiderAsync(saisie!);
+            }
+            catch (DepassementResteException ex)
+            {
+                if (!await Dialogues.ConfirmerAsync(ex.Message, "Reste à livrer modifié", "Valider quand même")) return;
+                numeroCree = await Saisies.ValiderAsync(saisie!, depassementAccepte: true);
+            }
+            Notifications.Succes($"BL n° {numeroCree} enregistré.");
+        });
+    }
+
+    private async Task AbandonnerAsync()
+    {
+        if (await Dialogues.ConfirmerAsync("Abandonner la saisie de ce BL ?", "Abandon", "Abandonner"))
+        {
+            if (NumeroBl > 0) { RetourFiche(); return; }
+            saisie = null;
+            controle = null;
+            ligneLots = null;
+        }
+    }
+
+    private async Task MarquerEditeAsync(int numero)
+    {
+        try { await Edition.MarquerEditeAsync(numero); }
+        catch (RegleMetierException ex) { Notifications.Info(ex.Message); }
+    }
+
+    private async Task NouveauSurLeDossierAsync()
+    {
+        numeroCree = null;
+        saisie = null;
+        await PreparerAsync();
+    }
+
+    private void Recommencer()
+    {
+        (numeroCree, saisie, preparation, dossier, cle) = (null, null, null, null, "");
+        choisies.Clear();
+    }
+
+    // Appel au service : règle métier → message ; autre erreur → message technique
+    private async Task Executer(Func<Task> action)
+    {
+        occupe = true;
+        try { await action(); }
+        catch (RegleMetierException ex) { Notifications.Erreur(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Erreur : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+}

@@ -1,0 +1,196 @@
+@page "/logistique/opr"
+@* =====================================================================
+   Ordres de préparation (WinDev OPR, FEN_GestionOPR) : une ligne par OPR et commande, les plus récents d'abord.
+   Rien n'est chargé à l'ouverture. Création, ajout de lignes, fiche (modification), suppression d'un OPR ou d'une commande.
+   ===================================================================== *@
+@using NetPrint.Modules.Logistique.Ecrans.Opr
+@inject IOpr Oprs
+@inject EtatListeOpr Etat
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Ordres de préparation · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button disabled="@(!droits.Creer)" title="Mettre en préparation des lignes de commande" @onclick='() => Navigation.NavigateTo("logistique/opr/nouveau")'>➕ Nouvel OPR</button>
+    <button disabled="@(Selection is not { Etat: not EtatsOpr.Livre } || !droits.Creer)" title="Ajouter des lignes de commande à l'OPR sélectionné (même client, même adresse)"
+            @onclick='() => Navigation.NavigateTo($"logistique/opr/{Selection!.NumeroOpr}/ajout")'>➕ Ajouter des lignes</button>
+    <span class="espace"></span>
+    <button disabled="@(Selection is not { Etat: EtatsOpr.APreparer } || !droits.Supprimer)" class="bouton-danger"
+            title="Retirer cette commande de l'OPR" @onclick="SupprimerElementAsync">🗑 Retirer la commande</button>
+    <button disabled="@(Selection is not { Etat: EtatsOpr.APreparer } || !droits.Supprimer)" class="bouton-danger"
+            title="Supprimer tout l'OPR" @onclick="SupprimerOprAsync">🗑 Supprimer l'OPR</button>
+    <button class="bouton-principal" disabled="@(Selection is null)" title="Fiche de l'OPR (double-clic)" @onclick="() => Ouvrir(Selection)">🔎 Ouvrir l'OPR</button>
+</fieldset>
+
+<form class="panneau-criteres" @onsubmit="RechercherAsync">
+    <label class="champ"><span>N° OPR</span><input type="number" class="num6" @bind="C.NumeroOpr" /></label>
+    <div class="champ">
+        <span>Commande</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" @bind="C.Commande" />
+            <input class="code" maxlength="1" title="Clé" @bind="C.Cle" />
+        </div>
+    </div>
+    <div class="champ">
+        <span>Client</span>
+        <div class="ligne-champs">
+            <input type="number" class="num6" title="Compte général" @bind="C.CompteGeneral" />
+            <input type="number" class="num7" title="Compte client" @bind="C.CompteClient" />
+            <BoutonRecherche Liste="ListeChoix.Client" Titre="Rechercher un client" OnChoix="ChoisirClient" />
+        </div>
+    </div>
+    <label class="champ"><span>Date prévue</span><input type="date" @bind="C.DatePrevue" /></label>
+    <label class="champ champ-case"><input type="checkbox" @bind="C.AvecLivres" /><span>Avec les OPR livrés</span></label>
+    <div class="boutons-criteres">
+        <button type="submit" class="bouton-principal" disabled="@chargement">🔍 Rechercher</button>
+        <button type="button" class="bouton-gomme" title="Réinitialiser tous les critères" @onclick="Effacer"><img src="gomme.png" alt="" /> Effacer</button>
+    </div>
+</form>
+
+<div class="contenu">
+    <section class="zone-liste">
+        <div class="ligne-infos">
+            <p class="compteur">
+                @if (!droits.Acces)
+                {
+                    <span class="avertissement">Vous n'êtes pas autorisé à la gestion des OPR.</span>
+                }
+                else if (Etat.Resultat is not { } r)
+                {
+                    <span>Saisissez au moins un critère puis cliquez sur Rechercher.</span>
+                }
+                else
+                {
+                    <strong>@r.Lignes.Select(e => e.NumeroOpr).Distinct().Count().ToString("N0")</strong><span> OPR</span>
+                    <span class="separateur-compteur">·</span>
+                    <strong>@r.Lignes.Count.ToString("N0")</strong><span> commande@(r.Lignes.Count > 1 ? "s" : "")</span>
+                    @if (r.Tronque) {<span class="avertissement"> (seuls les @LimitesRecherche.Maximum.ToString("N0") plus récents sont chargés : affinez la recherche)</span>}
+                }
+                @if (chargement) {<span class="chargement"> Chargement…</span>}
+            </p>
+        </div>
+        @if (Etat.Resultat is { Lignes.Count: > 0 })
+        {
+            <div class="zone-defilement-liste">
+                <table class="grille grille-bl">
+                    <thead>
+                        <tr><th class="nombre">OPR</th><th>État</th><th>Client</th><th>Commande</th><th>Réf. cde</th><th class="nombre">Lignes</th>
+                            <th>Date prévue</th><th>Livrer à</th><th>Transporteur</th><th>Créé</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in Etat.Resultat.Lignes)
+                        {
+                            <tr class="@Classe(e)" @onclick="() => Etat.Selection = (e.NumeroOpr, e.Dossier, e.Cle)" @ondblclick="() => Ouvrir(e)">
+                                <td class="nombre"><b>@e.NumeroOpr</b></td>
+                                <td><span class="badge @BadgeEtat(e.Etat)">@e.Etat</span>@if (e.SousTraite) {<span class="badge" title="Commande sous-traitée">ST</span>}</td>
+                                <td title="@($"{e.CompteGeneral} {e.CompteClient}")">@e.NomClient</td>
+                                <td>@e.Dossier/@e.Cle</td>
+                                <td>@e.ReferenceCommande</td>
+                                <td class="nombre">@e.Lignes</td>
+                                <td>@e.DatePrevue?.ToString("dd/MM/yyyy")</td>
+                                <td>@e.Adresse.RaisonSociale <span class="discret">@e.Adresse.CodePostal @e.Adresse.Ville</span></td>
+                                <td>@(e.Transporteur > 0 ? $"{e.Transporteur} {e.NomTransporteur}" : "")</td>
+                                <td>@e.DateCreation?.ToString("dd/MM/yyyy") <span class="discret">@e.Profil</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private CriteresOpr C => Etat.Criteres;
+    private bool chargement;
+    private DroitsOpr droits = new(true, false, false, false);
+
+    private ElementOpr? Selection => Etat.Resultat?.Lignes.FirstOrDefault(e => (e.NumeroOpr, e.Dossier, e.Cle) == Etat.Selection);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { droits = await Oprs.DroitsAsync(); }
+        catch (Exception ex) { Notifications.Erreur($"Lecture des droits impossible : {ex.Message}"); }
+    }
+
+    private static string BadgeEtat(string etat) => etat switch
+    {
+        EtatsOpr.Livre => "badge-bl-r", EtatsOpr.EnPreparation => "badge-appel", _ => "",
+    };
+
+    private string Classe(ElementOpr e) =>
+        ((e.NumeroOpr, e.Dossier, e.Cle) == Etat.Selection ? "selection " : "") + (e.ClientBloque ? "client-bloque" : "");
+
+    private async Task RechercherAsync()
+    {
+        if (chargement || !droits.Acces) return;
+        if (C.NumeroOpr is not > 0 && C.Commande is not > 0 && C.CompteGeneral is not > 0 && C.CompteClient is not > 0 && C.DatePrevue is null
+            && !await Dialogues.ConfirmerAsync("Rechercher tous les OPR de la société (les plus récents d'abord) ?", "Recherche sans critère", "Rechercher"))
+            return;
+        await ChargerAsync();
+    }
+
+    // Après une suppression : la même recherche, sans redemander
+    private async Task ChargerAsync()
+    {
+        chargement = true;
+        try
+        {
+            Etat.Resultat = await Oprs.RechercherAsync(C);
+            Etat.Selection = null;
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Recherche impossible : {ex.Message}"); }
+        finally { chargement = false; }
+    }
+
+    private void Effacer()
+    {
+        Etat.Criteres = new();
+        Etat.Resultat = null;
+        Etat.Selection = null;
+    }
+
+    private void ChoisirClient(LigneChoix l)
+    {
+        if (l.Codes.Count < 2) return;
+        (C.CompteGeneral, C.CompteClient) = (int.TryParse(l.Codes[0], out var g) ? g : null, int.TryParse(l.Codes[1], out var a) ? a : null);
+    }
+
+    private void Ouvrir(ElementOpr? e)
+    {
+        if (e is not null) Navigation.NavigateTo($"logistique/opr/{e.NumeroOpr}");
+    }
+
+    private async Task SupprimerOprAsync()
+    {
+        if (Selection is not { } e) return;
+        if (!await Dialogues.ConfirmerAsync($"Supprimer l'OPR {e.NumeroOpr} ?", "Suppression", "Supprimer")) return;
+        try
+        {
+            await Oprs.SupprimerAsync(e.NumeroOpr);
+            Notifications.Succes($"OPR {e.NumeroOpr} supprimé.");
+            await ChargerAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
+    }
+
+    private async Task SupprimerElementAsync()
+    {
+        if (Selection is not { } e) return;
+        if (!await Dialogues.ConfirmerAsync($"Retirer la commande {e.Dossier}/{e.Cle} de l'OPR {e.NumeroOpr} ?\nS'il n'y reste rien, l'OPR est supprimé.",
+                "Suppression", "Retirer")) return;
+        try
+        {
+            await Oprs.SupprimerElementAsync(e.NumeroOpr, e.Dossier, e.Cle);
+            Notifications.Succes($"Commande {e.Dossier}/{e.Cle} retirée de l'OPR {e.NumeroOpr}.");
+            await ChargerAsync();
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Suppression impossible : {ex.Message}"); }
+    }
+}

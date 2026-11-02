@@ -1,0 +1,210 @@
+@page "/logistique/bl/{NumeroBl:int}/retour"
+@* =====================================================================
+   Retour de marchandises d'un BL : un seul écran pour l'option RM d'EXP010S (fabrication à la quantité, négoce et produit fini
+   par lot) et le clic droit « Retour BL » de ConsultationBL (palettes SSCC, retournées palette par palette).
+   Le retour est un nouveau BL à l'état R ; la marchandise rentre en stock et va au dépôt de retour.
+   ===================================================================== *@
+@inject IRetourBl Retours
+@inject NavigationManager Navigation
+@inject Dialogues Dialogues
+@inject Notifications Notifications
+
+<PageTitle>Retour du BL @NumeroBl · NetPrint</PageTitle>
+<HeadContent><link rel="stylesheet" href="_content/NetPrint.Modules.Logistique/logistique.css" /></HeadContent>
+
+<fieldset class="barre-outils">
+    <button @onclick='() => Navigation.NavigateTo($"logistique/bl/{NumeroBl}")'>← BL @NumeroBl</button>
+    <span class="espace"></span>
+    @if (prep is not null)
+    {
+        <button class="bouton-principal" disabled="@(occupe || Total == 0)" @onclick="ValiderAsync">↩ Enregistrer le retour</button>
+    }
+</fieldset>
+
+<div class="contenu contenu-detail saisie-bl">
+    @if (occupe && prep is null)
+    {
+        <p class="chargement">Chargement…</p>
+    }
+    else if (erreur is { } e0)
+    {
+        <section class="carte"><p class="erreur-saisie">⛔ @e0</p></section>
+    }
+    else if (prep is not null)
+    {
+        <section class="carte">
+            <div class="titre-fiche">
+                <span class="type-fiche">RETOUR DE MARCHANDISES</span>
+                <b>BL @prep.NumeroBl</b>
+                <span class="discret">@prep.NomClient · @prep.CompteGeneral @prep.CompteClient@(prep.DateBl is { } d ? $" · livré le {d:dd/MM/yyyy}" : "")</span>
+            </div>
+            <div class="cartes-saisie">
+                <div class="info">
+                    <h3>Retour</h3>
+                    <label class="champ"><span>Date du retour</span><input type="date" @bind="date" /></label>
+                    <label class="champ"><span>Transporteur</span><input type="number" class="num3" min="0" @bind="transporteur" /></label>
+                    <div class="ligne-champs">
+                        <label class="champ"><span>Colis</span><input type="number" class="num6" min="0" @bind="colis" /></label>
+                        <label class="champ"><span>Poids (kg)</span><input type="number" class="num6" min="0" @bind="poids" /></label>
+                    </div>
+                </div>
+                <div class="info">
+                    <h3>Motif</h3>
+                    @for (var i = 0; i < 3; i++)
+                    {
+                        var n = i;
+                        <input class="large" maxlength="40" value="@motif[n]" @onchange="ev => motif[n] = ev.Value?.ToString() ?? string.Empty" />
+                    }
+                </div>
+                <div class="info">
+                    <h3>Facturation</h3>
+                    <label class="champ-case"><input type="checkbox" @bind="facturable" /> <span>Facturable</span></label>
+                    <label class="champ-case"><input type="checkbox" @bind="facturationAuto" /> <span>À prendre en facturation automatique</span></label>
+                    @if (facturationAuto)
+                    {
+                        <div class="champ">
+                            <span>Client facturé</span>
+                            <div class="ligne-champs">
+                                <input type="number" class="num6" @bind="generalFacture" />
+                                <input type="number" class="num7" @bind="clientFacture" />
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+
+        @foreach (var el in prep.Elements)
+        {
+            <section class="carte">
+                <h3>
+                    <span>Élément @el.Element</span>
+                    @if (el.Dossier > 0) {<span>&nbsp;· commande @el.Dossier/@el.Cle</span>}
+                    @if (el.Designation != "") {<span class="discret">&nbsp;· @el.Designation</span>}
+                    @if (el.Fabrication) {<span class="badge">fabrication</span>}
+                </h3>
+                @if (el.Refus != "")
+                {
+                    <p class="aide">@el.Refus</p>
+                }
+                else if (el.Fabrication)
+                {
+                    <div class="ligne-champs">
+                        <span>Livré <b>@el.QuantiteLivree.ToString("#,##0")</b>@if (el.DejaRetourne > 0) {<span> · déjà retourné @el.DejaRetourne.ToString("#,##0")</span>}</span>
+                        <label class="champ"><span>Quantité retournée</span>
+                            <input type="number" class="num7" min="0" max="@el.Retournable" value="@Valeur(Cle(el))" @onchange="ev => Saisir(Cle(el), ev)" /></label>
+                    </div>
+                }
+                else
+                {
+                    <table class="grille grille-fiche">
+                        <thead>
+                            <tr><th>Article</th><th>Désignation</th><th>Lot</th><th>Palette</th><th class="nombre">Livré</th><th class="nombre">Déjà retourné</th><th class="nombre">Retourné</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var lot in el.Lots)
+                            {
+                                if (lot.Palettes.Count == 0)
+                                {
+                                    var k = Cle(el, lot);
+                                    <tr>
+                                        <td><b>@lot.Article</b>@if (lot.Indice != "") {<span class="discret"> @lot.Indice</span>}</td>
+                                        <td>@lot.Designation</td>
+                                        <td>@lot.Lot@if (lot.Emplacement != "") {<span class="discret"> · @lot.Emplacement</span>}</td>
+                                        <td></td>
+                                        <td class="nombre">@lot.QuantiteLivree.ToString("#,##0")</td>
+                                        <td class="nombre">@(lot.DejaRetourne > 0 ? lot.DejaRetourne.ToString("#,##0") : "")</td>
+                                        <td class="nombre"><input type="number" class="num7" min="0" max="@lot.Retournable" disabled="@(lot.Retournable == 0)"
+                                                                  value="@Valeur(k)" @onchange="ev => Saisir(k, ev)" /></td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    foreach (var p in lot.Palettes)
+                                    {
+                                        var k = Cle(el, lot, p.Sscc);
+                                        <tr class="@(p.DejaRetournee ? "discret" : "")">
+                                            <td><b>@lot.Article</b>@if (lot.Indice != "") {<span class="discret"> @lot.Indice</span>}</td>
+                                            <td>@lot.Designation</td>
+                                            <td>@lot.Lot</td>
+                                            <td>
+                                                <label class="champ-case">
+                                                    <input type="checkbox" disabled="@p.DejaRetournee" checked="@(Valeur(k) > 0)" @onchange="ev => Cocher(k, p, ev)" />
+                                                    <span>@p.Sscc</span>
+                                                </label>
+                                            </td>
+                                            <td class="nombre">@p.Quantite.ToString("#,##0")</td>
+                                            <td class="nombre">@(p.DejaRetournee ? "retournée" : "")</td>
+                                            <td class="nombre"><input type="number" class="num7" min="0" max="@p.Quantite" disabled="@p.DejaRetournee"
+                                                                      value="@Valeur(k)" @onchange="ev => Saisir(k, ev)" /></td>
+                                        </tr>
+                                    }
+                                }
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int NumeroBl { get; set; }
+
+    private PreparationRetour? prep;
+    private string? erreur;
+    private bool occupe;
+    private DateOnly date = DateOnly.FromDateTime(DateTime.Today);
+    private int transporteur, colis, poids, generalFacture, clientFacture;
+    private bool facturable = true, facturationAuto;
+    private readonly string[] motif = ["", "", ""];
+    private readonly Dictionary<(int Element, int Ligne, string Lot, string Emplacement, string Sscc), int> quantites = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        occupe = true;
+        try
+        {
+            prep = await Retours.PreparerAsync(NumeroBl);
+            (transporteur, generalFacture, clientFacture) = (prep.Transporteur, prep.CompteGeneralFacture, prep.CompteClientFacture);
+            erreur = prep.Elements.All(e => e.Refus != "") ? "Aucun élément de ce BL ne peut être retourné." : null;
+        }
+        catch (RegleMetierException ex) { erreur = ex.Message; }
+        catch (Exception ex) { erreur = $"Lecture du BL impossible : {ex.Message}"; }
+        finally { occupe = false; }
+    }
+
+    private static (int, int, string, string, string) Cle(ElementRetour e) => (e.Element, 0, "", "", "");
+    private static (int, int, string, string, string) Cle(ElementRetour e, LotRetour l, string sscc = "") =>
+        (e.Element, l.LigneBl, l.Lot, sscc == "" ? l.Emplacement : "", sscc);
+
+    private int Valeur((int, int, string, string, string) k) => quantites.GetValueOrDefault(k);
+    private int Total => quantites.Values.Sum();
+
+    private void Saisir((int, int, string, string, string) k, ChangeEventArgs e) =>
+        quantites[k] = int.TryParse(e.Value?.ToString(), out var n) && n > 0 ? n : 0;
+
+    // Palette cochée : toute la palette revient (quantité modifiable ensuite, comme ConsultationBL)
+    private void Cocher((int, int, string, string, string) k, PaletteRetour p, ChangeEventArgs e) =>
+        quantites[k] = e.Value is true ? p.Quantite : 0;
+
+    private async Task ValiderAsync()
+    {
+        var saisies = quantites.Where(x => x.Value > 0)
+            .Select(x => new QuantiteRetournee(x.Key.Element, x.Key.Ligne, x.Key.Lot, x.Key.Emplacement, x.Key.Sscc, x.Value)).ToList();
+        if (!await Dialogues.ConfirmerAsync($"Enregistrer le retour de {Total:#,##0} sur le BL {NumeroBl} ?\nLa marchandise rentre en stock.",
+                "Retour de marchandises", "Enregistrer")) return;
+        occupe = true;
+        try
+        {
+            var numero = await Retours.EnregistrerAsync(new SaisieRetour(NumeroBl, date, transporteur, colis, poids, motif, facturable, facturationAuto,
+                generalFacture, clientFacture, saisies));
+            Notifications.Succes($"Retour enregistré : BL {numero}.");
+            Navigation.NavigateTo($"logistique/bl/{numero}");
+        }
+        catch (RegleMetierException ex) { await Dialogues.AlerterAsync(ex.Message); }
+        catch (Exception ex) { Notifications.Erreur($"Retour impossible : {ex.Message}"); }
+        finally { occupe = false; }
+    }
+}
