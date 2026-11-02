@@ -121,6 +121,10 @@ Questions ouvertes :
 | 🟠 | Service Compteurs (n° de dossier, GETDOSSIER) | Cible du cadrage : attribution atomique |
 | 🟠 | Qualité client (CQUACL) | Règle transverse devis / commande / BL : à porter dans le Noyau |
 | ✅ | ~~Éditions PDF~~ | Socle `Documents` (QuestPDF, page standard, aperçu, formats) et Noyau `ISocietes.LireIdentiteAsync` (en-tête, mentions légales, logo) : à réutiliser pour l'édition du devis (`docs/editions-pdf.md`) |
+| 🟠 | **À relire par Julien** : messagerie (Noyau `Messagerie`) | `IMessagerie` : envoi par le serveur SMTP de la société (FAC010, comme EnvoideFactures), garde-fou `Messagerie:Mode` (Desactive par défaut, Redirection, Reel). `IJournalEnvois` : journal ENV100 des documents envoyés, PDF compris (ARC, BL, factures). Socle `MessageBrouillon` + Web.Commun `TelechargementJs` : brouillon .eml ouvert dans Outlook. À réutiliser pour l'envoi des devis/offres |
+| 🟠 | **À relire par Julien** : contacts, utilisateurs, n° de dossier (Noyau) | `IContactsTiers` (PRT051F, destinataires par type de document : ARC, offre, BL, facture…), `IUtilisateurs.EmailAsync` (AI00F.ACMELE), `NumerosDossier` (découpage du retour GETDOSSIER et clé calculée GETCLE, partagé Ventes / Production) |
+| 🟠 | **À relire par Julien** : événements (Noyau `Evenements` + composant Web.Commun) | `IEvenements` (EVE100 / EVE105 / DOS030, compteur AB001.CCTCOM) et composant `Evenements.razor` : utilisables pour les événements d'un devis |
+| 🟠 | Lecture des droits (PRT000P1) recopiée dans 3 modules | `DroitsFacturationDb2` (Facturation), `OprDb2` (Logistique), Ventes : à regrouper dans un service du Noyau |
 | 🟠 | Licence QuestPDF | Community gratuite sous 1 M$ de CA annuel ; sinon licence Professional, ou bascule sur PDFsharp/MigraDoc (MIT) |
 | ⚪ | Droit du profil sur la société à la connexion (PRT000P1) | Déjà noté dans decisions.md |
 
